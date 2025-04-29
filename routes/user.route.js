@@ -1,0 +1,115 @@
+const auth = require("../controllers/userController");
+const authJwt = require("../middlewares/authJwt");
+
+const { userProfileUpload, bannerUpload } = require('../middlewares/imageUpload')
+
+const express = require("express");
+const router = express()
+module.exports = (app) => {
+        app.post("/api/v1/user/signup", auth.signup);
+        app.post("/api/v1/user/loginWithPhone", auth.loginWithPhone);
+        app.post("/api/v1/user/logout", [authJwt.verifyToken], auth.logoutUser);
+        app.post("/api/v1/user/signupWithPhone", auth.signupWithPhone);
+        app.post("/api/v1/user/:id/send-otp", auth.sendOTP);
+        app.post("/api/v1/user/:id", auth.verifyOtp);
+        app.post("/api/v1/auth/login", auth.login);
+        app.post("/api/v1/user/resendOtp/:id", auth.resendOTP);
+        app.post("/api/v1/user/registration", [authJwt.verifyToken], auth.registration);
+        app.post("/api/v1/user/socialLogin", auth.socialLogin);
+        app.get("/api/v1/user/getProfile", [authJwt.verifyToken], auth.getProfile);
+        app.put("/api/v1/user/updateProfile", [authJwt.verifyToken], userProfileUpload.single('image'), auth.updateProfile);
+        app.put("/api/v1/user/getAllProfile", [authJwt.verifyToken], auth.getAllProfiles);
+        app.get("/api/v1/admin/getUserProfile/:userId", [authJwt.verifyToken], auth.getUserProfileById);
+        app.put("/api/v1/user/updateLocation", [authJwt.verifyToken], auth.updateLocation);
+        app.get("/api/v1/user/banner", [authJwt.verifyToken], auth.getBanner);
+        app.get("/api/v1/user/banner/:id", [authJwt.verifyToken], auth.getBannerById);
+        app.post('/api/v1/user/user-subscriptions/add', [authJwt.verifyToken], auth.createUserSubscription);
+        app.get('/api/v1/user/user-subscriptions/:id', [authJwt.verifyToken], auth.getUserSubscriptionById);
+        app.get('/api/v1/user/user-subscriptions', [authJwt.verifyToken], auth.getAllUserSubscriptions);
+        app.put('/api/v1/user/user-subscriptions/:id', [authJwt.verifyToken], auth.updateUserSubscription);
+        app.delete('/api/v1/user/user-subscriptions/:id', [authJwt.verifyToken], auth.deleteUserSubscription);
+        app.put('/api/v1/user/notifications/:notificationId', [authJwt.verifyToken], auth.markNotificationAsRead);
+        app.put('/api/v1/user/notifications/markAll/read', [authJwt.verifyToken], auth.markAllNotificationsAsRead);
+        app.get('/api/v1/user/notifications/user/:userId', [authJwt.verifyToken], auth.getNotificationsForUser);
+        app.get('/api/v1/user/notifications/user', [authJwt.verifyToken], auth.getAllNotificationsForUser);
+        app.post("/api/v1/user/chat/send", [authJwt.verifyToken], auth.sendMessage);
+        app.get("/api/v1/user/chat/conversation/:user1/:user2", [authJwt.verifyToken], auth.getConversation);
+        app.put('/api/v1/user/chat/update-message/:messageId', [authJwt.verifyToken], auth.updateMessage);
+        app.delete('/api/v1/user/chat/delete-message/:messageId', [authJwt.verifyToken], auth.deleteMessage);
+        app.put('/api/v1/user/chat/mark-as-read/:messageId', [authJwt.verifyToken], auth.markAsRead);
+        app.get('/api/v1/user/chat/unread-messages-count/:userId', [authJwt.verifyToken], auth.getUnreadMessagesCount);
+        app.get("/api/v1/user/schedules", [authJwt.verifyToken], auth.getAllSchedules);
+        app.get("/api/v1/user/schedules/live", [authJwt.verifyToken], auth.getAllLive);
+        app.get("/api/v1/user/schedules/completed", [authJwt.verifyToken], auth.getAllCompleted);
+        app.get("/api/v1/user/schedules/cancelled", [authJwt.verifyToken], auth.getAllCancelled);
+        app.get("/api/v1/user/schedules/:id", [authJwt.verifyToken], auth.getScheduleById);
+        app.get('/api/v1/user/categories', [authJwt.verifyToken], auth.getAllCategories);
+        app.get('/api/v1/user/categories/:categoryId', [authJwt.verifyToken], auth.getCategoryById);
+        app.get('/api/v1/user/products', [authJwt.verifyToken], auth.getAllProducts);
+        app.get('/api/v1/user/products/:productId', [authJwt.verifyToken], auth.getProductById);
+        app.post('/api/v1/user/products/:productId/reviews', [authJwt.verifyToken], auth.createProductReview);
+        app.get('/api/v1/user/products/:productId/reviews', [authJwt.verifyToken], auth.getAllProductReviews);
+        app.get('/api/v1/user/products/:productId/reviews/:reviewId', [authJwt.verifyToken], auth.getProductReviewById);
+        app.put('/api/v1/user/products/:productId/reviews/:reviewId', [authJwt.verifyToken], auth.updateProductReview);
+        app.delete('/api/v1/user/products/:productId/reviews/:reviewId', [authJwt.verifyToken], auth.deleteProductReview);
+        app.get('/api/v1/user/products/category/:categoryId', [authJwt.verifyToken], auth.getProductsByCategory);
+        app.get('/api/v1/user/product/search', [authJwt.verifyToken], auth.searchProducts);
+        app.get('/api/v1/user/category/:categoryId/new-arrivals', [authJwt.verifyToken], auth.getNewArrivalProductsByCategoryAndSubCategory)
+        app.get('/api/v1/user/new-arrivals', [authJwt.verifyToken], auth.getNewArrivalProducts);
+        app.get('/api/v1/user/most-demanded', [authJwt.verifyToken], auth.getMostDemandedProducts);
+        app.get("/api/v1/user/product/all/paginateProductSearch", [authJwt.verifyToken], auth.paginateProductSearch);
+        app.post('/api/v1/user/cart/add', [authJwt.verifyToken], auth.addToCart);
+        app.get('/api/v1/user/cart/get', [authJwt.verifyToken], auth.getCart);
+        app.put('/api/v1/user/cart/update', [authJwt.verifyToken], auth.updateCart);
+        app.delete('/api/v1/user/cart/delete', [authJwt.verifyToken], auth.deleteCart);
+        app.put('/api/v1/user/cart/updateQuantity', [authJwt.verifyToken], auth.updateCartQuantity);
+        app.delete('/api/v1/user/cart/products/:productId', [authJwt.verifyToken], auth.deleteCartProductById);
+        app.post('/api/v1/user/address/add', [authJwt.verifyToken], auth.createAddress);
+        app.put('/api/v1/user/address/:addressId', [authJwt.verifyToken], auth.updateAddress);
+        app.get('/api/v1/user/address', [authJwt.verifyToken], auth.getAddresses);
+        app.get('/api/v1/user/address/:addressId', [authJwt.verifyToken], auth.getAddressById);
+        app.delete('/api/user/address/:addressId', [authJwt.verifyToken], auth.deleteAddress);
+        app.post('/api/v1/user/order/add', [authJwt.verifyToken], auth.createOrder);
+        app.put('/api/v1/user/order/payment/:orderId/status', [authJwt.verifyToken], auth.updatePaymentStatus);
+        app.get('/api/v1/user/order/:orderId', [authJwt.verifyToken], auth.getOrderById);
+        app.get('/api/v1/user/history/order', [authJwt.verifyToken], auth.getOrderHistory);
+        app.put('/api/v1/user/orders/:orderId/refunds', [authJwt.verifyToken], auth.createReturnRequest);
+        app.get('/api/v1/user/refund-orders', [authJwt.verifyToken], auth.getRefundOrders);
+        app.get('/api/v1/user/enrolled-courses', [authJwt.verifyToken], auth.getUserEnrolledCourses);
+        app.get('/api/v1/user/free-courses', [authJwt.verifyToken], auth.getAllFreeCourses);
+        app.get('/api/v1/user/all-courses', [authJwt.verifyToken], auth.getAllCourses);
+        app.get('/api/v1/user/notices', [authJwt.verifyToken], auth.getAllNotices);
+        app.get('/api/v1/user/free/notices', [authJwt.verifyToken], auth.getAllFreeCourseNotices);
+        app.get('/api/v1/user/notices/:id', [authJwt.verifyToken], auth.getNoticeById);
+        app.post('/api/v1/user/attendance/mark', [authJwt.verifyToken], auth.markAttendance);
+        app.get('/api/v1/user/attendance', [authJwt.verifyToken], auth.getAttendanceByUser);
+        app.get('/api/v1/user/attendance/curreent-month', [authJwt.verifyToken], auth.getAttendanceByUserCurrentMonth);
+        app.get('/api/v1/user/attendance/filter', [authJwt.verifyToken], auth.getAttendanceFilter);
+        app.get('/api/v1/user/attendance/:courseId', [authJwt.verifyToken], auth.getAttendanceByUserAndCourse);
+        app.put('/api/v1/user/attendance/:id', [authJwt.verifyToken], auth.updateAttendance);
+        app.delete('/api/v1/user/attendance/:id', [authJwt.verifyToken], auth.deleteAttendance);
+        app.post('/api/v1/user/courses/wishlist/:courseId', [authJwt.verifyToken], auth.addToWishlist);
+        app.get('/api/v1/user/courses/wishlist', [authJwt.verifyToken], auth.getMyWishlist);
+        app.delete('/api/v1/user/courses/wishlist/:courseId', [authJwt.verifyToken], auth.removeFromWishlist);
+        app.get('/api/v1/user/syllabus', [authJwt.verifyToken], auth.getAllSyllabus)
+        app.get('/api/v1/user/syllabus/:id', [authJwt.verifyToken], auth.getSyllabusById)
+        app.get('/api/v1/user/testseries', [authJwt.verifyToken], auth.getAllTestSeries);
+        app.get('/api/v1/user/testseries/:id', [authJwt.verifyToken], auth.getTestSeriesById);
+        app.get('/api/v1/user/VideoLecture', [authJwt.verifyToken], auth.getAllVideoLectures);
+        app.get('/api/v1/user/VideoLecture/:id', [authJwt.verifyToken], auth.getVideoLectureById);
+        app.get('/api/v1/user/ExamSchedule', [authJwt.verifyToken], auth.getAllExamSchedules);
+        app.get('/api/v1/user/ExamSchedule/:id', [authJwt.verifyToken], auth.getExamScheduleById);
+        app.get('/api/v1/user/Recording', [authJwt.verifyToken], auth.getAllRecordings);
+        app.get('/api/v1/user/Recording/:id', [authJwt.verifyToken], auth.getRecordingById);
+        app.post('/api/v1/user/SurveyForm/add', [authJwt.verifyToken], auth.createSurveyForm);
+        app.get('/api/v1/user/SurveyForm', [authJwt.verifyToken], auth.getAllSurveyForms);
+        app.get('/api/v1/user/SurveyForm/:id', [authJwt.verifyToken], auth.getSurveyFormById);
+        app.put('/api/v1/user/SurveyForm/:id', [authJwt.verifyToken], auth.updateSurveyForm);
+        app.delete('/api/v1/user/SurveyForm/:id', [authJwt.verifyToken], auth.deleteSurveyForm);
+        app.get('/api/v1/user/FollowUs', [authJwt.verifyToken], auth.getAllFollowUs);
+        app.get('/api/v1/user/FollowUs/:id', [authJwt.verifyToken], auth.getFollowUsById);
+        app.get('/api/v1/user/search', [authJwt.verifyToken], auth.searchCourses);
+        app.get('/api/v1/user/behavior-notes', [authJwt.verifyToken], auth.getAllBehaviorNotes);
+        app.get('/api/v1/user/behavior-notes/:id', [authJwt.verifyToken], auth.getBehaviorNoteById);
+
+}

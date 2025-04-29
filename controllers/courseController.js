@@ -1,0 +1,949 @@
+const User = require('../models/userModel');
+const Folder = require("../models/folderModel");
+const File = require("../models/fileModel");
+const Course = require("../models/courseModel");
+const Subject = require("../models/subjectModel");
+const Quiz = require("../models/quizModel");
+const QuizFolder = require("../models/quizFolder");
+const mongoose = require("mongoose"); // Ensure mongoose is imported
+const { deleteFilesFromBucket } = require("../configs/aws.config");
+const authConfig = require("../configs/auth.config");
+
+exports.adminManageCourseAccess = async (req, res) => {
+  try {
+    const { userIds, courseId, action, expiresIn } = req.body;
+
+    if (req.user.userType !== "ADMIN") {
+      return res.status(401).json({
+        status: 401,
+        message: "Unauthorized access, only admin can manage course access"
+      });
+    }
+
+    if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
+      return res.status(400).json({
+        status: 400,
+        message: "User IDs array is required"
+      });
+    }
+
+    if (!courseId) {
+      return res.status(400).json({
+        status: 400,
+        message: "Course ID is required"
+      });
+    }
+
+    if (!["ASSIGN", "REVOKE"].includes(action)) {
+      return res.status(400).json({
+        status: 400,
+        message: "Invalid action. Use 'ASSIGN' or 'REVOKE'"
+      });
+    }
+
+    if (action === "ASSIGN" && expiresIn && (typeof expiresIn !== "number" || expiresIn <= 0)) {
+      return res.status(400).json({
+        status: 400,
+        message: "Invalid expiresIn value. It must be a positive number of days."
+      });
+    }
+
+    const course = await Course.findById(courseId);
+    if (!course) {
+      return res.status(404).json({
+        status: 404,
+        message: "Course not found"
+      });
+    }
+
+    const results = { successful: [], failed: [] };
+
+    for (const userId of userIds) {
+      try {
+        const user = await User.findById(userId);
+
+        if (!user) {
+          results.failed.push({ userId, reason: "User not found" });
+          continue;
+        }
+
+        if (action === "ASSIGN") {
+          const hasAccess = user.purchasedCourses.some(pc => pc.course.toString() === courseId);
+
+          if (hasAccess) {
+            results.failed.push({ userId, reason: "User already has access to this course" });
+          } else {
+            const expirationDate = expiresIn ? new Date(Date.now() + expiresIn * 24 * 60 * 60 * 1000) : null;
+
+            user.purchasedCourses.push({
+              course: courseId,
+              assignedByAdmin: {
+                isAssigned: true,
+                assignedAt: new Date(),
+                assignedBy: req.user._id
+              },
+              expiresAt: expirationDate
+            });
+
+            await user.save();
+            results.successful.push({ userId, expiresAt: expirationDate });
+          }
+        } else { // REVOKE
+          const courseIndex = user.purchasedCourses.findIndex(pc => pc.course.toString() === courseId);
+
+          if (courseIndex === -1) {
+            results.failed.push({ userId, reason: "User doesn't have access to this course" });
+          } else {
+            user.purchasedCourses.splice(courseIndex, 1);
+            await user.save();
+            results.successful.push({ userId });
+          }
+        }
+      } catch (error) {
+        results.failed.push({ userId, reason: error.message });
+      }
+    }
+
+    return res.status(200).json({
+      status: 200,
+      message: `Course access ${action.toLowerCase()}ed successfully.`,
+      results: {
+        totalProcessed: userIds.length,
+        successful: results.successful.length,
+        failed: results.failed.length,
+        successfulDetails: results.successful,
+        failedDetails: results.failed
+      }
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      status: 500,
+      message: "Server error"
+    });
+  }
+};
+
+
+
+exports.createFolder = async (req, res = null) => {
+  try {
+    const { parentId, name, courseId } = req.body;
+    console.log("parentId", req.body);
+
+    // Convert courseId to ObjectId
+    const courseObjectId = new mongoose.Types.ObjectId(courseId); // Correctly instantiate ObjectId
+
+    // Use the ObjectId to find the course
+    const course = await Course.findOne({
+      _id: courseObjectId,
+    });
+    console.log(course);
+
+    if (course?.rootFolder) {
+      const errorMessage =
+        "A root folder already exists for the course. Please delete the existing root folder before creating a new one.";
+      if (res) {
+        return res.status(400).json({ message: errorMessage }); // If res exists, send response
+      }
+      throw new Error(errorMessage); // If no res, throw an error for handling elsewhere
+    }
+
+    const newFolder = await Folder.create({ name, folders: [], files: [] });
+
+    if (parentId) {
+      await Folder.findByIdAndUpdate(newFolder._id, {
+        parentFolderId: parentId,
+      });
+      // Add to parent folder
+      await Folder.findByIdAndUpdate(parentId, {
+        $push: { folders: newFolder._id },
+      });
+    } else if (courseId) {
+      // Set as root folder for course
+      await Course.findByIdAndUpdate(courseObjectId, {
+        rootFolder: newFolder._id,
+      });
+
+      await Folder.findByIdAndUpdate(newFolder._id, { parentFolderId: null });
+    }
+
+    if (res) {
+      return res
+        .status(201)
+        .json({ message: "Folder created successfully", newFolder }); // Send response if res is provided
+    }
+
+    return newFolder; // Return new folder if no res is provided (used in createCourse)
+  } catch (error) {
+    console.log("Error creating folder:", error);
+    if (res) {
+      return res
+        .status(500)
+        .json({ message: "Failed to create folder", error: error.message });
+    }
+    throw error; // Rethrow error for handling elsewhere
+  }
+};
+
+exports.addSubfolder = async (req, res) => {
+  try {
+    const { folderId: parentFolderId } = req.params;
+    const { name } = req.body;
+
+    const subfolder = await Folder.create({
+      name,
+      folders: [],
+      files: [],
+      parentFolderId,
+    });
+
+    await Folder.findByIdAndUpdate(parentFolderId, {
+      $push: { folders: subfolder._id },
+    });
+
+    res
+      .status(201)
+      .json({ message: "Subfolder added successfully", subfolder });
+  } catch (error) {
+    console.log("Error adding subfolder:", error);
+    res
+      .status(500)
+      .json({ message: "Failed to add subfolder", error: error.message });
+  }
+};
+
+exports.deleteFolder = async (req, res) => {
+  try {
+    const { folderId } = req.params;
+    const { sourceFolderId } = req.body;
+
+    if (!sourceFolderId) {
+      return res.status(400).json({ 
+        message: "sourceFolderId is required" 
+      });
+    }
+
+    const folderToDelete = await Folder.findById(folderId);
+    
+    if (!folderToDelete) {
+      return res.status(404).json({ message: "Folder not found" });
+    }
+
+
+    if (folderToDelete.parentFolderId?.toString()!== sourceFolderId.toString()) {
+      await Folder.findByIdAndUpdate(
+        sourceFolderId,
+        { $pull: { folders: folderId } }
+      );
+      
+      return res.status(200).json({ 
+        message: "Folder reference removed from source folder" 
+      });
+    }
+    const deleteFolderRecursively = async (id) => {
+      const folder = await Folder.findById(id);
+
+      if (!folder) {
+        console.log(`Folder with id ${id} not found`);
+        return;
+      }
+
+      if (folder.folders.length === null) {
+        await Folder.findByIdAndDelete(id);
+        return;
+      }
+      for (const subfolderId of folder.folders) {
+        await deleteFolderRecursively(subfolderId);
+      }
+
+      const fileUrls = folder.files.map((file) => file.url);
+
+      if (fileUrls?.length > 0) {
+        await deleteFilesFromBucket(authConfig.s3_bucket, fileUrls);
+      }
+      // Delete files from storage
+
+      await Folder.findByIdAndDelete(id);
+    };
+
+    await deleteFolderRecursively(folderId);
+
+    res
+      .status(200)
+      .json({ message: "Folder and its contents deleted successfully" });
+  } catch (error) {
+    console.log("Error deleting folder:", error);
+    res
+      .status(500)
+      .json({ message: "Failed to delete folder", error: error.message });
+  }
+};
+
+
+exports.addFileToFolder = async (req, res) => {
+  try {
+    const { folderId } = req.params;
+    const { name, url, description } = req.body;
+
+    const newFile = await File.create({ name, url, description });
+
+    await Folder.findByIdAndUpdate(folderId, {
+      $push: { files: newFile._id },
+    });
+
+    res.status(201).json({ message: "File added successfully", file: newFile });
+  } catch (error) {
+    console.log("Error adding file:", error);
+    res
+      .status(500)
+      .json({ message: "Failed to add file", error: error.message });
+  }
+};
+
+exports.getFolderContents = async (req, res) => {
+  try {
+    const { folderId } = req.params;
+    const userId = req.user?._id || "";
+
+    const getRootFolder = async (folderId) => {
+      let currentFolder = await Folder.findById(folderId)
+      while(currentFolder && currentFolder.parentFolderId){
+        currentFolder = await Folder.findById(currentFolder.parentFolderId)
+      }
+      return currentFolder
+    }
+
+    const getCourseFromRootFolder = async (rootFolder) => {
+      if(!rootFolder) return null
+      let course=await Course.findOne({rootFolder:rootFolder._id})
+      return course
+    }
+
+    const rootFolder = await getRootFolder(folderId)
+    const course = await getCourseFromRootFolder(rootFolder)
+    console.log("course",course);
+    const courseId = course?course._id:null;
+
+    if (!courseId) {
+      return res.status(404).json({ message: "Course not found" });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const hasPurchasedCourse = user.purchasedCourses.some(
+      (pc) => pc.course.toString() === courseId.toString()
+    );
+
+    if (!hasPurchasedCourse) {
+      console.log("User has not purchased course");
+    }
+
+    const folder = await Folder.findById(folderId)
+      .populate("folders")
+      .populate("files");
+
+    if (!folder) {
+      return res.status(404).json({ error: "Folder not found" });
+    }
+
+    const folderContents = folder.files.map((file) => {
+      const fileObj = file.toObject();
+
+
+      return {
+        ...fileObj,
+        isViewable:fileObj.isViewable || hasPurchasedCourse
+      }
+    })
+
+    const folderData = folder.toObject();
+    folderData.files = folderContents;
+
+
+    res.status(200).json({ message: "Folder contents retrieved", folder: folderData });
+  } catch (error) {
+    console.log("Error getting folder contents:", error);
+    res
+      .status(500)
+      .json({ message: "Failed to get folder contents", error: error.message });
+  }
+};
+
+exports.getFolderContentsForHomeScreen = async (req, res) => {
+  try {
+    const { folderId } = req.params;
+    const folder = await Folder.findById(folderId)
+      .populate("folders")
+      .populate("files");
+
+    if (!folder) {
+      return res.status(404).json({ error: "Folder not found" });
+    }
+
+    res.status(200).json({ message: "Folder contents retrieved", folder });
+  } catch (error) {
+    console.log("Error getting folder contents:", error);
+    res
+      .status(500)
+      .json({ message: "Failed to get folder contents", error: error.message });
+  }
+};
+
+// exports.deleteFolder = async (req, res) => {
+//   try {
+//     const { folderId } = req.params;
+//     const { sourceFolderId } = req.body;
+
+//     if (!sourceFolderId) {
+//       return res.status(400).json({ 
+//         message: "sourceFolderId is required" 
+//       });
+//     }
+
+//     const folderToDelete = await Folder.findById(folderId);
+    
+//     if (!folderToDelete) {
+//       return res.status(404).json({ message: "Folder not found" });
+//     }
+
+
+//     if (folderToDelete.parentFolderId?.toString()!== sourceFolderId.toString()) {
+//       await Folder.findByIdAndUpdate(
+//         sourceFolderId,
+//         { $pull: { folders: folderId } }
+//       );
+      
+//       return res.status(200).json({ 
+//         message: "Folder reference removed from source folder" 
+//       });
+//     }
+//     const deleteFolderRecursively = async (id) => {
+//       const folder = await Folder.findById(id);
+
+//       if (!folder) {
+//         console.log(`Folder with id ${id} not found`);
+//         return;
+//       }
+
+//       if (folder.folders.length === null) {
+//         await Folder.findByIdAndDelete(id);
+//         return;
+//       }
+//       for (const subfolderId of folder.folders) {
+//         await deleteFolderRecursively(subfolderId);
+//       }
+
+//       const fileUrls = folder.files.map((file) => file.url);
+
+//       if (fileUrls?.length > 0) {
+//         await deleteFilesFromBucket(authConfig.s3_bucket, fileUrls);
+//       }
+//       // Delete files from storage
+
+//       await Folder.findByIdAndDelete(id);
+//     };
+
+//     await deleteFolderRecursively(folderId);
+
+//     res
+//       .status(200)
+//       .json({ message: "Folder and its contents deleted successfully" });
+//   } catch (error) {
+//     console.log("Error deleting folder:", error);
+//     res
+//       .status(500)
+//       .json({ message: "Failed to delete folder", error: error.message });
+//   }
+// };
+
+exports.deleteFileFromFolder = async (req, res) => {
+  try {
+    const { folderId, fileId } = req.params;
+
+    //check to delete file permanently if its in root folder else just pull from files array
+
+    // Find the folder and populate the `files` field
+    const folder = await Folder.findById(folderId).populate("files");
+
+    if (!folder) {
+      return res.status(404).json({ message: "Folder not found" });
+    }
+
+    // Locate the file in the folder's files array
+    const file = folder.files.find((file) => file._id.toString() === fileId);
+
+    if (!file) {
+      return res.status(404).json({ message: "File not found in folder" });
+    }
+
+    // Extract the fileUrl
+    const fileUrl = file.url;
+
+    // Remove the file reference from the folder
+    folder.files = folder.files.filter(
+      (file) => file._id.toString() !== fileId
+    );
+    await folder.save();
+
+    // Delete the file from the S3 bucket
+    await deleteFilesFromBucket(authConfig.s3_bucket, [fileUrl]);
+
+    // Optionally, delete the File document from the database
+    await File.findByIdAndDelete(fileId);
+
+    res.status(200).json({ message: "File deleted successfully", fileUrl });
+  } catch (error) {
+    console.error("Error deleting file:", error);
+    res
+      .status(500)
+      .json({ message: "Failed to delete file", error: error.message });
+  }
+};
+
+exports.updateFolder = async (req, res) => {
+  try {
+    const { folderId } = req.params;
+    const { name, isDownloadable, downloadType  } = req.body;
+
+    const folder = await Folder.findById(folderId);
+    if (!folder) {
+      return res.status(404).json({ error: "Folder not found" });
+    }
+
+    folder.name = name || folder.name;
+    if (isDownloadable !== undefined) folder.isDownloadable = isDownloadable;
+    if (downloadType) folder.downloadType = downloadType;
+    await folder.save();
+
+    async function updateSubItems(currentFolderId) {
+      const currentFolder = await Folder.findById(currentFolderId)
+        .populate('folders')
+        .populate('files');
+
+      if (currentFolder.files.length > 0) {
+        await File.updateMany(
+          { _id: { $in: currentFolder.files } },
+          {
+            $set: {
+              isDownloadable: isDownloadable !== undefined ? isDownloadable : currentFolder.isDownloadable,
+              downloadType: downloadType || currentFolder.downloadType
+            }
+          }
+        );
+      }
+
+      for (const subfolder of currentFolder.folders) {
+        await Folder.findByIdAndUpdate(
+          subfolder._id,
+          {
+            $set: {
+              isDownloadable: isDownloadable !== undefined ? isDownloadable : currentFolder.isDownloadable,
+              downloadType: downloadType || currentFolder.downloadType
+            }
+          }
+        );
+        await updateSubItems(subfolder._id);
+      }
+    }
+
+    await updateSubItems(folderId);
+
+    res.status(200).json({ message: "Folder and all contained items updated successfully", folder });
+  } catch (error) {
+    console.log("Error updating folder:", error);
+    res
+      .status(500)
+      .json({ message: "Failed to update folder", error: error.message });
+  }
+};
+
+exports.moveFileToFolder = async (req, res) => {
+  try {
+    const { fileIds, sourceFolderId, destinationFolderId } = req.body;
+
+    const fileIdsArray = Array.isArray(fileIds) ? fileIds : [fileIds];
+
+    // const sourceFolder = await Folder.findById(sourceFolderId);
+    // if(!sourceFolder){
+    //   return res.status(404).json({ error: "Source folder not found" });
+    // }
+
+    const destinationFolder = await Folder.findById(destinationFolderId);
+    if (!destinationFolder) {
+      return res.status(404).json({ error: "Destination folder not found" });
+    }
+
+    const movedFiles = [];
+    for (const fileId of fileIdsArray) {
+      const file = await File.findById(fileId);
+      if (!file) {
+        continue;
+      }
+
+      const duplicateFile = await File.create({
+        name: file.name,
+        url: file.url,
+        description: file.description,
+        isDownloadable: file.isDownloadable,
+        isViewable: file.isViewable,
+      });
+
+      destinationFolder.files.push(duplicateFile._id);
+      await destinationFolder.save();
+
+      movedFiles.push(duplicateFile);
+    }
+
+    const successfulMoves = movedFiles.length;
+
+    res
+      .status(200)
+      .json({
+        message: `${successfulMoves} file(s) moved successfully`,
+        movedFiles,
+        destinationFolder,
+        totalFilesMoved: successfulMoves,
+      });
+  } catch (error) {
+    console.log("Error moving file:", error);
+    res
+      .status(500)
+      .json({ message: "Failed to move file", error: error.message });
+  }
+};
+
+//move ccomplete folder into another folder
+exports.moveFolderToFolder = async (req, res) => {
+  try {
+    const { folderIds, destinationFolderId } = req.body; // Change to accept multiple folderIds
+
+    const destinationFolder = await Folder.findById(destinationFolderId);
+    if (!destinationFolder) {
+      return res.status(404).json({ error: "Destination folder not found" });
+    }
+
+    // Prevent moving folders into themselves or their descendants
+    const isAlreadyItsOwnSubfolder = async (childIds, parentId) => {
+      if (childIds.includes(parentId)) {
+        return true;
+      }
+
+      const parent = await Folder.findById(parentId).populate("folders");
+      if (!parent) {
+        return false;
+      }
+
+      for (let subfolder of parent.folders) {
+        if (await isAlreadyItsOwnSubfolder(childIds, subfolder._id)) {
+          return true;
+        }
+      }
+
+      return false;
+    };
+
+    if (await isAlreadyItsOwnSubfolder(folderIds, destinationFolderId)) {
+      return res
+        .status(400)
+        .json({ error: "Cannot move folders into their own subfolders" });
+    }
+
+    // Move each folder to the new parent
+    let movedFolders = [];
+    for (let folderId of folderIds) {
+      const folder = await Folder.findById(folderId);
+      if (!folder || !folder.parentFolderId) {
+        continue; // Skip if folder is not found or is a root folder
+      }
+
+      const duplicateFolder = await Folder.create({
+        name: folder.name,
+        parentFolderId: destinationFolderId,
+        folders: folder.folders,
+        files: folder.files,
+        importedQuizzes: folder.importedQuizzes,
+        QuizFolders: folder.QuizFolders,
+      });
+
+      destinationFolder.folders.push(duplicateFolder._id);
+      await destinationFolder.save();
+
+      movedFolders.push(duplicateFolder);
+    }
+
+    res
+      .status(200)
+      .json({
+        message: `${movedFolders.length} folder(s) moved successfully`,
+        movedFolders,
+      });
+  } catch (error) {
+    console.log("Error moving folders:", error);
+    res
+      .status(500)
+      .json({ message: "Failed to move folders", error: error.message });
+  }
+};
+
+exports.updateFile = async (req, res) => {
+  try {
+    const { folderId, fileId } = req.params;
+    const { name, url, description, isDownloadable, downloadType, isViewable } = req.body;
+
+    const folder = await Folder.findById(folderId);
+    if (!folder) {
+      return res.status(404).json({ message: "Folder not found" });
+    }
+
+    const updatedFile = await File.findByIdAndUpdate(
+      fileId,
+      {
+        $set: {
+          ...(name && { name }),
+          ...(url && { url }),
+          ...(description && { description }),
+          ...(isDownloadable !== undefined && { isDownloadable }),
+          ...(downloadType && { downloadType }),
+          ...(isViewable !== undefined && { isViewable }),
+        },
+      },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedFile) {
+      return res.status(404).json({ message: "File not found" });
+    }
+
+    return res.status(200).json({
+      message: "File updated successfully",
+      updatedFile,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Error updating file",
+      error: error.message,
+    });
+  }
+};
+
+exports.importQuizToCourseFolder = async (req, res) => {
+  try {
+    const { folderId: destinationFolderId } = req.params;
+    const { quizId, sourceFolderId } = req.body;
+
+    const quiz = await Quiz.findById(quizId);
+    if (!quiz) {
+      return res.status(404).json({ message: "Quiz not found" });
+    }
+
+    const quizFolder = await QuizFolder.findById(sourceFolderId);
+    if (!quizFolder) {
+      return res.status(404).json({ message: "Quiz folder not found" });
+    }
+
+    const courseFolder = await Folder.findById(destinationFolderId);
+    if (!courseFolder) {
+      return res.status(404).json({ message: "Course folder not found" });
+    }
+
+    const isAlreadyImported = courseFolder.importedQuizzes.some(
+      (importedQuiz) => importedQuiz.quizId.toString() === quizId
+    );
+    if (isAlreadyImported) {
+      return res
+        .status(400)
+        .json({ message: "Quiz already imported to course" });
+    }
+
+    await Folder.updateOne(
+      { _id: destinationFolderId },
+      {
+        $push: {
+          importedQuizzes: {
+            quizId,
+            originalFolderId: sourceFolderId,
+          },
+        },
+      }
+    );
+
+    const updatedFolder = await Folder.findById(destinationFolderId);
+
+    return res
+      .status(200)
+      .json({
+        message: "Quiz imported successfully",
+        courseFolder: updatedFolder,
+      });
+  } catch (error) {
+    console.log("Error importing quiz:", error);
+    return res
+      .status(500)
+      .json({ message: "Failed to import quiz", error: error.message });
+  }
+};
+
+exports.removeQuizFromCourseFolder = async (req, res) => {
+  try {
+    const { folderId, quizId } = req.params;
+
+    const updatedFolder = await Folder.findOneAndUpdate(
+      {
+        _id: folderId,
+      },
+      {
+        $pull: {
+          importedQuizzes: {
+            quizId: new mongoose.Types.ObjectId(quizId),
+          },
+        },
+      },
+      {
+        new: true,
+        runValidators: true,
+      }
+    );
+
+    if (!updatedFolder) {
+      return res.status(404).json({ message: "Folder not found" });
+    }
+
+    return res
+      .status(200)
+      .json({ message: "Quiz removed successfully", folder: updatedFolder });
+  } catch (error) {
+    return res
+      .status(500)
+      .json({ message: "Failed to remove quiz", error: error.message });
+  }
+};
+
+exports.importQuizFolderToCourseFolder = async (req, res) => {
+  try {
+    const { folderId: destinationFolderId } = req.params;
+    const { quizFolderId } = req.body;
+
+    const quizFolder = await QuizFolder.findById(quizFolderId);
+    if (!quizFolder) {
+      return res.status(404).json({ message: "Quiz folder not found" });
+    }
+
+    const courseFolder = await Folder.findById(destinationFolderId);
+    if (!courseFolder) {
+      return res.status(404).json({ message: "Course folder not found" });
+    }
+    console.log("courseFolder", courseFolder);
+
+    const isAlreadyImported = courseFolder.QuizFolders.includes(quizFolderId);
+    if (isAlreadyImported) {
+      return res
+        .status(400)
+        .json({ message: "Quiz folder already imported to course" });
+    }
+
+    const updatedFolder = await Folder.findByIdAndUpdate(
+      destinationFolderId,
+      {
+        $push: { QuizFolders: quizFolderId },
+      },
+      {
+        new: true,
+        runValidators: true,
+      }
+    ).populate("QuizFolders");
+
+    return res
+      .status(200)
+      .json({
+        message: "Quiz folder imported successfully",
+        courseFolder: updatedFolder,
+      });
+  } catch (error) {
+    console.log("Error importing quiz folder:", error);
+    return res
+      .status(500)
+      .json({ message: "Failed to import quiz folder", error: error.message });
+  }
+};
+
+exports.removeQuizFolderFromCourseFolder = async (req, res) => {
+  try {
+    const { folderId, quizFolderId } = req.params;
+
+    const folder = await Folder.findById(folderId);
+    if (!folder) {
+      return res.status(404).json({ message: "Course folder not found" });
+    }
+    if (!folder.QuizFolders.includes(quizFolderId)) {
+      return res.status(404).json({
+        message: "Quiz folder not found in this course folder",
+        details:
+          "The specified quiz folder is not associated with this course folder",
+      });
+    }
+
+    const quizFolder = await QuizFolder.findById(quizFolderId);
+    if (!quizFolder) {
+      return res.status(404).json({ message: "Quiz folder does not exist" });
+    }
+
+    const updatedFolder = await Folder.findOneAndUpdate(
+      {
+        _id: folderId,
+      },
+      {
+        $pull: {
+          QuizFolders: quizFolderId,
+        },
+      },
+      {
+        new: true,
+        runValidators: true,
+      }
+    ).populate("QuizFolders");
+
+    if (!updatedFolder) {
+      return res.status(404).json({ message: "Folder not found" });
+    }
+
+    return res
+      .status(200)
+      .json({
+        message: "Quiz folder removed successfully",
+        folder: updatedFolder,
+      });
+  } catch (error) {
+    return res
+      .status(500)
+      .json({ message: "Failed to remove quiz folder", error: error.message });
+  }
+};
+
+exports.updateFileOrder=async(req,res)=>{
+  try{
+    const {folderId}=req.params;
+    const {fileIds}=req.body;
+
+    const folder=await Folder.findById(folderId);
+    if(!folder){
+      return res.status(404).json({message:"Folder not found"});
+    }
+
+    await Folder.findByIdAndUpdate(folderId,{
+      files:fileIds
+    });
+
+    const updatedFolder=await Folder.findById(folderId).populate("files");
+
+    return res.status(200).json({
+      message:"File order updated successfully",
+      folder:updatedFolder
+    });
+  }catch(error){
+    return res.status(500).json({message:"Failed to update file order",error:error.message});
+  }
+}
