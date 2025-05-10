@@ -497,6 +497,7 @@ exports.adminLogoutUser = async (req, res) => {
 exports.getProfile = async (req, res) => {
   try {
     const data = await User.findOne({ _id: req.user._id });
+    console.log(data);
     if (data) {
       return res
         .status(200)
@@ -511,6 +512,46 @@ exports.getProfile = async (req, res) => {
     return res
       .status(501)
       .send({ status: 501, message: "server error.", data: {} });
+  }
+};
+exports.updateProfile = async (req, res) => {
+  try {
+    const { firstName, lastName, email, phone } = req.body;
+
+    // Validate input
+    if (!firstName || !lastName || !email || !phone) {
+      return res.status(400).json({
+        status: 400,
+        message: "All fields (firstName, lastName, email, phone) are required.",
+      });
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      req.user._id,
+      { firstName, lastName, email, phone },
+      { new: true } // return the updated document
+    );
+
+    if (!updatedUser) {
+      return res.status(404).json({
+        status: 404,
+        message: "User not found",
+        data: {},
+      });
+    }
+
+    return res.status(200).json({
+      status: 200,
+      message: "Profile updated successfully",
+      data: updatedUser,
+    });
+  } catch (error) {
+    console.error("Error updating profile:", error);
+    return res.status(500).json({
+      status: 500,
+      message: "Server error",
+      data: {},
+    });
   }
 };
 
@@ -639,6 +680,7 @@ exports.updateUserDetails = async (req, res) => {
 exports.uploadProfilePicture = async (req, res) => {
   try {
     const userId = req.params.id;
+    console.log("uploadProfilePicture UsedID :", userId);
 
     if (!req.file) {
       return res
@@ -651,6 +693,7 @@ exports.uploadProfilePicture = async (req, res) => {
       { image: req.file.path },
       { new: true }
     );
+    console.log("updated user is here", updatedUser);
 
     if (!updatedUser) {
       return res.status(404).json({ status: 404, message: "User not found" });

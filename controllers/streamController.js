@@ -19,6 +19,7 @@ exports.streamFile = async (req, res) => {
 
   try {
     const file = await File.findById(fileId);
+    console.log("getting this file on stream :", file);
 
     if (!file) {
       return res.status(404).json({ message: "File not found" });
@@ -34,10 +35,10 @@ exports.streamFile = async (req, res) => {
     const fileExtension = file.url.split(".").pop().toLowerCase();
 
     // If the file is PDF, generate signed URL and redirect
-    if (fileExtension === "pdf") {
-      const signedUrl = generateSignedUrl(process.env.S3_BUCKET, key, 60 * 10); // 10 minutes signed URL
-      return res.redirect(signedUrl);
-    }
+    // if (fileExtension === "pdf") {
+    //   const signedUrl = generateSignedUrl(process.env.S3_BUCKET, key, 60 * 10); // 10 minutes signed URL
+    //   return res.redirect(signedUrl);
+    // }
 
     // Else, normal streaming for other file types
     const s3Params = {
@@ -83,13 +84,13 @@ exports.generateFileToken = async (req, res) => {
     // You may want to check if user has purchased access to the course here
     // Example: const hasAccess = await checkUserAccess(userId, file.courseId);
 
-    const hasAccess = true; // TODO: add your real access check here
+    // const hasAccess = true; // TODO: add your real access check here
 
-    if (!hasAccess) {
-      return res
-        .status(403)
-        .json({ message: "You do not have access to this file" });
-    }
+    // if (!hasAccess) {
+    //   return res
+    //     .status(403)
+    //     .json({ message: "You do not have access to this file" });
+    // }
 
     const token = generateFileAccessToken(fileId, userId, file.isDownloadable);
 
@@ -102,71 +103,6 @@ exports.generateFileToken = async (req, res) => {
     res.status(500).json({ message: "Server Error" });
   }
 };
-
-// exports.streamFileDirect = async (req, res) => {
-//   const { fileId } = req.params;
-//   const userId = req.userId || "dummyUser"; // Replace with real user logic when needed
-
-//   if (!fileId) {
-//     return res.status(400).json({ message: "File ID is required" });
-//   }
-
-//   try {
-//     const file = await File.findById(fileId);
-//     if (!file) {
-//       return res.status(404).json({ message: "File not found" });
-//     }
-
-//     // Normally you'd validate access here, skipping for now
-//     const tokenPayload = {
-//       fileId,
-//       userId,
-//       isDownloadable: file.isDownloadable,
-//     };
-
-//     const token = generateFileAccessToken(tokenPayload.fileId, tokenPayload.userId, tokenPayload.isDownloadable);
-
-//     // Directly use the payload now (since we just created it)
-//     const { isDownloadable } = tokenPayload;
-
-//     if (!file.isViewable) {
-//       return res
-//         .status(403)
-//         .json({ message: "Access Denied: File not viewable" });
-//     }
-
-//     const key = decodeURIComponent(file.url.split(".com/")[1]);
-//     const fileExtension = file.url.split(".").pop().toLowerCase();
-
-//     if (fileExtension === "pdf") {
-//       const signedUrl = generateSignedUrl(process.env.S3_BUCKET, key, 60 * 10); // 10 mins
-//       return res.redirect(signedUrl);
-//     }
-
-//     // Block video download — only allow inline streaming
-//     if (fileExtension === "mp4") {
-//       res.setHeader("Content-Type", getMimeType(file.url));
-//       res.setHeader("Content-Disposition", "inline");
-//     } else {
-//       res.setHeader("Content-Type", getMimeType(file.url));
-//       res.setHeader(
-//         "Content-Disposition",
-//         isDownloadable
-//           ? `attachment; filename="${file.name}"`
-//           : "inline"
-//       );
-//     }
-
-//     const s3Stream = s3
-//       .getObject({ Bucket: process.env.S3_BUCKET, Key: key })
-//       .createReadStream();
-
-//     return s3Stream.pipe(res);
-//   } catch (error) {
-//     console.error("Error in streamFileDirect:", error);
-//     return res.status(500).json({ message: "Server Error" });
-//   }
-// };
 
 function getMimeType(url) {
   if (url.endsWith(".pdf")) return "application/pdf";

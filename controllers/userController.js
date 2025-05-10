@@ -29,7 +29,7 @@ const FollowUs = require("../models/followusModel");
 const BehaviorNote = require("../models/behaviourModel");
 const { addUser, updateUser } = require("../configs/merithub.config");
 // const nodemailer = require('nodemailer');
-const { redisClient } = require('../configs/redis');
+const { redisClient } = require("../configs/redis");
 
 const reffralCode = async () => {
   var digits = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -95,8 +95,6 @@ const generateTrackingNumber = () => {
 const generateOTP = () => {
   return Math.floor(1000 + Math.random() * 9000).toString();
 };
-
-
 
 exports.signup = async (req, res) => {
   try {
@@ -170,13 +168,11 @@ exports.signup = async (req, res) => {
 
     await newUser.save();
 
-    return res
-      .status(201)
-      .json({
-        status: 201,
-        message: "User created successfully",
-        user: newUser,
-      });
+    return res.status(201).json({
+      status: 201,
+      message: "User created successfully",
+      user: newUser,
+    });
   } catch (error) {
     console.log(error);
     return res
@@ -209,13 +205,11 @@ exports.registration = async (req, res) => {
           completeProfile: userCreate.completeProfile,
           phone: userCreate.phone,
         };
-        return res
-          .status(200)
-          .send({
-            status: 200,
-            message: "Registered successfully ",
-            data: obj,
-          });
+        return res.status(200).send({
+          status: 200,
+          message: "Registered successfully ",
+          data: obj,
+        });
       } else {
         const findUser = await User.findOne({
           refferalCode: req.body.refferalCode,
@@ -249,13 +243,11 @@ exports.registration = async (req, res) => {
               completeProfile: userCreate.completeProfile,
               phone: userCreate.phone,
             };
-            return res
-              .status(200)
-              .send({
-                status: 200,
-                message: "Registered successfully ",
-                data: obj,
-              });
+            return res.status(200).send({
+              status: 200,
+              message: "Registered successfully ",
+              data: obj,
+            });
           }
         } else {
           return res
@@ -287,14 +279,12 @@ exports.socialLogin = async (req, res) => {
           if (err) {
             return res.status(401).send("Invalid Credentials");
           } else {
-            return res
-              .status(200)
-              .json({
-                status: 200,
-                msg: "Login successfully",
-                userId: user._id,
-                token: token,
-              });
+            return res.status(200).json({
+              status: 200,
+              msg: "Login successfully",
+              userId: user._id,
+              token: token,
+            });
           }
         }
       );
@@ -314,14 +304,12 @@ exports.socialLogin = async (req, res) => {
             return res.status(401).send("Invalid Credentials");
           } else {
             console.log(token);
-            return res
-              .status(200)
-              .json({
-                status: 200,
-                msg: "Login successfully",
-                userId: newUser._id,
-                token: token,
-              });
+            return res.status(200).json({
+              status: 200,
+              msg: "Login successfully",
+              userId: newUser._id,
+              token: token,
+            });
           }
         });
       }
@@ -364,7 +352,7 @@ exports.loginWithPhone = async (req, res) => {
 
     const userObj = {
       otp: otp,
-      otpExpiration: expirationTime, 
+      otpExpiration: expirationTime,
       accountVerification: false,
     };
 
@@ -381,13 +369,11 @@ exports.loginWithPhone = async (req, res) => {
       userType: user.userType,
     };
 
-    return res
-      .status(200)
-      .send({
-        status: 200,
-        message: "OTP sent successfully",
-        data: responseObj,
-      });
+    return res.status(200).send({
+      status: 200,
+      message: "OTP sent successfully",
+      data: responseObj,
+    });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ status: 500, message: "Server error" });
@@ -399,39 +385,37 @@ exports.logoutUser = async (req, res) => {
     const { deviceType } = req.body;
     const userId = req.user._id;
 
-    if (!deviceType || !['web', 'mobile'].includes(deviceType)) {
-      return res.status(400).json({ 
-        status: 400, 
-        message: "Valid device type (web/mobile) is required" 
+    if (!deviceType || !["web", "mobile"].includes(deviceType)) {
+      return res.status(400).json({
+        status: 400,
+        message: "Valid device type (web/mobile) is required",
       });
     }
 
-    const updateQuery = deviceType === 'web' 
-      ? { 'activeTokens.webToken': null }
-      : { 'activeTokens.mobileToken': null };
+    const updateQuery =
+      deviceType === "web"
+        ? { "activeTokens.webToken": null }
+        : { "activeTokens.mobileToken": null };
 
-    await User.findOneAndUpdate(
-      { _id: userId },
-      updateQuery
-    );
+    await User.findOneAndUpdate({ _id: userId }, updateQuery);
 
     return res.status(200).json({
       status: 200,
-      message: `Successfully logged out from ${deviceType}`
+      message: `Successfully logged out from ${deviceType}`,
     });
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ 
-      status: 500, 
-      message: "Server error" 
+    return res.status(500).json({
+      status: 500,
+      message: "Server error",
     });
   }
 };
 
 exports.signupWithPhone = async (req, res) => {
   try {
-    const {firstName,lastName,phone} = req.body;
-    console.log(req.body)
+    const { firstName, lastName, phone } = req.body;
+    console.log(req.body);
 
     // Check if the phone number is provided
     if (!phone) {
@@ -459,8 +443,7 @@ exports.signupWithPhone = async (req, res) => {
         message: "User with this phone number already exists",
       });
     }
-    
-    
+
     const expirationTime = 5 * 60; // 5 minutes //otp
 
     // Create a new user object
@@ -540,10 +523,10 @@ exports.signupWithPhone = async (req, res) => {
 exports.sendOTP = async (req, res) => {
   try {
     const { email, phone } = req.body;
-    
+
     // if (!email && !phone) {
-    //   return res.status(400).json({ 
-    //     message: "Either email or phone number is required" 
+    //   return res.status(400).json({
+    //     message: "Either email or phone number is required"
     //   });
     // }
 
@@ -553,7 +536,7 @@ exports.sendOTP = async (req, res) => {
     }
 
     const otp = generateOTP();
-    const expirationTime = 5 * 60; // 5 minutes 
+    const expirationTime = 5 * 60; // 5 minutes
 
     // Store OTP in Redis with expiration
     const redisKey = `otp:${user._id}`;
@@ -569,18 +552,16 @@ exports.sendOTP = async (req, res) => {
     // for development and testing purposes only - remove in production
     return res.status(200).json({
       message: "OTP sent successfully",
-      otp: otp // remove this in production
+      otp: otp, // remove this in production
     });
-
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ 
-      message: "Internal server error", 
-      error: err.message 
+    return res.status(500).json({
+      message: "Internal server error",
+      error: err.message,
     });
   }
 };
-
 
 exports.verifyOtp = async (req, res) => {
   try {
@@ -593,7 +574,6 @@ exports.verifyOtp = async (req, res) => {
     const redisKey = `otp:${user._id}`;
     const storedOTP = await redisClient.get(redisKey);
 
-  
     if (!storedOTP || storedOTP !== otp) {
       return res.status(400).json({ message: "Invalid or expired OTP" });
     }
@@ -632,27 +612,24 @@ exports.login = async (req, res) => {
 
     if (!identifier) {
       return res.status(400).json({
-        message: "Email or phone number is required"
+        message: "Email or phone number is required",
       });
     }
 
     if (!password && !otp) {
       return res.status(400).json({
-        message: "Either password or OTP is required"
+        message: "Either password or OTP is required",
       });
     }
 
     // finding user by email or phone
     const user = await User.findOne({
-      $or: [
-        { email: identifier },
-        { phone: identifier }
-      ]
+      $or: [{ email: identifier }, { phone: identifier }],
     });
 
     if (!user) {
       return res.status(404).json({
-        message: "User not found"
+        message: "User not found",
       });
     }
 
@@ -661,28 +638,25 @@ exports.login = async (req, res) => {
     if (otp) {
       const redisKey = `otp:${user._id}`;
       const storedOTP = await redisClient.get(redisKey);
-      
+
       if (storedOTP && storedOTP === otp) {
         isAuthenticated = true;
-       
+
         await redisClient.del(redisKey);
       }
-    }
-    else if (password) {
+    } else if (password) {
       isAuthenticated = await bcrypt.compare(password, user.password);
     }
 
     if (!isAuthenticated) {
       return res.status(401).json({
-        message: otp ? "Invalid OTP" : "Invalid password"
+        message: otp ? "Invalid OTP" : "Invalid password",
       });
     }
 
-    const accessToken = jwt.sign(
-      { id: user._id },
-      authConfig.secret,
-      { expiresIn: authConfig.accessTokenTime }
-    );
+    const accessToken = jwt.sign({ id: user._id }, authConfig.secret, {
+      expiresIn: authConfig.accessTokenTime,
+    });
 
     // last Login can be used
     // await User.findByIdAndUpdate(user._id, {
@@ -695,24 +669,22 @@ exports.login = async (req, res) => {
       phone: user.phone,
       token: accessToken,
       completeProfile: user.completeProfile,
-      accountVerification: user.accountVerification
+      accountVerification: user.accountVerification,
     };
 
     return res.status(200).json({
       status: 200,
       message: "Logged in successfully",
-      data: responseObj
+      data: responseObj,
     });
-
   } catch (err) {
     console.error(err);
     return res.status(500).json({
       message: "Internal server error",
-      error: err.message
+      error: err.message,
     });
   }
 };
-
 
 // Helper function for sending responses
 const sendResponse = (res, status, message, data = {}) => {
@@ -769,22 +741,28 @@ exports.updateProfile = async (req, res) => {
 
     // Prepare the name field to update on MeritHub
     const nameForMeritHub = `${updateDataLocal.firstName} ${updateDataLocal.lastName}`;
-    
+
     // Update user details on MeritHub using the combined name
-    const merithubUpdate = await updateUser(user.merithubUserId, { name: nameForMeritHub });
+    const merithubUpdate = await updateUser(user.merithubUserId, {
+      name: nameForMeritHub,
+    });
 
     // Respond to the client with success or forward the error if the MeritHub update fails
     if (!merithubUpdate) {
       return sendResponse(res, 500, "Failed to update name on MeritHub");
     }
 
-    return sendResponse(res, 200, "Profile updated successfully on both platforms", updatedUser);
+    return sendResponse(
+      res,
+      200,
+      "Profile updated successfully on both platforms",
+      updatedUser
+    );
   } catch (error) {
     console.error(error);
     return sendResponse(res, 500, "Server error");
   }
 };
-
 
 // Controller to get all users' profiles
 exports.getAllProfiles = async (req, res) => {
@@ -801,35 +779,37 @@ exports.getAllProfiles = async (req, res) => {
 };
 // Controller to get a user profile by ID
 exports.getUserProfileById = async (req, res) => {
-        try {
-            const { userId } = req.params;
-    
-            // Find user by ID
-            const user = await User.findById(userId);
-    
-            if (!user) {
-                return res.status(404).json({
-                    status: 404,
-                    message: "User not found",
-                    data: {}
-                });
-            }
-    
-            return res.status(200).json({
-                status: 200,
-                message: "User profile retrieved successfully",
-                data: user
-            });
-        } catch (error) {
-            console.error(error);
-            return res.status(500).json({
-                status: 500,
-                message: "Server error",
-                data: {}
-            });
-        }
-    };
-    
+  try {
+    const { userId } = req.params;
+
+    // Find user by ID
+    const user = await User.findById(userId);
+
+    console.log("auser at getUserProfileById is here :", user);
+
+    if (!user) {
+      return res.status(404).json({
+        status: 404,
+        message: "User not found",
+        data: {},
+      });
+    }
+
+    return res.status(200).json({
+      status: 200,
+      message: "User profile retrieved successfully",
+      data: user,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      status: 500,
+      message: "Server error",
+      data: {},
+    });
+  }
+};
+
 exports.resendOTP = async (req, res) => {
   const { id } = req.params;
   try {
@@ -839,12 +819,13 @@ exports.resendOTP = async (req, res) => {
     }
 
     const otp = generateOTP();
-    const expirationTime = 5 * 60; // 5 minutes 
+    const expirationTime = 5 * 60; // 5 minutes
 
     const redisKey = `otp:${user._id}`;
     await redisClient.setEx(redisKey, expirationTime, otp);
 
-    await User.findByIdAndUpdate(user._id, 
+    await User.findByIdAndUpdate(
+      user._id,
       { accountVerification: false },
       { new: true }
     );
@@ -859,7 +840,7 @@ exports.resendOTP = async (req, res) => {
       iid: user._id,
       phone: user.phone,
       email: user.email,
-      otp: otp // remove this in production
+      otp: otp, // remove this in production
     };
     return res
       .status(200)
@@ -901,13 +882,11 @@ exports.updateLocation1 = async (req, res) => {
           city: update.city,
           sector: update.sector,
         };
-        return res
-          .status(200)
-          .send({
-            status: 200,
-            message: "Location update successfully.",
-            data: obj,
-          });
+        return res.status(200).send({
+          status: 200,
+          message: "Location update successfully.",
+          data: obj,
+        });
       }
     }
   } catch (error) {
@@ -956,13 +935,11 @@ exports.updateLocation = async (req, res) => {
         city: updatedUser.city,
         sector: updatedUser.sector,
       };
-      return res
-        .status(200)
-        .send({
-          status: 200,
-          message: "Location update successful.",
-          data: obj,
-        });
+      return res.status(200).send({
+        status: 200,
+        message: "Location update successful.",
+        data: obj,
+      });
     }
   } catch (error) {
     console.error(error);
@@ -977,13 +954,11 @@ exports.getBanner = async (req, res) => {
     return res.status(200).json({ status: 200, data: Banners });
   } catch (error) {
     console.error(error);
-    return res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Error fetching Banners",
-        error: error.message,
-      });
+    return res.status(500).json({
+      status: 500,
+      message: "Error fetching Banners",
+      error: error.message,
+    });
   }
 };
 exports.getBannerById = async (req, res) => {
@@ -998,13 +973,11 @@ exports.getBannerById = async (req, res) => {
     return res.status(200).json({ status: 200, data: Banner });
   } catch (error) {
     console.error(error);
-    return res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Error fetching Banner",
-        error: error.message,
-      });
+    return res.status(500).json({
+      status: 500,
+      message: "Error fetching Banner",
+      error: error.message,
+    });
   }
 };
 exports.createUserSubscription = async (req, res) => {
@@ -1059,13 +1032,11 @@ exports.createUserSubscription = async (req, res) => {
 
     await newSubscription.save();
 
-    return res
-      .status(201)
-      .json({
-        status: 201,
-        message: "Subscription purchased successfully",
-        data: newSubscription,
-      });
+    return res.status(201).json({
+      status: 201,
+      message: "Subscription purchased successfully",
+      data: newSubscription,
+    });
   } catch (error) {
     console.error(error);
     return res
@@ -1176,13 +1147,11 @@ exports.updateUserSubscription = async (req, res) => {
         .json({ status: 404, message: "Subscription not found" });
     }
 
-    return res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Subscription updated successfully",
-        data: updatedSubscription,
-      });
+    return res.status(200).json({
+      status: 200,
+      message: "Subscription updated successfully",
+      data: updatedSubscription,
+    });
   } catch (error) {
     console.error(error);
     return res
@@ -1228,21 +1197,17 @@ exports.markNotificationAsRead = async (req, res) => {
         .json({ status: 404, message: "Notification not found" });
     }
 
-    return res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Notification marked as read",
-        data: notification,
-      });
+    return res.status(200).json({
+      status: 200,
+      message: "Notification marked as read",
+      data: notification,
+    });
   } catch (error) {
-    return res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Error marking notification as read",
-        error: error.message,
-      });
+    return res.status(500).json({
+      status: 500,
+      message: "Error marking notification as read",
+      error: error.message,
+    });
   }
 };
 exports.markAllNotificationsAsRead = async (req, res) => {
@@ -1265,21 +1230,17 @@ exports.markAllNotificationsAsRead = async (req, res) => {
         .json({ status: 404, message: "No notifications found for the user" });
     }
 
-    return res
-      .status(200)
-      .json({
-        status: 200,
-        message: "All notifications marked as read for the user",
-        data: notifications,
-      });
+    return res.status(200).json({
+      status: 200,
+      message: "All notifications marked as read for the user",
+      data: notifications,
+    });
   } catch (error) {
-    return res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Error marking notifications as read",
-        error: error.message,
-      });
+    return res.status(500).json({
+      status: 500,
+      message: "Error marking notifications as read",
+      error: error.message,
+    });
   }
 };
 exports.getNotificationsForUser = async (req, res) => {
@@ -1293,21 +1254,17 @@ exports.getNotificationsForUser = async (req, res) => {
 
     const notifications = await Notification.find({ recipient: userId });
 
-    return res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Notifications retrieved successfully",
-        data: notifications,
-      });
+    return res.status(200).json({
+      status: 200,
+      message: "Notifications retrieved successfully",
+      data: notifications,
+    });
   } catch (error) {
-    return res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Error retrieving notifications",
-        error: error.message,
-      });
+    return res.status(500).json({
+      status: 500,
+      message: "Error retrieving notifications",
+      error: error.message,
+    });
   }
 };
 exports.getAllNotificationsForUser = async (req, res) => {
@@ -1322,21 +1279,17 @@ exports.getAllNotificationsForUser = async (req, res) => {
     }
     const notifications = await Notification.find({ recipient: userId });
 
-    return res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Notifications retrieved successfully",
-        data: notifications,
-      });
+    return res.status(200).json({
+      status: 200,
+      message: "Notifications retrieved successfully",
+      data: notifications,
+    });
   } catch (error) {
-    return res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Error retrieving notifications",
-        error: error.message,
-      });
+    return res.status(500).json({
+      status: 500,
+      message: "Error retrieving notifications",
+      error: error.message,
+    });
   }
 };
 exports.sendMessage = async (req, res) => {
@@ -1347,12 +1300,10 @@ exports.sendMessage = async (req, res) => {
       !mongoose.Types.ObjectId.isValid(sender) ||
       !mongoose.Types.ObjectId.isValid(receiver)
     ) {
-      return res
-        .status(StatusCodes.BAD_REQUEST)
-        .json({
-          status: StatusCodes.BAD_REQUEST,
-          message: "Invalid sender or receiver ID",
-        });
+      return res.status(StatusCodes.BAD_REQUEST).json({
+        status: StatusCodes.BAD_REQUEST,
+        message: "Invalid sender or receiver ID",
+      });
     }
 
     const senderUser = await User.findById(sender);
@@ -1523,13 +1474,11 @@ exports.getAllSchedules = async (req, res) => {
       status: "scheduled",
     }).populate("course");
 
-    return res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Schedules retrieved successfully",
-        data: schedules,
-      });
+    return res.status(200).json({
+      status: 200,
+      message: "Schedules retrieved successfully",
+      data: schedules,
+    });
   } catch (error) {
     console.error(error);
     return res
@@ -1559,13 +1508,11 @@ exports.getAllLive = async (req, res) => {
       status: "live",
     }).populate("course");
 
-    return res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Schedules retrieved successfully",
-        data: schedules,
-      });
+    return res.status(200).json({
+      status: 200,
+      message: "Schedules retrieved successfully",
+      data: schedules,
+    });
   } catch (error) {
     console.error(error);
     return res
@@ -1595,13 +1542,11 @@ exports.getAllCompleted = async (req, res) => {
       status: "completed",
     }).populate("course");
 
-    return res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Schedules retrieved successfully",
-        data: schedules,
-      });
+    return res.status(200).json({
+      status: 200,
+      message: "Schedules retrieved successfully",
+      data: schedules,
+    });
   } catch (error) {
     console.error(error);
     return res
@@ -1631,13 +1576,11 @@ exports.getAllCancelled = async (req, res) => {
       status: "cancelled",
     }).populate("course");
 
-    return res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Schedules retrieved successfully",
-        data: schedules,
-      });
+    return res.status(200).json({
+      status: 200,
+      message: "Schedules retrieved successfully",
+      data: schedules,
+    });
   } catch (error) {
     console.error(error);
     return res
@@ -1654,13 +1597,11 @@ exports.getScheduleById = async (req, res) => {
         .status(404)
         .json({ status: 404, message: "Schedule not found" });
     }
-    return res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Schedule retrieved successfully",
-        data: schedule,
-      });
+    return res.status(200).json({
+      status: 200,
+      message: "Schedule retrieved successfully",
+      data: schedule,
+    });
   } catch (error) {
     console.error(error);
     return res
@@ -1674,13 +1615,11 @@ exports.getAllCategories = async (req, res) => {
     return res.status(200).json({ status: 200, data: categories });
   } catch (error) {
     console.error(error);
-    return res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Error fetching categories",
-        error: error.message,
-      });
+    return res.status(500).json({
+      status: 500,
+      message: "Error fetching categories",
+      error: error.message,
+    });
   }
 };
 exports.getCategoryById = async (req, res) => {
@@ -1698,13 +1637,11 @@ exports.getCategoryById = async (req, res) => {
     return res.status(200).json({ status: 200, data: category });
   } catch (error) {
     console.error(error);
-    return res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Error fetching category",
-        error: error.message,
-      });
+    return res.status(500).json({
+      status: 500,
+      message: "Error fetching category",
+      error: error.message,
+    });
   }
 };
 exports.getAllProducts = async (req, res) => {
@@ -1713,13 +1650,11 @@ exports.getAllProducts = async (req, res) => {
     return res.status(200).json({ status: 200, data: products });
   } catch (error) {
     console.error(error);
-    return res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Error fetching products",
-        error: error.message,
-      });
+    return res.status(500).json({
+      status: 500,
+      message: "Error fetching products",
+      error: error.message,
+    });
   }
 };
 exports.getProductById = async (req, res) => {
@@ -1737,13 +1672,11 @@ exports.getProductById = async (req, res) => {
     return res.status(200).json({ status: 200, data: product });
   } catch (error) {
     console.error(error);
-    return res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Error fetching product by ID",
-        error: error.message,
-      });
+    return res.status(500).json({
+      status: 500,
+      message: "Error fetching product by ID",
+      error: error.message,
+    });
   }
 };
 exports.createProductReview = async (req, res) => {
@@ -1789,22 +1722,18 @@ exports.createProductReview = async (req, res) => {
 
     await product.save();
 
-    return res
-      .status(201)
-      .json({
-        status: 201,
-        message: "Product review added successfully",
-        data: product,
-      });
+    return res.status(201).json({
+      status: 201,
+      message: "Product review added successfully",
+      data: product,
+    });
   } catch (error) {
     console.error(error);
-    return res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Product review creation failed",
-        error: error.message,
-      });
+    return res.status(500).json({
+      status: 500,
+      message: "Product review creation failed",
+      error: error.message,
+    });
   }
 };
 exports.getAllProductReviews = async (req, res) => {
@@ -1824,13 +1753,11 @@ exports.getAllProductReviews = async (req, res) => {
     res.status(200).json({ status: 200, data: reviews });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Error fetching product reviews",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Error fetching product reviews",
+      error: error.message,
+    });
   }
 };
 exports.getProductReviewById = async (req, res) => {
@@ -1855,13 +1782,11 @@ exports.getProductReviewById = async (req, res) => {
     res.status(200).json({ status: 200, data: review });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Error fetching product review",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Error fetching product review",
+      error: error.message,
+    });
   }
 };
 exports.updateProductReview = async (req, res) => {
@@ -1894,22 +1819,18 @@ exports.updateProductReview = async (req, res) => {
 
     await product.save();
 
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Product review updated successfully",
-        data: review,
-      });
+    res.status(200).json({
+      status: 200,
+      message: "Product review updated successfully",
+      data: review,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Product review update failed",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Product review update failed",
+      error: error.message,
+    });
   }
 };
 exports.deleteProductReview = async (req, res) => {
@@ -1955,13 +1876,11 @@ exports.deleteProductReview = async (req, res) => {
       .json({ status: 200, message: "Product review deleted successfully" });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Product review deletion failed",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Product review deletion failed",
+      error: error.message,
+    });
   }
 };
 exports.getProductsByCategory = async (req, res) => {
@@ -1973,13 +1892,11 @@ exports.getProductsByCategory = async (req, res) => {
     res.status(200).json({ status: 200, data: products });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Error fetching products by category",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Error fetching products by category",
+      error: error.message,
+    });
   }
 };
 exports.searchProducts = async (req, res) => {
@@ -2010,14 +1927,12 @@ exports.searchProducts = async (req, res) => {
         { $sort: { numOfReviews: -1 } },
       ];
       let apiFeature = await Product.aggregate(data1);
-      return res
-        .status(200)
-        .json({
-          status: 200,
-          message: "Product data found.",
-          data: apiFeature,
-          count: productsCount,
-        });
+      return res.status(200).json({
+        status: 200,
+        message: "Product data found.",
+        data: apiFeature,
+        count: productsCount,
+      });
     } else {
       let apiFeature = await Product.aggregate([
         {
@@ -2032,24 +1947,20 @@ exports.searchProducts = async (req, res) => {
         { $sort: { numOfReviews: -1 } },
       ]);
 
-      return res
-        .status(200)
-        .json({
-          status: 200,
-          message: "Product data found.",
-          data: apiFeature,
-          count: productsCount,
-        });
+      return res.status(200).json({
+        status: 200,
+        message: "Product data found.",
+        data: apiFeature,
+        count: productsCount,
+      });
     }
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Error searching products",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Error searching products",
+      error: error.message,
+    });
   }
 };
 exports.getNewArrivalProductsByCategoryAndSubCategory = async (req, res) => {
@@ -2072,22 +1983,18 @@ exports.getNewArrivalProductsByCategoryAndSubCategory = async (req, res) => {
       createdAt: { $gte: thirtyDaysAgo },
     }).sort({ createdAt: -1 });
 
-    return res
-      .status(200)
-      .json({
-        status: 200,
-        message: "New arrival products by category and subcategory",
-        data: newArrivalProducts,
-      });
+    return res.status(200).json({
+      status: 200,
+      message: "New arrival products by category and subcategory",
+      data: newArrivalProducts,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Error retrieving new arrival products",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Error retrieving new arrival products",
+      error: error.message,
+    });
   }
 };
 exports.getNewArrivalProducts = async (req, res) => {
@@ -2099,22 +2006,18 @@ exports.getNewArrivalProducts = async (req, res) => {
       createdAt: { $gte: thirtyDaysAgo },
     }).sort({ createdAt: -1 });
 
-    return res
-      .status(200)
-      .json({
-        status: 200,
-        message: "New arrival products",
-        data: newArrivalProducts,
-      });
+    return res.status(200).json({
+      status: 200,
+      message: "New arrival products",
+      data: newArrivalProducts,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Error retrieving new arrival products",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Error retrieving new arrival products",
+      error: error.message,
+    });
   }
 };
 exports.getMostDemandedProducts = async (req, res) => {
@@ -2123,22 +2026,18 @@ exports.getMostDemandedProducts = async (req, res) => {
       numOfReviews: -1,
     });
 
-    return res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Most demanded products",
-        data: mostDemandedProducts,
-      });
+    return res.status(200).json({
+      status: 200,
+      message: "Most demanded products",
+      data: mostDemandedProducts,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Error retrieving most demanded products",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Error retrieving most demanded products",
+      error: error.message,
+    });
   }
 };
 exports.paginateProductSearch = async (req, res) => {
@@ -2306,13 +2205,11 @@ exports.addToCart = async (req, res) => {
     console.log(totalCartAmount);
     console.log("cart", cart);
 
-    return res
-      .status(201)
-      .json({
-        status: 201,
-        message: "Product added to cart successfully",
-        data: cart,
-      });
+    return res.status(201).json({
+      status: 201,
+      message: "Product added to cart successfully",
+      data: cart,
+    });
   } catch (error) {
     console.error(error);
     return res
@@ -2341,13 +2238,11 @@ exports.getCart = async (req, res) => {
       return res.status(404).json({ status: 404, message: "Cart not found" });
     }
 
-    return res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Cart retrieved successfully",
-        data: cart,
-      });
+    return res.status(200).json({
+      status: 200,
+      message: "Cart retrieved successfully",
+      data: cart,
+    });
   } catch (error) {
     console.error(error);
     return res
@@ -2526,13 +2421,11 @@ exports.deleteCartProductById = async (req, res) => {
 
     await cart.save();
 
-    return res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Cart product deleted successfully",
-        data: cart,
-      });
+    return res.status(200).json({
+      status: 200,
+      message: "Cart product deleted successfully",
+      data: cart,
+    });
   } catch (error) {
     console.error(error);
     return res
@@ -2558,22 +2451,18 @@ exports.createAddress = async (req, res) => {
 
     await address.save();
 
-    res
-      .status(201)
-      .json({
-        status: 201,
-        message: "Address created successfully",
-        data: address,
-      });
+    res.status(201).json({
+      status: 201,
+      message: "Address created successfully",
+      data: address,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Error creating address",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Error creating address",
+      error: error.message,
+    });
   }
 };
 exports.updateAddress = async (req, res) => {
@@ -2599,22 +2488,18 @@ exports.updateAddress = async (req, res) => {
     Object.assign(address, addressData);
     await address.save();
 
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Address updated successfully",
-        data: address,
-      });
+    res.status(200).json({
+      status: 200,
+      message: "Address updated successfully",
+      data: address,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Error updating address",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Error updating address",
+      error: error.message,
+    });
   }
 };
 exports.getAddresses = async (req, res) => {
@@ -2629,22 +2514,18 @@ exports.getAddresses = async (req, res) => {
 
     const addresses = await Address.find({ userId });
 
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Addresses retrieved successfully",
-        data: addresses,
-      });
+    res.status(200).json({
+      status: 200,
+      message: "Addresses retrieved successfully",
+      data: addresses,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Error fetching addresses",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Error fetching addresses",
+      error: error.message,
+    });
   }
 };
 exports.getAddressById = async (req, res) => {
@@ -2659,22 +2540,18 @@ exports.getAddressById = async (req, res) => {
         .json({ status: 404, message: "Address not found" });
     }
 
-    return res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Address retrieved successfully",
-        data: address,
-      });
+    return res.status(200).json({
+      status: 200,
+      message: "Address retrieved successfully",
+      data: address,
+    });
   } catch (error) {
     console.error(error);
-    return res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Error fetching address",
-        error: error.message,
-      });
+    return res.status(500).json({
+      status: 500,
+      message: "Error fetching address",
+      error: error.message,
+    });
   }
 };
 exports.deleteAddress = async (req, res) => {
@@ -2701,13 +2578,11 @@ exports.deleteAddress = async (req, res) => {
       .json({ status: 200, message: "Address deleted successfully" });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Error deleting address",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Error deleting address",
+      error: error.message,
+    });
   }
 };
 const createOrderNotification = async (userId, orderId, totalAmount) => {
@@ -2791,13 +2666,11 @@ exports.createOrder = async (req, res) => {
     });
   } catch (error) {
     console.error(error);
-    return res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Error creating order",
-        error: error.message,
-      });
+    return res.status(500).json({
+      status: 500,
+      message: "Error creating order",
+      error: error.message,
+    });
   }
 };
 exports.updatePaymentStatus = async (req, res) => {
@@ -2836,22 +2709,18 @@ exports.updatePaymentStatus = async (req, res) => {
 
     await payment.save();
 
-    return res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Payment status updated successfully",
-        data: payment,
-      });
+    return res.status(200).json({
+      status: 200,
+      message: "Payment status updated successfully",
+      data: payment,
+    });
   } catch (error) {
     console.error(error);
-    return res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Error updating payment status",
-        error: error.message,
-      });
+    return res.status(500).json({
+      status: 500,
+      message: "Error updating payment status",
+      error: error.message,
+    });
   }
 };
 exports.getOrderById = async (req, res) => {
@@ -2877,22 +2746,18 @@ exports.getOrderById = async (req, res) => {
       return res.status(404).json({ status: 404, message: "Order not found" });
     }
 
-    return res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Order retrieved successfully",
-        data: order,
-      });
+    return res.status(200).json({
+      status: 200,
+      message: "Order retrieved successfully",
+      data: order,
+    });
   } catch (error) {
     console.error(error);
-    return res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Error fetching order",
-        error: error.message,
-      });
+    return res.status(500).json({
+      status: 500,
+      message: "Error fetching order",
+      error: error.message,
+    });
   }
 };
 exports.getOrderHistory = async (req, res) => {
@@ -2914,13 +2779,11 @@ exports.getOrderHistory = async (req, res) => {
           "fullName phone addressLine1 city state postalCode country isDefault",
       });
 
-    return res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Order history retrieved successfully",
-        data: orders,
-      });
+    return res.status(200).json({
+      status: 200,
+      message: "Order history retrieved successfully",
+      data: orders,
+    });
   } catch (error) {
     console.error(error);
     return res
@@ -2957,12 +2820,10 @@ exports.createReturnRequest = async (req, res) => {
         data: order,
       });
     } else {
-      return res
-        .status(400)
-        .json({
-          status: 400,
-          message: "Order is not eligible for return/refund",
-        });
+      return res.status(400).json({
+        status: 400,
+        message: "Order is not eligible for return/refund",
+      });
     }
   } catch (error) {
     console.error(error);
@@ -3031,24 +2892,20 @@ exports.getUserEnrolledCourses = async (req, res) => {
       user: userId,
     }).populate("course");
     if (subscriptions.length === 0) {
-      return res
-        .status(404)
-        .json({
-          status: 404,
-          message: "No enrolled courses found",
-          data: null,
-        });
+      return res.status(404).json({
+        status: 404,
+        message: "No enrolled courses found",
+        data: null,
+      });
     }
 
     const courses = subscriptions.map((sub) => sub.course);
 
-    return res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Enrolled courses retrieved successfully",
-        data: courses,
-      });
+    return res.status(200).json({
+      status: 200,
+      message: "Enrolled courses retrieved successfully",
+      data: courses,
+    });
   } catch (error) {
     console.error(error);
     return res
@@ -3066,13 +2923,11 @@ exports.getAllFreeCourses = async (req, res) => {
         .json({ status: 404, message: "No free courses found", data: null });
     }
 
-    return res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Free courses retrieved successfully",
-        data: freeCourses,
-      });
+    return res.status(200).json({
+      status: 200,
+      message: "Free courses retrieved successfully",
+      data: freeCourses,
+    });
   } catch (error) {
     console.error(error);
     return res
@@ -3088,13 +2943,11 @@ exports.getAllCourses = async (req, res) => {
         .status(404)
         .json({ status: 404, message: "No courses found", data: null });
     }
-    return res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Courses retrieved successfully",
-        data: courses,
-      });
+    return res.status(200).json({
+      status: 200,
+      message: "Courses retrieved successfully",
+      data: courses,
+    });
   } catch (error) {
     console.error(error);
     return res
@@ -3115,13 +2968,11 @@ exports.getAllNotices = async (req, res) => {
       user: userId,
     }).populate("course");
     if (subscriptions.length === 0) {
-      return res
-        .status(404)
-        .json({
-          status: 404,
-          message: "No enrolled courses found",
-          data: null,
-        });
+      return res.status(404).json({
+        status: 404,
+        message: "No enrolled courses found",
+        data: null,
+      });
     }
 
     const courseIds = subscriptions.map((sub) => sub.course._id);
@@ -3142,22 +2993,18 @@ exports.getAllNotices = async (req, res) => {
       return res.status(404).json({ status: 404, message: "No notices found" });
     }
 
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Notices retrieved successfully",
-        data: notices,
-      });
+    res.status(200).json({
+      status: 200,
+      message: "Notices retrieved successfully",
+      data: notices,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Internal server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 exports.getAllFreeCourseNotices = async (req, res) => {
@@ -3177,31 +3024,25 @@ exports.getAllFreeCourseNotices = async (req, res) => {
     }).populate("author courseId");
 
     if (!notices || notices.length === 0) {
-      return res
-        .status(404)
-        .json({
-          status: 404,
-          message: "No free course notices found",
-          data: null,
-        });
+      return res.status(404).json({
+        status: 404,
+        message: "No free course notices found",
+        data: null,
+      });
     }
 
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Notices retrieved successfully",
-        data: notices,
-      });
+    res.status(200).json({
+      status: 200,
+      message: "Notices retrieved successfully",
+      data: notices,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Internal server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 exports.getNoticeById = async (req, res) => {
@@ -3212,22 +3053,18 @@ exports.getNoticeById = async (req, res) => {
     if (!notice) {
       return res.status(404).json({ status: 404, message: "Notice not found" });
     }
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Notice retrieved successfully",
-        data: notice,
-      });
+    res.status(200).json({
+      status: 200,
+      message: "Notice retrieved successfully",
+      data: notice,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Internal server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 exports.markAttendance = async (req, res) => {
@@ -3255,12 +3092,10 @@ exports.markAttendance = async (req, res) => {
       date,
     });
     if (existingAttendance) {
-      return res
-        .status(400)
-        .json({
-          status: 400,
-          message: "Attendance already marked for this date",
-        });
+      return res.status(400).json({
+        status: 400,
+        message: "Attendance already marked for this date",
+      });
     }
 
     const attendance = new Attendance({
@@ -3272,22 +3107,18 @@ exports.markAttendance = async (req, res) => {
 
     await attendance.save();
 
-    res
-      .status(201)
-      .json({
-        status: 201,
-        message: "Attendance marked successfully",
-        data: attendance,
-      });
+    res.status(201).json({
+      status: 201,
+      message: "Attendance marked successfully",
+      data: attendance,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Internal server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 exports.getAttendanceByUser = async (req, res) => {
@@ -3304,31 +3135,25 @@ exports.getAttendanceByUser = async (req, res) => {
     );
 
     if (!attendanceRecords || attendanceRecords.length === 0) {
-      return res
-        .status(404)
-        .json({
-          status: 404,
-          message: "No attendance records found",
-          data: null,
-        });
+      return res.status(404).json({
+        status: 404,
+        message: "No attendance records found",
+        data: null,
+      });
     }
 
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Attendance records retrieved successfully",
-        data: attendanceRecords,
-      });
+    res.status(200).json({
+      status: 200,
+      message: "Attendance records retrieved successfully",
+      data: attendanceRecords,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Internal server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 exports.getAttendanceFilter = async (req, res) => {
@@ -3342,12 +3167,10 @@ exports.getAttendanceFilter = async (req, res) => {
 
     const { year, month } = req.query;
     if (!year || !month) {
-      return res
-        .status(400)
-        .json({
-          status: 400,
-          message: "Year and month parameters are required",
-        });
+      return res.status(400).json({
+        status: 400,
+        message: "Year and month parameters are required",
+      });
     }
 
     const numericYear = parseInt(year);
@@ -3376,13 +3199,11 @@ exports.getAttendanceFilter = async (req, res) => {
     }).populate("user course");
 
     if (!attendanceRecords || attendanceRecords.length === 0) {
-      return res
-        .status(404)
-        .json({
-          status: 404,
-          message: `No attendance records found for ${numericMonth}/${numericYear}`,
-          data: null,
-        });
+      return res.status(404).json({
+        status: 404,
+        message: `No attendance records found for ${numericMonth}/${numericYear}`,
+        data: null,
+      });
     }
 
     const presentCount = attendanceRecords.filter(
@@ -3403,13 +3224,11 @@ exports.getAttendanceFilter = async (req, res) => {
     });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Internal server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 exports.getAttendanceByUserCurrentMonth = async (req, res) => {
@@ -3437,13 +3256,11 @@ exports.getAttendanceByUserCurrentMonth = async (req, res) => {
     }).populate("user course");
 
     if (!attendanceRecords || attendanceRecords.length === 0) {
-      return res
-        .status(404)
-        .json({
-          status: 404,
-          message: "No attendance records found for the current month",
-          data: null,
-        });
+      return res.status(404).json({
+        status: 404,
+        message: "No attendance records found for the current month",
+        data: null,
+      });
     }
 
     const presentCount = attendanceRecords.filter(
@@ -3465,13 +3282,11 @@ exports.getAttendanceByUserCurrentMonth = async (req, res) => {
     });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Internal server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 exports.getAttendanceByUserAndCourse = async (req, res) => {
@@ -3490,31 +3305,25 @@ exports.getAttendanceByUserAndCourse = async (req, res) => {
     }).populate("user course");
 
     if (!attendanceRecords || attendanceRecords.length === 0) {
-      return res
-        .status(404)
-        .json({
-          status: 404,
-          message: "No attendance records found",
-          data: null,
-        });
+      return res.status(404).json({
+        status: 404,
+        message: "No attendance records found",
+        data: null,
+      });
     }
 
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Attendance records retrieved successfully",
-        data: attendanceRecords,
-      });
+    res.status(200).json({
+      status: 200,
+      message: "Attendance records retrieved successfully",
+      data: attendanceRecords,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Internal server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 exports.updateAttendance = async (req, res) => {
@@ -3529,31 +3338,25 @@ exports.updateAttendance = async (req, res) => {
     );
 
     if (!attendance) {
-      return res
-        .status(404)
-        .json({
-          status: 404,
-          message: "Attendance record not found",
-          data: null,
-        });
+      return res.status(404).json({
+        status: 404,
+        message: "Attendance record not found",
+        data: null,
+      });
     }
 
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Attendance updated successfully",
-        data: attendance,
-      });
+    res.status(200).json({
+      status: 200,
+      message: "Attendance updated successfully",
+      data: attendance,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Internal server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 exports.deleteAttendance = async (req, res) => {
@@ -3563,31 +3366,25 @@ exports.deleteAttendance = async (req, res) => {
     const attendance = await Attendance.findByIdAndDelete(id);
 
     if (!attendance) {
-      return res
-        .status(404)
-        .json({
-          status: 404,
-          message: "Attendance record not found",
-          data: null,
-        });
+      return res.status(404).json({
+        status: 404,
+        message: "Attendance record not found",
+        data: null,
+      });
     }
 
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Attendance deleted successfully",
-        data: attendance,
-      });
+    res.status(200).json({
+      status: 200,
+      message: "Attendance deleted successfully",
+      data: attendance,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Internal server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 exports.addToWishlist = async (req, res) => {
@@ -3624,22 +3421,18 @@ exports.addToWishlist = async (req, res) => {
       }
     }
 
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "courses added to wishlist successfully",
-        data: wishlist,
-      });
+    res.status(200).json({
+      status: 200,
+      message: "courses added to wishlist successfully",
+      data: wishlist,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Error adding courses to wishlist",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Error adding courses to wishlist",
+      error: error.message,
+    });
   }
 };
 exports.getMyWishlist = async (req, res) => {
@@ -3659,13 +3452,11 @@ exports.getMyWishlist = async (req, res) => {
     res.status(200).json({ status: 200, data: wishlist.courses });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Error fetching wishlist",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Error fetching wishlist",
+      error: error.message,
+    });
   }
 };
 exports.removeFromWishlist = async (req, res) => {
@@ -3694,21 +3485,17 @@ exports.removeFromWishlist = async (req, res) => {
 
     await wishlist.save();
 
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "courses removed from wishlist successfully",
-      });
+    res.status(200).json({
+      status: 200,
+      message: "courses removed from wishlist successfully",
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Error removing courses from wishlist",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Error removing courses from wishlist",
+      error: error.message,
+    });
   }
 };
 exports.getAllSyllabus = async (req, res) => {
@@ -3724,13 +3511,11 @@ exports.getAllSyllabus = async (req, res) => {
       user: userId,
     }).populate("course");
     if (subscriptions.length === 0) {
-      return res
-        .status(404)
-        .json({
-          status: 404,
-          message: "No enrolled courses found",
-          data: null,
-        });
+      return res.status(404).json({
+        status: 404,
+        message: "No enrolled courses found",
+        data: null,
+      });
     }
 
     const courseIds = subscriptions.map((sub) => sub.course._id);
@@ -3740,22 +3525,18 @@ exports.getAllSyllabus = async (req, res) => {
       courseId: { $in: courseIds },
     });
 
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "All syllabus entries retrieved successfully",
-        data: syllabusEntries,
-      });
+    res.status(200).json({
+      status: 200,
+      message: "All syllabus entries retrieved successfully",
+      data: syllabusEntries,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Internal server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 exports.getSyllabusById = async (req, res) => {
@@ -3766,22 +3547,18 @@ exports.getSyllabusById = async (req, res) => {
         .status(404)
         .json({ status: 404, message: "Syllabus entry not found", data: null });
     }
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Syllabus entry retrieved successfully",
-        data: syllabusEntry,
-      });
+    res.status(200).json({
+      status: 200,
+      message: "Syllabus entry retrieved successfully",
+      data: syllabusEntry,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Internal server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 exports.getAllTestSeries = async (req, res) => {
@@ -3797,13 +3574,11 @@ exports.getAllTestSeries = async (req, res) => {
       user: userId,
     }).populate("course");
     if (subscriptions.length === 0) {
-      return res
-        .status(404)
-        .json({
-          status: 404,
-          message: "No enrolled courses found",
-          data: null,
-        });
+      return res.status(404).json({
+        status: 404,
+        message: "No enrolled courses found",
+        data: null,
+      });
     }
 
     const courseIds = subscriptions.map((sub) => sub.course._id);
@@ -3812,22 +3587,18 @@ exports.getAllTestSeries = async (req, res) => {
       courseId: { $in: courseIds },
     }).populate("courseId categoryId subCategoryId");
 
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Test series retrieved successfully",
-        data: testSeriesList,
-      });
+    res.status(200).json({
+      status: 200,
+      message: "Test series retrieved successfully",
+      data: testSeriesList,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Internal server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 exports.getTestSeriesById = async (req, res) => {
@@ -3840,22 +3611,18 @@ exports.getTestSeriesById = async (req, res) => {
         .status(404)
         .json({ status: 404, message: "Test series not found", data: null });
     }
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Test series retrieved successfully",
-        data: testSeries,
-      });
+    res.status(200).json({
+      status: 200,
+      message: "Test series retrieved successfully",
+      data: testSeries,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Internal server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 exports.getAllVideoLectures = async (req, res) => {
@@ -3871,13 +3638,11 @@ exports.getAllVideoLectures = async (req, res) => {
       user: userId,
     }).populate("course");
     if (subscriptions.length === 0) {
-      return res
-        .status(404)
-        .json({
-          status: 404,
-          message: "No enrolled courses found",
-          data: null,
-        });
+      return res.status(404).json({
+        status: 404,
+        message: "No enrolled courses found",
+        data: null,
+      });
     }
 
     const courseIds = subscriptions.map((sub) => sub.course._id);
@@ -3887,22 +3652,18 @@ exports.getAllVideoLectures = async (req, res) => {
       courseId: { $in: courseIds },
     }).populate("courseId categoryId subCategoryId");
 
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Video lectures retrieved successfully",
-        data: videoLectures,
-      });
+    res.status(200).json({
+      status: 200,
+      message: "Video lectures retrieved successfully",
+      data: videoLectures,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Internal server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 exports.getVideoLectureById = async (req, res) => {
@@ -3915,22 +3676,18 @@ exports.getVideoLectureById = async (req, res) => {
         .status(404)
         .json({ status: 404, message: "Video lecture not found", data: null });
     }
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Video lecture retrieved successfully",
-        data: videoLecture,
-      });
+    res.status(200).json({
+      status: 200,
+      message: "Video lecture retrieved successfully",
+      data: videoLecture,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Internal server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 exports.getAllExamSchedules = async (req, res) => {
@@ -3946,13 +3703,11 @@ exports.getAllExamSchedules = async (req, res) => {
       user: userId,
     }).populate("course");
     if (subscriptions.length === 0) {
-      return res
-        .status(404)
-        .json({
-          status: 404,
-          message: "No enrolled courses found",
-          data: null,
-        });
+      return res.status(404).json({
+        status: 404,
+        message: "No enrolled courses found",
+        data: null,
+      });
     }
 
     const courseIds = subscriptions.map((sub) => sub.course._id);
@@ -3961,22 +3716,18 @@ exports.getAllExamSchedules = async (req, res) => {
       courseId: { $in: courseIds },
     }).populate("courseId categoryId subCategoryId");
 
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Exam schedules retrieved successfully",
-        data: examSchedules,
-      });
+    res.status(200).json({
+      status: 200,
+      message: "Exam schedules retrieved successfully",
+      data: examSchedules,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Internal server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 exports.getExamScheduleById = async (req, res) => {
@@ -3989,22 +3740,18 @@ exports.getExamScheduleById = async (req, res) => {
         .status(404)
         .json({ status: 404, message: "Exam schedule not found", data: null });
     }
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Exam schedule retrieved successfully",
-        data: examSchedule,
-      });
+    res.status(200).json({
+      status: 200,
+      message: "Exam schedule retrieved successfully",
+      data: examSchedule,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Internal server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 exports.getAllRecordings = async (req, res) => {
@@ -4020,13 +3767,11 @@ exports.getAllRecordings = async (req, res) => {
       user: userId,
     }).populate("course");
     if (subscriptions.length === 0) {
-      return res
-        .status(404)
-        .json({
-          status: 404,
-          message: "No enrolled courses found",
-          data: null,
-        });
+      return res.status(404).json({
+        status: 404,
+        message: "No enrolled courses found",
+        data: null,
+      });
     }
 
     const courseIds = subscriptions.map((sub) => sub.course._id);
@@ -4035,22 +3780,18 @@ exports.getAllRecordings = async (req, res) => {
       courseId: { $in: courseIds },
     }).populate("courseId categoryId subCategoryId");
 
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Recordings retrieved successfully",
-        data: recordings,
-      });
+    res.status(200).json({
+      status: 200,
+      message: "Recordings retrieved successfully",
+      data: recordings,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Internal server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 exports.getRecordingById = async (req, res) => {
@@ -4063,22 +3804,18 @@ exports.getRecordingById = async (req, res) => {
         .status(404)
         .json({ status: 404, message: "Recording not found", data: null });
     }
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Recording retrieved successfully",
-        data: recording,
-      });
+    res.status(200).json({
+      status: 200,
+      message: "Recording retrieved successfully",
+      data: recording,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Internal server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 exports.createSurveyForm = async (req, res) => {
@@ -4117,22 +3854,18 @@ exports.createSurveyForm = async (req, res) => {
     });
 
     const savedSurveyForm = await newSurveyForm.save();
-    res
-      .status(201)
-      .json({
-        status: 201,
-        message: "Survey form created successfully",
-        data: savedSurveyForm,
-      });
+    res.status(201).json({
+      status: 201,
+      message: "Survey form created successfully",
+      data: savedSurveyForm,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Internal server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 exports.getAllSurveyForms = async (req, res) => {
@@ -4147,22 +3880,18 @@ exports.getAllSurveyForms = async (req, res) => {
     const surveyForms = await SurveyForm.find({ user: userId }).populate(
       "user teacher course categoryId subCategoryId"
     );
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Survey forms retrieved successfully",
-        data: surveyForms,
-      });
+    res.status(200).json({
+      status: 200,
+      message: "Survey forms retrieved successfully",
+      data: surveyForms,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Internal server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 exports.getSurveyFormById = async (req, res) => {
@@ -4175,22 +3904,18 @@ exports.getSurveyFormById = async (req, res) => {
         .status(404)
         .json({ status: 404, message: "Survey form not found", data: null });
     }
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Survey form retrieved successfully",
-        data: surveyForm,
-      });
+    res.status(200).json({
+      status: 200,
+      message: "Survey form retrieved successfully",
+      data: surveyForm,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Internal server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 exports.updateSurveyForm = async (req, res) => {
@@ -4238,22 +3963,18 @@ exports.updateSurveyForm = async (req, res) => {
         .json({ status: 404, message: "Survey form not found", data: null });
     }
 
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Survey form updated successfully",
-        data: updatedSurveyForm,
-      });
+    res.status(200).json({
+      status: 200,
+      message: "Survey form updated successfully",
+      data: updatedSurveyForm,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Internal server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 exports.deleteSurveyForm = async (req, res) => {
@@ -4266,43 +3987,35 @@ exports.deleteSurveyForm = async (req, res) => {
         .json({ status: 404, message: "Survey form not found", data: null });
     }
 
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Survey form deleted successfully",
-        data: deletedSurveyForm,
-      });
+    res.status(200).json({
+      status: 200,
+      message: "Survey form deleted successfully",
+      data: deletedSurveyForm,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Internal server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 exports.getAllFollowUs = async (req, res) => {
   try {
     const followUsLinks = await FollowUs.find();
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Social media links retrieved successfully",
-        data: followUsLinks,
-      });
+    res.status(200).json({
+      status: 200,
+      message: "Social media links retrieved successfully",
+      data: followUsLinks,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Internal server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 exports.getFollowUsById = async (req, res) => {
@@ -4310,31 +4023,25 @@ exports.getFollowUsById = async (req, res) => {
     const followUsLink = await FollowUs.findById(req.params.id);
 
     if (!followUsLink) {
-      return res
-        .status(404)
-        .json({
-          status: 404,
-          message: "Social media link not found",
-          data: null,
-        });
+      return res.status(404).json({
+        status: 404,
+        message: "Social media link not found",
+        data: null,
+      });
     }
 
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Social media link retrieved successfully",
-        data: followUsLink,
-      });
+    res.status(200).json({
+      status: 200,
+      message: "Social media link retrieved successfully",
+      data: followUsLink,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Internal server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 exports.searchCourses = async (req, res) => {
@@ -4390,22 +4097,18 @@ exports.getAllBehaviorNotes = async (req, res) => {
     const behaviorNotes = await BehaviorNote.find({ user: userId }).populate(
       "user teacher"
     );
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Behavior notes retrieved successfully",
-        data: behaviorNotes,
-      });
+    res.status(200).json({
+      status: 200,
+      message: "Behavior notes retrieved successfully",
+      data: behaviorNotes,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Internal server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 exports.getBehaviorNoteById = async (req, res) => {
@@ -4418,22 +4121,18 @@ exports.getBehaviorNoteById = async (req, res) => {
         .status(404)
         .json({ status: 404, message: "Behavior note not found" });
     }
-    res
-      .status(200)
-      .json({
-        status: 200,
-        message: "Behavior note retrieved successfully",
-        data: behaviorNote,
-      });
+    res.status(200).json({
+      status: 200,
+      message: "Behavior note retrieved successfully",
+      data: behaviorNote,
+    });
   } catch (error) {
     console.error(error);
-    res
-      .status(500)
-      .json({
-        status: 500,
-        message: "Internal server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 
@@ -4444,31 +4143,31 @@ exports.updateUserPermissions = async (req, res) => {
 
     const user = await User.findById(userId);
     if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+      return res.status(404).json({ message: "User not found" });
     }
 
-   
-    if (req.user.userType !== 'ADMIN') {
-      return res.status(403).json({ message: 'Unauthorized: Only admins can update permissions' });
+    if (req.user.userType !== "ADMIN") {
+      return res
+        .status(403)
+        .json({ message: "Unauthorized: Only admins can update permissions" });
     }
 
-    if (user.userType !== 'TEACHER' || user.userType !== 'TEAM') {
-      return res.status(400).json({ message: 'Invalid user type' });
+    if (user.userType !== "TEACHER" || user.userType !== "TEAM") {
+      return res.status(400).json({ message: "Invalid user type" });
     }
-
 
     const permissionFields = [
-      'coursesPermission',
-      'bookStorePermission',
-      'planPermission',      
-      'reportAndAnalyticPermission',
-      'chatPermission',
-      'marketingServicesPermission',
-      'testPortalPermission',
-      'peoplePermission',
+      "coursesPermission",
+      "bookStorePermission",
+      "planPermission",
+      "reportAndAnalyticPermission",
+      "chatPermission",
+      "marketingServicesPermission",
+      "testPortalPermission",
+      "peoplePermission",
     ];
 
-    permissionFields.forEach(field => {
+    permissionFields.forEach((field) => {
       if (permissions.hasOwnProperty(field)) {
         user[field] = permissions[field];
       }
@@ -4477,21 +4176,21 @@ exports.updateUserPermissions = async (req, res) => {
     await user.save();
 
     return res.status(200).json({
-      message: 'Permissions updated successfully',
+      message: "Permissions updated successfully",
       user: {
         _id: user._id,
         userType: user.userType,
         permissions: permissionFields.reduce((acc, field) => {
           acc[field] = user[field];
           return acc;
-        }, {})
-      }
+        }, {}),
+      },
     });
   } catch (error) {
-    console.error('Error updating user permissions:', error);
-    return res.status(500).json({ 
-      message: 'Internal server error', 
-      error: error.message 
+    console.error("Error updating user permissions:", error);
+    return res.status(500).json({
+      message: "Internal server error",
+      error: error.message,
     });
   }
 };
@@ -4513,15 +4212,17 @@ exports.getUserPermissions = async (req, res) => {
     `);
 
     if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+      return res.status(404).json({ message: "User not found" });
     }
 
-    if (req.user.userType !== 'ADMIN') {
-      return res.status(403).json({ message: 'Unauthorized to view permissions' });
+    if (req.user.userType !== "ADMIN") {
+      return res
+        .status(403)
+        .json({ message: "Unauthorized to view permissions" });
     }
 
     return res.status(200).json({
-      message: 'User permissions retrieved',
+      message: "User permissions retrieved",
       permissions: {
         userType: user.userType,
         coursesPermission: user.coursesPermission,
@@ -4532,13 +4233,13 @@ exports.getUserPermissions = async (req, res) => {
         marketingServicesPermission: user.marketingServicesPermission,
         testPortalPermission: user.testPortalPermission,
         peoplePermission: user.peoplePermission,
-      }
+      },
     });
   } catch (error) {
-    console.error('Error retrieving user permissions:', error);
-    return res.status(500).json({ 
-      message: 'Internal server error', 
-      error: error.message 
+    console.error("Error retrieving user permissions:", error);
+    return res.status(500).json({
+      message: "Internal server error",
+      error: error.message,
     });
   }
 };

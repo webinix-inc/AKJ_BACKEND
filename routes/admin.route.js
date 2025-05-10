@@ -35,7 +35,12 @@ module.exports = (app) => {
     auth.adminLogoutUser
   );
 
-  app.get("/api/v1/admin/getProfile", auth.getProfile);
+  app.get("/api/v1/admin/getProfile", [authJwt.verifyToken], auth.getProfile);
+  app.put(
+    "/api/v1/admin/update-profile",
+    [authJwt.verifyToken],
+    auth.updateProfile
+  );
 
   app.get("/api/v1/admin/getAllProfile", auth.getAllProfile);
 
