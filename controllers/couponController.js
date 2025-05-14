@@ -130,9 +130,14 @@ exports.getCouponById = async (req, res) => {
 
 exports.updateCoupon = async (req, res) => {
   try {
+    console.log(
+      "req.body() we are getting on calling updateCoupon :",
+      req.body
+    );
     const {
       offerName,
       couponType,
+      couponCode,
       assignedUserIds,
       courseSelectionType,
       assignedCourseIds,
@@ -142,6 +147,7 @@ exports.updateCoupon = async (req, res) => {
       visibility,
       discountType,
       discountAmount,
+      discountPercentage,
       startDate,
       startTime,
       endDate,
@@ -155,8 +161,19 @@ exports.updateCoupon = async (req, res) => {
       return res.status(404).json({ message: "Coupon not found" });
     }
 
+    const sanitizedDiscountAmount =
+      discountAmount === "" || isNaN(discountAmount)
+        ? 0
+        : Number(discountAmount);
+    const sanitizedDiscountPercentage =
+      discountPercentage === "" || isNaN(discountPercentage)
+        ? 0
+        : Number(discountPercentage);
+
     coupon.offerName = offerName || coupon.offerName;
+    coupon.couponCode = couponCode || coupon.couponCode;
     coupon.couponType = couponType || coupon.couponType;
+
     if (couponType === "Private") {
       coupon.assignedUsers = assignedUserIds || coupon.assignedUsers;
     }
@@ -171,15 +188,24 @@ exports.updateCoupon = async (req, res) => {
     coupon.visibility =
       visibility !== undefined ? visibility : coupon.visibility;
     coupon.discountType = discountType || coupon.discountType;
-    coupon.discountAmount = discountAmount || coupon.discountAmount;
+    if (discountType === "Flat") {
+      coupon.discountAmount = sanitizedDiscountAmount;
+      coupon.discountPercentage = 0;
+    } else if (discountType === "Percentage") {
+      coupon.discountPercentage = sanitizedDiscountPercentage;
+      coupon.discountAmount = 0;
+    }
+
+    // coupon.discountAmount = discountAmount || coupon.discountAmount;
     coupon.startDate = startDate || coupon.startDate;
     coupon.startTime = startTime || coupon.startTime;
-    coupon.endDate = isLifetime ? null : endDate || coupon.endDate;
-    coupon.endTime = isLifetime ? null : endTime || coupon.endTime;
     coupon.isLifetime = isLifetime;
+    coupon.endDate = isLifetime ? endDate || coupon.endDate : null;
+    coupon.endTime = isLifetime ? endTime || coupon.endTime : null;
     coupon.minimumOrderValue = minimumOrderValue || coupon.minimumOrderValue;
 
     await coupon.save();
+    console.log("Upadated coupon is hereby :", coupon);
     res.status(200).json({ message: "Coupon updated successfully", coupon });
   } catch (error) {
     res
@@ -300,29 +326,107 @@ exports.validateCoupon = async (req) => {
   }
 };
 
+// exports.getAvailableCoupons = async (req, res) => {
+//   try {
+//     const userId = req.userId;
+//     const { courseId } = req.query;
+
+//     // Get all public coupons and private coupons assigned to the user
+//     const coupons = await Coupon.find({
+//       $or: [
+//         { couponType: "Public" },
+//         {
+//           couponType: "Private",
+//           assignedUsers: userId,
+//         },
+//       ],
+//       visibility: true,
+//       $or: [
+//         { isLifetime: true },
+//         {
+//           endDate: { $gte: new Date() },
+//           startDate: { $lte: new Date() },
+//         },
+//       ],
+//       $or: [
+//         { courseSelectionType: "All" }, // assuming "All" means it's not specific
+//         {
+//           courseSelectionType: "Specific",
+//           assignedCourses: courseId, // ensure current course is in assignedCourses
+//         },
+//       ],
+//     });
+
+//     res.status(200).json(coupons);
+//   } catch (error) {
+//     res.status(500).json({
+//       message: "Error fetching available coupons",
+//       error: error.message,
+//     });
+//   }
+// };
+
 exports.getAvailableCoupons = async (req, res) => {
   try {
     const userId = req.userId;
+    const { courseId } = req.query;
 
-    // Get all public coupons and private coupons assigned to the user
+    const today = new Date();
+
+    // const coupons = await Coupon.find({
+    //   $and: [
+    //     {
+    //       $or: [
+    //         { couponType: "Public" },
+    //         { couponType: "Private", assignedUsers: userId },
+    //       ],
+    //     },
+    //     { visibility: true },
+    //     // {
+    //     //   $or: [
+    //     //     // { isLifetime: true },
+    //     //     { isLifetime: { $eq: true } },
+
+    //     //     {
+    //     //       startDate: { $lte: today },
+    //     //       endDate: { $gte: today },
+    //     //     },
+    //     //   ],
+    //     // },
+
+    //     {
+    //       $or: [
+    //         { courseSelectionType: "All" },
+    //         {
+    //           courseSelectionType: "Specific",
+    //           assignedCourses: courseId, // Make sure this is a string and matches ObjectId if needed
+    //         },
+    //       ],
+    //     },
+    //   ],
+    // });
+
     const coupons = await Coupon.find({
       $or: [
         { couponType: "Public" },
-        {
-          couponType: "Private",
-          assignedUsers: userId,
-        },
+        { couponType: "Private", assignedUsers: userId },
       ],
       visibility: true,
       $or: [
         { isLifetime: true },
         {
-          endDate: { $gte: new Date() },
-          startDate: { $lte: new Date() },
+          startDate: { $lte: today },
+          endDate: { $gte: today },
+        },
+      ],
+      $or: [
+        { courseSelectionType: "All" },
+        {
+          courseSelectionType: "Specific",
+          assignedCourses: courseId, // this must match the type in DB (e.g., ObjectId or string)
         },
       ],
     });
-
     res.status(200).json(coupons);
   } catch (error) {
     res.status(500).json({

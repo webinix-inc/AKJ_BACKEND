@@ -72,11 +72,17 @@ const couponSchema = new mongoose.Schema(
     },
     endDate: {
       type: Date,
-      required: true,
+      // required: true,
+      required: function () {
+        return !this.isLifetime;
+      },
     },
     endTime: {
       type: String,
-      required: true,
+      // required: true,
+      required: function () {
+        return !this.isLifetime;
+      },
     },
     isLifetime: {
       type: Boolean,
