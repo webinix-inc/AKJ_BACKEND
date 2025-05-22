@@ -5,7 +5,7 @@ const path = require("path");
 const cloudinary = require("cloudinary").v2;
 const cheerio = require("cheerio");
 const WordExtractor = require("word-extractor");
-const { JSDOM } = require('jsdom');
+const { JSDOM } = require("jsdom");
 
 const extractor = new WordExtractor();
 
@@ -186,6 +186,8 @@ exports.updateQuestion = async (req, res) => {
       return res.status(404).json({ message: "Question not found" });
     }
 
+    console.log("the updated Question is this :", updatedQuestion);
+
     res
       .status(200)
       .json({ message: "Question updated successfully", updatedQuestion });
@@ -256,7 +258,9 @@ exports.uploadQuestionsFromWord = async (req, res) => {
 
       const typeeIndex = questionText.indexOf("Type\t");
       if (typeeIndex !== -1) {
-        questionData.questionText = questionText.substring(0, typeeIndex).trim();
+        questionData.questionText = questionText
+          .substring(0, typeeIndex)
+          .trim();
       } else {
         questionData.questionText = questionText.trim();
       }
@@ -267,7 +271,11 @@ exports.uploadQuestionsFromWord = async (req, res) => {
         .filter((line) => line);
 
       // Extract and upload images for this question
-      questionData.questionImage = await extractAndUploadImages(bodyHtml, quizId, i);
+      questionData.questionImage = await extractAndUploadImages(
+        bodyHtml,
+        quizId,
+        i
+      );
 
       // Add tables as part of the question data if applicable
       if (tables[i]) {
@@ -280,7 +288,9 @@ exports.uploadQuestionsFromWord = async (req, res) => {
 
       // Extract the correct answer letter (A, B, C, or D)
       const solutionLine = lines.find((line) => line.startsWith("Solution"));
-      const correctAnswerLetter = solutionLine ? solutionLine.split("\t")[1].trim() : "";
+      const correctAnswerLetter = solutionLine
+        ? solutionLine.split("\t")[1].trim()
+        : "";
 
       // Parse and set options
       questionData.options = lines
@@ -292,7 +302,8 @@ exports.uploadQuestionsFromWord = async (req, res) => {
 
       // Set the correct answer based on the solution letter
       if (correctAnswerLetter) {
-        const correctIndex = correctAnswerLetter.charCodeAt(0) - 'A'.charCodeAt(0);
+        const correctIndex =
+          correctAnswerLetter.charCodeAt(0) - "A".charCodeAt(0);
         if (correctIndex >= 0 && correctIndex < questionData.options.length) {
           questionData.options[correctIndex].isCorrect = true;
         }
@@ -337,8 +348,13 @@ exports.uploadQuestionsFromWord = async (req, res) => {
 
     // Update the quiz with the new questions
     await Quiz.findByIdAndUpdate(quizId, {
-      $push: { questions: { $each: savedQuestions.map(q => q._id) } },
-      $inc: { quizTotalMarks: savedQuestions.reduce((total, q) => total + q.questionCorrectMarks, 0) }
+      $push: { questions: { $each: savedQuestions.map((q) => q._id) } },
+      $inc: {
+        quizTotalMarks: savedQuestions.reduce(
+          (total, q) => total + q.questionCorrectMarks,
+          0
+        ),
+      },
     });
 
     res.status(201).json({
@@ -353,26 +369,31 @@ exports.uploadQuestionsFromWord = async (req, res) => {
         await fs.unlink(tempFilePath);
         console.log("Temporary file deleted in error handler:", tempFilePath);
       } catch (unlinkError) {
-        console.error("Error deleting temporary file in error handler:", unlinkError);
+        console.error(
+          "Error deleting temporary file in error handler:",
+          unlinkError
+        );
       }
     }
-    res.status(500).json({ message: "Internal server error", error: error.message });
+    res
+      .status(500)
+      .json({ message: "Internal server error", error: error.message });
   }
 };
 
 async function extractTables(htmlContent) {
   const dom = new JSDOM(htmlContent);
   const document = dom.window.document;
-  const tables = document.querySelectorAll('table');
+  const tables = document.querySelectorAll("table");
   const tableData = [];
 
   tables.forEach((table) => {
-    const rows = table.querySelectorAll('tr');
+    const rows = table.querySelectorAll("tr");
     const rowData = [];
-    rows.forEach(row => {
-      const cells = row.querySelectorAll('td');
+    rows.forEach((row) => {
+      const cells = row.querySelectorAll("td");
       const cellData = [];
-      cells.forEach(cell => {
+      cells.forEach((cell) => {
         // Use innerHTML to get HTML content of each cell
         cellData.push(cell.innerHTML);
       });
@@ -386,41 +407,49 @@ async function extractTables(htmlContent) {
 
 async function extractAndUploadImages(bodyHtml, quizId, questionIndex) {
   const $ = cheerio.load(bodyHtml);
-  const tables = $('table');
+  const tables = $("table");
 
   if (questionIndex >= tables.length) {
     return []; // No images for this question
   }
 
   const questionTable = tables.eq(questionIndex);
-  const images = questionTable.find('img');
+  const images = questionTable.find("img");
 
   if (images.length === 0) {
     return []; // No images in this question
   }
 
   const imageUrls = await Promise.all(
-    images.map((index, img) => {
-      const imageSrc = $(img).attr('src');
-      return uploadToCloudinary(imageSrc, quizId, questionIndex, index);
-    }).get()
+    images
+      .map((index, img) => {
+        const imageSrc = $(img).attr("src");
+        return uploadToCloudinary(imageSrc, quizId, questionIndex, index);
+      })
+      .get()
   );
 
-  return imageUrls.map(result => result.secure_url);
+  return imageUrls.map((result) => result.secure_url);
 }
 
 async function uploadToCloudinary(imageSrc, quizId, questionIndex, imageIndex) {
   try {
-    if (!imageSrc.startsWith('data:image')) {
-      throw new Error('Invalid image source');
+    if (!imageSrc.startsWith("data:image")) {
+      throw new Error("Invalid image source");
     }
 
-    const base64Data = imageSrc.split(',')[1];
-    const imageBuffer = Buffer.from(base64Data, 'base64');
-    const tempPath = path.join(__dirname, `temp_image_${questionIndex}_${imageIndex}.png`);
+    const base64Data = imageSrc.split(",")[1];
+    const imageBuffer = Buffer.from(base64Data, "base64");
+    const tempPath = path.join(
+      __dirname,
+      `temp_image_${questionIndex}_${imageIndex}.png`
+    );
     await fs.writeFile(tempPath, imageBuffer);
 
-    const dateString = new Date().toISOString().replace(/[-:]/g, "").split(".")[0];
+    const dateString = new Date()
+      .toISOString()
+      .replace(/[-:]/g, "")
+      .split(".")[0];
     const fileName = `${quizId}_${dateString}_${questionIndex}_${imageIndex}.png`;
 
     const result = await cloudinary.uploader.upload(tempPath, {
