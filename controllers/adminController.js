@@ -579,12 +579,17 @@ exports.getAllProfile = async (req, res) => {
 exports.getProfileById = async (req, res) => {
   const { id } = req.params;
   try {
-    const student = await User.findById(id);
+    const student = await User.findById(id).populate({
+      path: "purchasedCourses.course", // Populate the course field
+      select: "title", // Only select courseName from the Course model
+    });
     if (!student) {
       return res
         .status(404)
         .json({ success: false, message: "Student not found" });
     }
+    // console.log("here is the student", student);
+
     res.status(200).json({ success: true, data: student });
   } catch (error) {
     console.error("Error fetching student by ID:", error);
