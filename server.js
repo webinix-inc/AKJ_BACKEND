@@ -39,7 +39,7 @@ const allowedOrigins = [
   "http://172.31.44.181", // New Users Frontend
   "http://172.31.35.192", // New Admin Frontend
   "http://172.31.11.118", // Backend itself
-  "http://13.201.132.140/users",
+  "http://3.111.34.85",
   "http://13.201.132.140",
 ];
 
