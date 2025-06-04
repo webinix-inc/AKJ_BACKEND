@@ -10,7 +10,7 @@ module.exports = (app) => {
   app.get("/api/v1/admin/books", bookController.getBooks);
   app.get(
     "/api/v1/admin/books/:id",
-    [authJwt.verifyToken],
+    [authJwt.verifyToken],  
     bookController.getBookById
   );
   app.post(
