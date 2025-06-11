@@ -26,7 +26,7 @@ exports.setCachedData = async (key, messages, expireSeconds = 3600) => {
         sender: message.sender,
         receiver: message.receiver,
         isBroadcast: message.isBroadcast,
-        // timestamp: message.timestamp
+        attachments: message.attachments,
         createdAt: message.createdAt,
       };
       await redisClient.lPush(key, JSON.stringify(cachedMessage));
@@ -50,7 +50,7 @@ exports.addMessageToCache = async (senderId, receiverId, message) => {
       content: message.content,
       sender: message.sender,
       receiver: message.receiver,
-      // timestamp: message.timestamp,
+      attachments: message.attachments,
       createdAt: message.createdAt,
       isBroadcast: message.isBroadcast,
     };
@@ -98,18 +98,15 @@ exports.stopCleanupInterval = () => {
 
 // Send a message
 exports.sendMessage = async (req, res) => {
-  const { sentId, receiverId, message, isBroadcast = false } = req.body;
-  const { _id: senderId, userType } = req.user;
-  let newMessage = {};
-
-  console.log("Backend Send Messages Data", req.user);
+  const { senderId, receiverId, message } = req.body;
+  const { _id: authenticatedUserId, userType } = req.user;
 
   try {
     // Validate request data
-    if (!receiverId || !message) {
-      return res
-        .status(400)
-        .json({ error: "receiverId and message are required" });
+    if (!receiverId || (!message && (!req.files || req.files.length === 0))) {
+      return res.status(400).json({
+        error: "receiverId and either message or attachments are required",
+      });
     }
 
     const MAX_PAYLOAD_SIZE = 1024 * 1024;
@@ -123,45 +120,57 @@ exports.sendMessage = async (req, res) => {
     ).select("firstName userEmail userType");
     if (!receiver) {
       return res.status(404).json({ error: "Receiver not found" });
-    }
+    } // Initialize message data with required fields
+    const messageData = {
+      sender: new mongoose.Types.ObjectId(authenticatedUserId),
+      receiver: new mongoose.Types.ObjectId(receiverId),
+      content: message || "", // Set empty string if no message
+      isBroadcast: false,
+      attachments: [], // Initialize empty attachments array
+    };
 
-    // Check permissions
-    if (userType === "USER" && receiver.userType === "USER") {
-      newMessage = new Message({
-        sender: sentId,
-        receiver: receiverId,
-        content: message,
-        isBroadcast: isBroadcast,
-        // timestamp: new Date().toISOString(),
-      });
-    } else {
-      // Create the message with a timestamp
-      newMessage = new Message({
-        sender: senderId,
-        receiver: receiverId,
-        content: message,
-        isBroadcast: isBroadcast,
-        // timestamp: new Date().toISOString(),
-      });
-    }
 
-    // Save the message
+    // Handle file attachments if present
+    if (req.files && req.files.length > 0) {
+      messageData.attachments = req.files.map((file) => ({
+        type: file.mimetype.startsWith("image/")
+          ? "image"
+          : file.mimetype.startsWith("video/")
+          ? "video"
+          : "document",
+        url: file.location,
+        filename: file.originalname,
+        size: file.size,
+        mimeType: file.mimetype,
+      }));
+
+    } // Create and save the message
+    const newMessage = new Message(messageData);
     const savedMessage = await newMessage.save();
+    console.log(
+      "Message after save:",
+      JSON.stringify(savedMessage.toObject(), null, 2)
+    );
 
     // Add message to cache
-    await exports.addMessageToCache(senderId, receiverId, savedMessage);
+    await exports.addMessageToCache(
+      authenticatedUserId,
+      receiverId,
+      savedMessage
+    );
 
     // Emit message to receiver if socket.io is available
     if (req.io) {
       console.log("Emitting message to receiver:", receiverId);
-      req.io.to(savedMessage?.receiverId).emit("message", savedMessage);
+      req.io.to(receiverId).emit("message", savedMessage);
     } else {
       console.warn("Socket.io not initialized");
     }
 
     res.status(201).json({
+      status: 201,
       message: "Message sent successfully",
-      messageId: savedMessage._id,
+      data: savedMessage,
     });
   } catch (error) {
     console.error("Error sending message:", error);
@@ -420,73 +429,118 @@ exports.getUsersWithMessages = async (req, res) => {
       {
         $group: {
           _id: {
-            $cond: [
-              { $eq: ["$sender", new mongoose.Types.ObjectId(userID)] },
-              "$receiver",
-              "$sender",
-            ],
+            $cond: {
+              if: { $eq: ["$sender", new mongoose.Types.ObjectId(userID)] },
+              then: "$receiver",
+              else: "$sender",
+            },
           },
           lastMessageTime: { $first: "$createdAt" },
           lastMessage: { $first: "$content" },
+          lastMessageAttachments: { $first: "$attachments" },
           lastMessageSender: { $first: "$sender" },
         },
       },
       { $sort: { lastMessageTime: -1 } },
     ]);
 
-    let userIds = messagePartners.map((partner) => partner._id);
-
-    let query = {
-      _id: {
-        $in: userIds,
-        $ne: new mongoose.Types.ObjectId(userID),
-      },
-    };
-
-    // If user is not an admin, only show admins and teachers
-    if (userType !== "ADMIN") {
-      query.userType = { $in: ["ADMIN", "TEACHER"] };
+    if (messagePartners.length > 0) {
+      console.log(
+        "[getUsersWithMessages] First message partner:",
+        messagePartners[0]
+      );
+    } else {
+      console.log("[getUsersWithMessages] No message partners found");
     }
 
-    // Fetching user details
-    const users = await User.find(query, {
-      _id: 1,
-      firstName: 1,
-      email: 1,
-      userType: 1,
-      image: 1,
-    });
+    let enrichedUsers = [];
+    let totalUnreadMessages = 0;
 
-    //a map to store last message details
-    const userLastMessageMap = new Map(
-      messagePartners.map((partner) => [
-        partner._id?.toString(),
-        {
-          lastMessageTime: partner.lastMessageTime,
-          lastMessage: partner.lastMessage,
-          lastMessageSender: partner.lastMessageSender,
+    // If we have message partners, process them
+    if (messagePartners.length > 0) {
+      console.log("[getUsersWithMessages] Creating base query for User.find");
+      // First find all users who have messages
+      let baseQuery = {
+        _id: {
+          $in: messagePartners.map((partner) => partner._id),
         },
-      ])
-    );
-
-    // adding last message details
-    const enrichedUsers = users.map((user) => {
-      const messageDetails = userLastMessageMap.get(user._id.toString());
-      return {
-        ...user.toObject(),
-        lastMessageTime: messageDetails?.lastMessageTime,
-        lastMessage: messageDetails?.lastMessage,
-        isLastMessageSentByMe:
-          messageDetails?.lastMessageSender.toString() === userID,
       };
-    });
 
-    // Sorting users based on their last message time
-    enrichedUsers.sort((a, b) => {
-      const timeA = a.lastMessageTime || 0;
-      const timeB = b.lastMessageTime || 0;
-      return timeB - timeA;
-    });
+      let allMessageUsers = await User.find(baseQuery).lean();
+
+      if (allMessageUsers.length > 0) {
+        console.log("[getUsersWithMessages] First matched user:", {
+          id: allMessageUsers[0]._id,
+          name: allMessageUsers[0].firstName,
+        });
+      } else {
+        console.log(
+          "[getUsersWithMessages] No users found matching message partners"
+        );
+      }
+
+      // For chat, we want to show all users you've messaged with, regardless of type
+      let filteredUsers = allMessageUsers;
+
+      // Remove current user if present
+      const beforeFilter = filteredUsers.length;
+      filteredUsers = filteredUsers.filter(
+        (user) => user._id.toString() !== userID
+      );
+
+      const userLastMessageMap = new Map(
+        messagePartners.map((partner) => [
+          partner._id?.toString(),
+          {
+            lastMessageTime: partner.lastMessageTime,
+            lastMessage: partner.lastMessage,
+            lastMessageAttachments: partner.lastMessageAttachments || [],
+            lastMessageSender: partner.lastMessageSender,
+          },
+        ])
+      );
+
+      const unreadCounts = await Promise.all(
+        filteredUsers.map(async (user) => {
+          const count = await Message.countDocuments({
+            sender: user._id,
+            receiver: new mongoose.Types.ObjectId(userID),
+            isRead: false,
+          });
+          return [user._id.toString(), count];
+        })
+      );
+      const unreadCountMap = new Map(unreadCounts);
+
+      enrichedUsers = filteredUsers.map((user) => {
+        const messageDetails = userLastMessageMap.get(user._id.toString());
+        const unreadCount = unreadCountMap.get(user._id.toString()) || 0;
+        totalUnreadMessages += unreadCount;
+
+        return {
+          firstName: user.firstName,
+          email: user.email || user.userEmail, // Support both field names
+          userType: userType,
+          image:user.image,
+          lastMessageTime: messageDetails?.lastMessageTime,
+          lastMessage: messageDetails?.lastMessage,
+          isLastMessageSentByMe:
+            messageDetails?.lastMessageSender.toString() === userID,
+          // Include _id for compatibility with expected response
+          _id: user._id,
+        };
+      });
+
+      // Sorting users based on their last message time
+      enrichedUsers.sort((a, b) => {
+        const timeA = a.lastMessageTime || 0;
+        const timeB = b.lastMessageTime || 0;
+        return timeB - timeA;
+      });
+      console.log(
+        `[getUsersWithMessages] Sorted ${enrichedUsers.length} enriched users by message time`
+      );
+    }
 
     // Applying pagination
     const paginatedUsers = enrichedUsers.slice(
@@ -494,15 +548,20 @@ exports.getUsersWithMessages = async (req, res) => {
       page * limit
     );
     const totalUsersCount = enrichedUsers.length;
+    console.log(
+      `[getUsersWithMessages] Applied pagination: ${totalUsersCount} total users -> ${paginatedUsers.length} in current page`
+    );
 
+    console.log("[getUsersWithMessages] Returning response");
     res.status(200).json({
       users: paginatedUsers,
       totalUsersCount,
+      totalUnreadMessages,
       currentPage: page,
       totalPages: Math.ceil(totalUsersCount / limit),
     });
   } catch (error) {
-    console.error("Error fetching users with messages:", error);
+    console.error("[getUsersWithMessages] Error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 };

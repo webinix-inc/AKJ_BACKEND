@@ -100,6 +100,43 @@ const behaviourUpload = multer({
   storage: s3Storage("images/behaviourUpload"),
 });
 
+const chatAttachmentUpload = multer({
+  storage: s3Storage("messages/attachments"),
+  fileFilter: (req, file, cb) => {
+    // Allow common file types
+    const allowedMimeTypes = [
+      // Images
+      "image/jpeg",
+      "image/png",
+      "image/gif",
+      "image/webp",
+      // Videos
+      "video/mp4",
+      "video/webm",
+      "video/quicktime",
+      // Documents
+      "application/pdf",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.ms-excel",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "text/plain",
+    ];
+
+    if (allowedMimeTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error("Invalid file type"), false);
+    }
+  },
+  limits: {
+    fileSize: 100 * 1024 * 1024, // 100MB max file size
+    files: 5, // Max 5 files per upload
+  },
+});
+
+const chatAttachments = chatAttachmentUpload.array("attachments", 5);
+
 // Export all multer setups for use in routes
 module.exports = {
   userProfileUpload,
@@ -114,4 +151,5 @@ module.exports = {
   TestSeriesUpload,
   kpUpload2,
   behaviourUpload,
+  chatAttachments, 
 };

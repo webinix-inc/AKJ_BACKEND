@@ -143,9 +143,28 @@ require("./routes/stream.route")(app);
 mongoose.Promise = global.Promise;
 mongoose.set("strictQuery", true);
 
-mongoose.connect(process.env.DB_URL).then((data) => {
-  console.log(`Mongodb instance connected to server: ${data.connection.host}`);
-});
+// MongoDB connection options with improved timeout and reconnection settings
+const mongooseOptions = {
+  connectTimeoutMS: 30000, // Increase connection timeout to 30 seconds
+  socketTimeoutMS: 45000, // Set socket timeout to 45 seconds
+  serverSelectionTimeoutMS: 30000, // Increase server selection timeout
+  maxPoolSize: 10, // Maximum number of connections in the connection pool
+  minPoolSize: 1, // Minimum number of connections in the connection pool
+  retryWrites: true,
+  retryReads: true,
+};
+
+// Connect to MongoDB with improved error handling and reconnection logic
+mongoose
+  .connect(process.env.DB_URL, mongooseOptions)
+  .then((data) => {
+    console.log(
+      `Mongodb instance connected to server: ${data.connection.host}`
+    );
+  })
+  .catch((error) => {
+    console.error("MongoDB connection error:", error);
+  });
 
 const PORT = process.env.PORT || 3000;
 
