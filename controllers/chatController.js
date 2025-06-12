@@ -251,6 +251,7 @@ exports.specificUserMessages = async (req, res) => {
       receiver: msg.receiver,
       isBroadcast: msg.isBroadcast,
       createdAt: msg.createdAt,
+      attachments: msg.attachments || [],
     }));
 
     const nextCursor =
