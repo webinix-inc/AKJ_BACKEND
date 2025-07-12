@@ -1011,6 +1011,7 @@ exports.createSubscription = async (req, res) => {
     } = req.body;
 
     // Validate course existence and fetch full course data
+    console.log("course from createSubscription :", req.body);
     let courseData = null;
     if (course) {
       courseData = await Course.findById(course);

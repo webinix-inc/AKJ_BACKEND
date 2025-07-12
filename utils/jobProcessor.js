@@ -1,16 +1,3 @@
-// const quizQueue = require('./quizQueue');
-// const scorecardController = require('../controllers/scorecardController');
-
-// quizQueue.process('autoSubmit', async (job) => {
-//     await scorecardController.processAutoSubmit(job);
-// });
-
-// module.exports = {
-//     initJobProcessor: () => {
-//         console.log('Job processor initialized');
-//     }
-// };
-
 const quizQueue = require('./quizQueue');
 const scorecardController = require('../controllers/scorecardController');
 
