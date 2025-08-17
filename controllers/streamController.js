@@ -428,7 +428,7 @@ exports.streamFile = async (req, res) => {
     // Use signed URLs for both PDFs and videos to avoid streaming issues
     if (fileExtension === "pdf" || ['mp4', 'webm', 'mkv', 'avi', 'mov'].includes(fileExtension)) {
       console.log(`🎥 Generating signed URL for ${fileExtension} file:`, file.name);
-      const signedUrl = generateSignedUrl(process.env.S3_BUCKET, key, 60 * 10); // 10 minutes signed URL
+      const signedUrl = await generateSignedUrl(process.env.S3_BUCKET, key, 60 * 10); // 10 minutes signed URL
       console.log(`🔗 Redirecting to signed URL:`, signedUrl.substring(0, 100) + '...');
       return res.redirect(signedUrl);
     }
@@ -534,7 +534,7 @@ exports.generateFileToken = async (req, res) => {
     const fileExtension = file.url.split('.').pop().toLowerCase();
     if (fileExtension === "pdf" || ['mp4', 'webm', 'mkv', 'avi', 'mov'].includes(fileExtension)) {
       const key = decodeURIComponent(file.url.split(".com/")[1]);
-      const signedUrl = generateSignedUrl(process.env.S3_BUCKET, key, 60 * 10); // 10 minutes signed URL
+      const signedUrl = await generateSignedUrl(process.env.S3_BUCKET, key, 60 * 10); // 10 minutes signed URL
       console.log(`🎥 Generated signed URL for ${fileExtension} file:`, file.name);
       
       return res.status(200).json({
