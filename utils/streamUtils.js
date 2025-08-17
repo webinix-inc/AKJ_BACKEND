@@ -1,12 +1,15 @@
 const jwt = require("jsonwebtoken");
-const AWS = require("aws-sdk");
+const { S3Client, GetObjectCommand } = require("@aws-sdk/client-s3");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const mime = require("mime-types");
 const JWT_SECRET = process.env.SECRET || "yoursecretkey";
 
-const s3 = new AWS.S3({
+const s3 = new S3Client({
   region: process.env.AWS_REGION,
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  },
 });
 
 // Generate short-lived token
@@ -34,15 +37,14 @@ function verifyFileAccessToken(token) {
   }
 }
 
-const generateSignedUrl = (bucketName, key, expiresIn = 60 * 5) => {
+const generateSignedUrl = async (bucketName, key, expiresIn = 60 * 5) => {
   // default 5 mins
-  const params = {
+  const command = new GetObjectCommand({
     Bucket: bucketName,
     Key: key,
-    Expires: expiresIn,
     ResponseContentDisposition: "inline", // show in browser, not download
-  };
-  return s3.getSignedUrl("getObject", params);
+  });
+  return await getSignedUrl(s3, command, { expiresIn });
 };
 
 function getMimeType(filePath) {

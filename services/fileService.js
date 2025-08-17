@@ -27,7 +27,8 @@
 //
 // ============================================================================
 
-const AWS = require("aws-sdk");
+const { S3Client, DeleteObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const multer = require("multer");
 const multerS3 = require("multer-s3");
 const path = require("path");
@@ -36,10 +37,12 @@ const authConfig = require("../configs/auth.config");
 const validationService = require("./validationService");
 
 // Configure S3
-const s3 = new AWS.S3({
-  accessKeyId: authConfig.aws_access_key_id,
-  secretAccessKey: authConfig.aws_secret_access_key,
+const s3 = new S3Client({
   region: authConfig.aws_region,
+  credentials: {
+    accessKeyId: authConfig.aws_access_key_id,
+    secretAccessKey: authConfig.aws_secret_access_key,
+  },
 });
 
 console.log("✅ FileService: Using S3 for file operations");

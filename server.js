@@ -110,6 +110,30 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" } // Allow cross-origin resource sharing
 }));
 
+// 🏥 HEALTH CHECK ENDPOINT for Docker and monitoring
+app.get('/health', (req, res) => {
+  const healthCheck = {
+    uptime: process.uptime(),
+    message: 'OK',
+    timestamp: new Date().toISOString(),
+    status: 'healthy',
+    version: process.env.npm_package_version || '1.0.0',
+    environment: process.env.NODE_ENV || 'development',
+    memory: {
+      used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + ' MB',
+      total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024) + ' MB'
+    }
+  };
+  
+  try {
+    res.status(200).json(healthCheck);
+  } catch (error) {
+    healthCheck.message = error.message;
+    healthCheck.status = 'error';
+    res.status(503).json(healthCheck);
+  }
+});
+
 // 🚀 RATE LIMITING: Protect against abuse and DoS attacks
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes

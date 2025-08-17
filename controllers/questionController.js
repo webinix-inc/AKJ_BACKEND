@@ -5,7 +5,7 @@ const path = require("path");
 const cheerio = require("cheerio");
 const WordExtractor = require("word-extractor");
 const { JSDOM } = require("jsdom");
-const AWS = require("aws-sdk");
+const { S3Client, DeleteObjectCommand, PutObjectCommand } = require("@aws-sdk/client-s3");
 const authConfig = require("../configs/auth.config");
 
 const extractor = new WordExtractor();
@@ -14,10 +14,12 @@ const Question = require("../models/questionModel");
 const Quiz = require("../models/quizModel");
 
 // Configure S3 instead of Cloudinary
-const s3 = new AWS.S3({
-  accessKeyId: authConfig.aws_access_key_id,
-  secretAccessKey: authConfig.aws_secret_access_key,
+const s3 = new S3Client({
   region: authConfig.aws_region,
+  credentials: {
+    accessKeyId: authConfig.aws_access_key_id,
+    secretAccessKey: authConfig.aws_secret_access_key,
+  },
 });
 
 console.log("✅ Using S3 for quiz image uploads instead of Cloudinary");
@@ -547,10 +549,12 @@ async function uploadToS3(imageSrc, quizId, questionIndex, imageIndex) {
     };
 
     console.log(`📤 Uploading quiz image to S3: ${fileName} (${Math.round(imageBuffer.length / 1024)}KB)`);
-    const result = await s3.upload(uploadParams).promise();
-    console.log(`✅ Quiz image uploaded successfully: ${result.Location}`);
+    const putCommand = new PutObjectCommand(uploadParams);
+    const result = await s3.send(putCommand);
+    const location = `https://${authConfig.s3_bucket}.s3.${authConfig.aws_region}.amazonaws.com/${fileName}`;
+    console.log(`✅ Quiz image uploaded successfully: ${location}`);
     
-    return result;
+    return { Location: location, ...result };
   } catch (error) {
     console.error(`❌ Error uploading image for question ${questionIndex + 1}, image ${imageIndex + 1}:`, error.message);
     // Don't throw error to allow other images to upload

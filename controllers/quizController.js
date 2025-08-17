@@ -1,7 +1,7 @@
 require("dotenv").config();
 
 const mongoose = require("mongoose");
-const AWS = require("aws-sdk");
+const { S3Client, DeleteObjectCommand } = require("@aws-sdk/client-s3");
 const moment = require("moment-timezone");
 const schedule = require("node-schedule");
 const authConfig = require("../configs/auth.config");
@@ -11,10 +11,12 @@ const Question = require("../models/questionModel");
 const QuizFolder = require("../models/quizFolder");
 
 // Configure S3 for image deletion
-const s3 = new AWS.S3({
-  accessKeyId: authConfig.aws_access_key_id,
-  secretAccessKey: authConfig.aws_secret_access_key,
+const s3 = new S3Client({
   region: authConfig.aws_region,
+  credentials: {
+    accessKeyId: authConfig.aws_access_key_id,
+    secretAccessKey: authConfig.aws_secret_access_key,
+  },
 });
 
 exports.createQuiz = async (req, res) => {
@@ -611,10 +613,11 @@ exports.deleteQuiz = async (req, res) => {
               
               console.log("S3 Key:", s3Key);
               try {
-                await s3.deleteObject({
+                const deleteCommand = new DeleteObjectCommand({
                   Bucket: authConfig.s3_bucket,
                   Key: s3Key
-                }).promise();
+                });
+                await s3.send(deleteCommand);
                 deletedImages.add(imageUrl);
                 console.log(`✅ Deleted S3 image: ${s3Key}`);
               } catch (s3Error) {
