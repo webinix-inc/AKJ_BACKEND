@@ -53,10 +53,10 @@ const allowedOrigins = [
   "https://13.201.132.140",
   
   // 🚀 FIX: Add production frontend URLs
-  "http://13.232.208.235:3000", // User Frontend (Production)
-  "http://13.232.208.235:3001", // Admin Frontend (Production)
-  "https://13.232.208.235:3000", // User Frontend (Production HTTPS)
-  "https://13.232.208.235:3001", // Admin Frontend (Production HTTPS)
+  "http://13.232.208.235", // User Frontend (Production)
+  "http://13.127.56.109", // Admin Frontend (Production)
+  "https://13.232.208.235", // User Frontend (Production HTTPS)
+  "https://13.127.56.109", // Admin Frontend (Production HTTPS)
 ];
 
 const app = express();
