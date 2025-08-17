@@ -287,7 +287,7 @@ exports.checkCourseAccess = async (req, res) => {
     }
     
     // Check installment payment status
-    if (purchasedCourse.paymentMode === 'installment' && purchasedCourse.totalInstallments > 0) {
+    if (purchasedCourse.paymentType === 'installment' && purchasedCourse.totalInstallments > 0) {
       const paymentStatus = await checkInstallmentPaymentStatus(userId, courseId);
       
       return res.status(200).json({
@@ -296,7 +296,7 @@ exports.checkCourseAccess = async (req, res) => {
         message: paymentStatus.message || (paymentStatus.hasAccess ? 'Course access granted' : 'Course access denied'),
         ...(paymentStatus.planType && { planType: paymentStatus.planType }),
         purchaseDate: purchasedCourse.purchaseDate,
-        paymentMode: purchasedCourse.paymentMode,
+        paymentType: purchasedCourse.paymentType,
         totalInstallments: purchasedCourse.totalInstallments
       });
     }
@@ -307,7 +307,7 @@ exports.checkCourseAccess = async (req, res) => {
       reason: 'FULL_PAYMENT',
       message: 'Course access granted - full payment completed',
       purchaseDate: purchasedCourse.purchaseDate,
-      paymentMode: purchasedCourse.paymentMode || 'full'
+      paymentType: purchasedCourse.paymentType || 'full'
     });
     
   } catch (error) {
