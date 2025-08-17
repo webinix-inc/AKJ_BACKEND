@@ -3,7 +3,7 @@ const { generateFileAccessToken } = require("../utils/streamUtils");
 const { generateSignedUrl } = require("../utils/streamUtils");
 const mime = require("mime-types");
 
-const { S3Client } = require("@aws-sdk/client-s3");
+const { S3Client, GetObjectCommand } = require("@aws-sdk/client-s3");
 const s3 = new S3Client({ 
   region: process.env.AWS_REGION,
   requestHandler: {
@@ -440,7 +440,9 @@ exports.streamFile = async (req, res) => {
     };
 
     // Use simple streaming for non-video/non-PDF files
-    const s3Stream = s3.getObject(s3Params).createReadStream();
+    const command = new GetObjectCommand(s3Params);
+    const response = await s3.send(command);
+    const s3Stream = response.Body;
 
     res.setHeader("Content-Type", getMimeType(file.url));
     res.setHeader('Cache-Control', 'public, max-age=3600');
@@ -598,7 +600,9 @@ const streamCourseImage = async (req, res) => {
       Key: s3Key,
     };
     
-    const s3Stream = s3.getObject(params).createReadStream();
+    const command = new GetObjectCommand(params);
+    const response = await s3.send(command);
+    const s3Stream = response.Body;
     
     // Set appropriate headers with CORS and embedding support
     const contentType = getImageMimeType(s3Key);
@@ -646,7 +650,9 @@ const streamQuizImage = async (req, res) => {
       Key: decodeURIComponent(s3Key), // 🔧 FIX: Decode URI components like other streaming functions
     };
     
-    const s3Stream = s3.getObject(params).createReadStream();
+    const command = new GetObjectCommand(params);
+    const response = await s3.send(command);
+    const s3Stream = response.Body;
     
     // Set appropriate headers with CORS and embedding support
     const contentType = getImageMimeType(s3Key);
@@ -712,7 +718,9 @@ const streamS3Image = async (req, res) => {
       Key: decodeURIComponent(fullKey),
     };
     
-    const s3Stream = s3.getObject(params).createReadStream();
+    const command = new GetObjectCommand(params);
+    const response = await s3.send(command);
+    const s3Stream = response.Body;
     
     // Detect file extension and set correct content-type
     const contentType = getImageMimeType(fullKey);
@@ -792,7 +800,9 @@ const streamUserImage = async (req, res) => {
       Key: s3Key,
     };
     
-    const s3Stream = s3.getObject(params).createReadStream();
+    const command = new GetObjectCommand(params);
+    const response = await s3.send(command);
+    const s3Stream = response.Body;
     
     const contentType = getImageMimeType(s3Key);
     res.setHeader('Content-Type', contentType);
@@ -843,7 +853,9 @@ const streamBannerImage = async (req, res) => {
       Key: s3Key,
     };
     
-    const s3Stream = s3.getObject(params).createReadStream();
+    const command = new GetObjectCommand(params);
+    const response = await s3.send(command);
+    const s3Stream = response.Body;
     
     const contentType = getImageMimeType(s3Key);
     res.setHeader('Content-Type', contentType);
@@ -893,7 +905,9 @@ const streamBookImage = async (req, res) => {
       Key: s3Key,
     };
     
-    const s3Stream = s3.getObject(params).createReadStream();
+    const command = new GetObjectCommand(params);
+    const response = await s3.send(command);
+    const s3Stream = response.Body;
     
     // Set appropriate headers
     res.setHeader('Content-Type', getImageMimeType(s3Key));

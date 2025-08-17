@@ -14,7 +14,8 @@ const {
 const fs = require("fs").promises; // Use promise-based fs
 const path = require("path");
 
-const { S3Client } = require("@aws-sdk/client-s3");
+const { S3Client, ListObjectsV2Command, GetObjectCommand } = require("@aws-sdk/client-s3");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const { default: mongoose } = require("mongoose");
 
 const s3 = new S3Client({
@@ -608,15 +609,16 @@ const getRecordedVideos = async (req, res) => {
       Prefix: `courses/${courseId}/recordings/`,
     };
 
-    const s3Data = await s3.listObjectsV2(params).promise();
+    const command = new ListObjectsV2Command(params);
+    const s3Data = await s3.send(command);
 
     const videos = await Promise.all(
       s3Data.Contents.map(async (object) => {
-        const signedUrl = await s3.getSignedUrlPromise("getObject", {
+        const getObjectCommand = new GetObjectCommand({
           Bucket: process.env.S3_BUCKET,
           Key: object.Key,
-          Expires: 3600,
         });
+        const signedUrl = await getSignedUrl(s3, getObjectCommand, { expiresIn: 3600 });
 
         return {
           title: object.Key.split("/").pop(),

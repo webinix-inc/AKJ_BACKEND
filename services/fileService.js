@@ -27,8 +27,9 @@
 //
 // ============================================================================
 
-const { S3Client, DeleteObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
+const { S3Client, DeleteObjectCommand, GetObjectCommand, PutObjectCommand, DeleteObjectsCommand, ListObjectsV2Command } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+const { Upload } = require("@aws-sdk/lib-storage");
 const multer = require("multer");
 const multerS3 = require("multer-s3");
 const path = require("path");
@@ -123,7 +124,11 @@ const uploadToS3Logic = async (file, options = {}) => {
     };
 
     // Upload to S3
-    const uploadResult = await s3.upload(uploadParams).promise();
+    const upload = new Upload({
+      client: s3,
+      params: uploadParams,
+    });
+    const uploadResult = await upload.done();
 
     const result = {
       success: true,
@@ -229,7 +234,8 @@ const deleteMultipleFromS3Logic = async (fileKeys, bucket = process.env.AWS_BUCK
       }
     };
 
-    const deleteResult = await s3.deleteObjects(deleteParams).promise();
+    const deleteCommand = new DeleteObjectsCommand(deleteParams);
+    const deleteResult = await s3.send(deleteCommand);
 
     console.log(`✅ ${deleteResult.Deleted.length} files deleted from S3 successfully`);
     return {
@@ -267,7 +273,8 @@ const generatePresignedUrlLogic = async (fileKey, options = {}) => {
       Expires: expires
     };
 
-    const presignedUrl = await s3.getSignedUrlPromise(operation, params);
+    const command = operation === 'getObject' ? new GetObjectCommand(params) : new PutObjectCommand(params);
+    const presignedUrl = await getSignedUrl(s3, command, { expiresIn: params.Expires || 3600 });
 
     console.log("✅ Presigned URL generated successfully");
     return {
@@ -306,7 +313,8 @@ const generateUploadUrlLogic = async (filename, options = {}) => {
       ContentType: contentType
     };
 
-    const uploadUrl = await s3.getSignedUrlPromise('putObject', params);
+    const putCommand = new PutObjectCommand(params);
+    const uploadUrl = await getSignedUrl(s3, putCommand, { expiresIn: 3600 });
 
     console.log("✅ Upload URL generated successfully");
     return {
@@ -408,7 +416,8 @@ const listFilesLogic = async (options = {}) => {
       MaxKeys: maxKeys
     };
 
-    const listResult = await s3.listObjectsV2(params).promise();
+    const listCommand = new ListObjectsV2Command(params);
+    const listResult = await s3.send(listCommand);
 
     const files = listResult.Contents.map(file => ({
       key: file.Key,
