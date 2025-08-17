@@ -10,17 +10,17 @@ const Banner = require('../models/bannerModel');
 const Subscription = require('../models/subscriptionModel');
 const UserSubscription = require('../models/userSubscriptionModel');
 const Subject = require('../models/subjectModel');
-const Privacy = require("../models/privacyPolicyModel");
-const AboutUs = require("../models/aboutUsModel");
+// const Privacy = require("../models/privacyPolicyModel"); // UNUSED - Removed
+// const AboutUs = require("../models/aboutUsModel"); // UNUSED - Removed
 const Course = require('../models/courseModel');
 const Notification = require('../models/notificationModel');
-const Chat = require('../models/chatModel');
+const Message = require('../models/messageModel');
 const Schedule = require('../models/scheduleModel');
-const Category = require('../models/course/courseCategory');
-const Product = require('../models/ProductModel');
-const Cart = require('../models/cartModel');
-const Address = require("../models/addressModel");
-const Order = require('../models/orderModel');
+// const Category = require('../models/course/courseCategory'); // DUPLICATE - Removed (same as CourseCategory)
+// const Product = require('../models/ProductModel'); // UNUSED - Removed
+// const Cart = require('../models/cartModel'); // UNUSED - Removed
+// const Address = require("../models/addressModel"); // UNUSED - Removed
+// const Order = require('../models/orderModel'); // UNUSED - Removed
 const CourseCategory = require('../models/course/courseCategory');
 const CourseSubCategory = require('../models/course/courseSubCategory');
 const NoticeBoard = require('../models/noticeBoardModel');
@@ -134,7 +134,7 @@ exports.registerTeacher = async (req, res) => {
             userType: "TEACHER",
             experience,
             userBio,
-            referralCode: await reffralCode(),
+            refferalCode: await reffralCode(),
             ...finalPermissions
         });
 
@@ -288,7 +288,7 @@ exports.socialLogin = async (req, res) => {
         }
     } catch (err) {
         console.error(err);
-        return createResponse(res, 500, "Internal server error");
+        return res.status(500).json({ status: 500, message: "Internal server error" });
     }
 };
 

@@ -1,19 +1,46 @@
 var multer = require("multer");
+const multerS3 = require("multer-s3");
+const { S3Client } = require("@aws-sdk/client-s3");
 const authConfig = require("../configs/auth.config");
-const { CloudinaryStorage } = require("multer-storage-cloudinary");
-const cloudinary = require("cloudinary").v2;
-cloudinary.config({ cloud_name: authConfig.cloud_name, api_key: authConfig.api_key, api_secret: authConfig.api_secret, });
-const storage = new CloudinaryStorage({ cloudinary: cloudinary, params: { folder: "Amitesh-Project/images/profile", allowed_formats: ["jpg", "jpeg", "png", "PNG", "xlsx", "xls", "pdf", "PDF"], }, });
-const userProfileUpload = multer({ storage: storage });
-const storage1 = new CloudinaryStorage({ cloudinary: cloudinary, params: { folder: "Amitesh-Project/images/banner", allowed_formats: ["jpg", "jpeg", "png", "PNG", "xlsx", "xls", "pdf", "PDF"], }, });
-const bannerImage = multer({ storage: storage1 });
-const storage2 = new CloudinaryStorage({
-    cloudinary: cloudinary,
-    params: {
-        folder: "Amitesh-Project/images/course",
-        allowed_formats: ["jpg", "jpeg", "png", "PNG", "xlsx", "xls", "pdf", "PDF", "txt", "TXT", "jiff", "JIFF", "jfif", "JFIF", "mp4", "MP4", "webm", "WEBM"],
-    },
+
+// Configure S3 client
+const s3 = new S3Client({
+  region: authConfig.aws_region,
+  credentials: {
+    accessKeyId: authConfig.aws_access_key_id,
+    secretAccessKey: authConfig.aws_secret_access_key,
+  },
 });
+
+// Helper function to create S3 storage configuration (following existing project pattern)
+const createS3Storage = (folderName) => multerS3({
+  s3: s3,
+  bucket: authConfig.s3_bucket,
+  // ACL removed as bucket has ACLs disabled
+  metadata: (req, file, cb) => {
+    cb(null, { fieldName: file.fieldname });
+  },
+  key: (req, file, cb) => {
+    // Sanitize filename to avoid special characters and spaces
+    const sanitizedName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const fileName = `${Date.now().toString()}_${sanitizedName}`;
+    const fullPath = `${folderName}/${fileName}`;
+    cb(null, fullPath);
+  },
+  contentType: multerS3.AUTO_CONTENT_TYPE,
+});
+
+console.log("✅ ImageUpload middleware: Using S3 storage instead of Cloudinary");
+// Profile images
+const storage = createS3Storage("images/profile");
+const userProfileUpload = multer({ storage: storage });
+
+// Banner images
+const storage1 = createS3Storage("images/banner");
+const bannerImage = multer({ storage: storage1 });
+
+// Course images and files
+const storage2 = createS3Storage("images/course");
 const courseImage = multer({ storage: storage2 });
 
 const kpUpload = courseImage.fields([
@@ -21,46 +48,65 @@ const kpUpload = courseImage.fields([
     { name: 'courseNotes', maxCount: 10 },
 ]);
 
-const storage3 = new CloudinaryStorage({ cloudinary: cloudinary, params: { folder: "Amitesh-Project/images/categoryImage", allowed_formats: ["jpg", "jpeg", "png", "PNG", "xlsx", "xls", "pdf", "PDF"], }, });
+// Category images
+const storage3 = createS3Storage("images/categoryImage");
 const categoryImage = multer({ storage: storage3 });
-const storage4 = new CloudinaryStorage({ cloudinary: cloudinary, params: { folder: "Amitesh-Project/images/productImage", allowed_formats: ["jpg", "jpeg", "png", "PNG", "xlsx", "xls", "pdf", "PDF"], }, });
-const productImage = multer({ storage: storage });
-const storage5 = new CloudinaryStorage({ cloudinary: cloudinary, params: { folder: "Amitesh-Project/images/CourseCategory", allowed_formats: ["jpg", "jpeg", "png", "PNG", "xlsx", "xls", "pdf", "PDF"], }, });
+
+// Product images
+const storage4 = createS3Storage("images/productImage");
+const productImage = multer({ storage: storage4 });
+
+// Course category images
+const storage5 = createS3Storage("images/CourseCategory");
 const subCategoryUpload = multer({ storage: storage5 });
-const storage6 = new CloudinaryStorage({ cloudinary: cloudinary, params: { folder: 'Amitesh-Project/images/CourseSubCategory', allowed_formats: ['jpg', 'jpeg', 'png', 'xlsx', 'xls', 'pdf', 'PDF', 'mp4', 'MP4', 'mkv', 'MKV', 'doc', 'docx'] } });
+
+// Course subcategory files
+const storage6 = createS3Storage("images/CourseSubCategory");
 const subCategory = multer({ storage: storage6 });
+
+// Enhanced course upload with multiple fields
 const kpUpload1 = courseImage.fields([
     { name: 'courseImage', maxCount: 100 },
     { name: 'courseNotes', maxCount: 100 },
     { name: 'courseVideo', maxCount: 100 },
 ]);
-const storage7 = new CloudinaryStorage({ cloudinary: cloudinary, params: { folder: "Amitesh-Project/images/CourseCategory", allowed_formats: ['jpg', 'jpeg', 'png', 'xlsx', 'xls', 'pdf', 'PDF', 'mp4', 'MP4', 'mkv', 'MKV', 'doc', 'docx'] } });
+
+// Course images (alternative)
+const storage7 = createS3Storage("images/CourseCategory");
 const courseImage1 = multer({ storage: storage7 });
-const storage8 = new CloudinaryStorage({ cloudinary: cloudinary, params: { folder: "Amitesh-Project/images/CourseCategory", allowed_formats: ['jpg', 'jpeg', 'png', 'xlsx', 'xls', 'pdf', 'PDF', 'mp4', 'MP4', 'mkv', 'MKV', 'doc', 'docx'] } });
+
+// Course notes
+const storage8 = createS3Storage("documents/CourseNotes");
 const courseNotes = multer({ storage: storage8 });
-const storage9 = new CloudinaryStorage({ cloudinary: cloudinary, params: { folder: "Amitesh-Project/images/CourseCategory", allowed_formats: ['jpg', 'jpeg', 'png', 'xlsx', 'xls', 'pdf', 'PDF', 'mp4', 'MP4', 'mkv', 'MKV', 'doc', 'docx'] } });
+
+// Course videos
+const storage9 = createS3Storage("videos/CourseVideos");
 const courseVideo = multer({ storage: storage9 });
-const storage10 = new CloudinaryStorage({ cloudinary: cloudinary, params: { folder: "Amitesh-Project/images/document", allowed_formats: ["jpg", "jpeg", "png", "PNG", "xlsx", "xls", "pdf", "PDF"] } });
+
+// Document uploads
+const storage10 = createS3Storage("documents/general");
 const documentUpload = multer({ storage: storage10 });
-const storage11 = new CloudinaryStorage({ cloudinary: cloudinary, params: { folder: 'Amitesh-Project/images/CourseSubCategory', allowed_formats: ['jpg', 'jpeg', 'png', 'xlsx', 'xls', 'pdf', 'PDF', 'mp4', 'MP4', 'mkv', 'MKV', 'doc', 'docx'] } });
+
+// Teacher images
+const storage11 = createS3Storage("images/teachers");
 const teacherImage = multer({ storage: storage11 });
 const kpUpload2 = teacherImage.fields([
     { name: 'image', maxCount: 1 },
     { name: 'otherImage', maxCount: 1 },
 ]);
-const storage12 = new CloudinaryStorage({ cloudinary: cloudinary, params: { folder: "Amitesh-Project/images/syllabus", allowed_formats: ["jpg", "jpeg", "png", "PNG", "xlsx", "xls", "pdf", "PDF"] } });
+// Syllabus uploads
+const storage12 = createS3Storage("documents/syllabus");
 const syllabusUpload = multer({ storage: storage12 });
-const storage134 = new CloudinaryStorage({ cloudinary: cloudinary, params: { folder: "Amitesh-Project/images/testSeries", allowed_formats: ["jpg", "jpeg", "png", "PNG", "xlsx", "xls", "pdf", "PDF", "doc", "docx", "txt"] } });
-const storage13 = new CloudinaryStorage({
-    cloudinary: cloudinary,
-    params: {
-        folder: "Amitesh-Project/images/testSeries",
-        resource_type: 'raw',
-        allowed_formats: ["jpg", "jpeg", "png", "PNG", "xlsx", "xls", "pdf", "PDF", "DOC", "DOCX", "doc", "docx", "txt"]
-    }
-});
+
+// Test series uploads (alternative config)
+const storage134 = createS3Storage("documents/testSeries");
+
+// Test series uploads (main config)
+const storage13 = createS3Storage("documents/testSeries");
 const TestSeriesUpload = multer({ storage: storage13 });
-const storage14 = new CloudinaryStorage({ cloudinary: cloudinary, params: { folder: "Amitesh-Project/images/behaviourUpload", allowed_formats: ["jpg", "jpeg", "png", "PNG", "xlsx", "xls", "pdf", "PDF"] } });
+
+// Behaviour uploads
+const storage14 = createS3Storage("documents/behaviourUpload");
 const behaviourUpload = multer({ storage: storage14 });
 
 

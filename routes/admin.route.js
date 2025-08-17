@@ -1,5 +1,6 @@
 const auth = require("../controllers/adminController");
 const installment = require("../controllers/installmentController");
+const { cacheConfigs } = require("../middlewares/cacheMiddleware");
 const express = require("express");
 // const { kpUpload } = require('../middlewares/cloudinaryConfig');
 const { kpUpload, kpUpload1 } = require("../middlewares/fileUpload");
@@ -61,8 +62,8 @@ module.exports = (app) => {
 
   //Banner start from here
   app.post("/api/v1/admin/banner", bannerImage.single("image"), auth.AddBanner);
-  app.get("/api/v1/admin/banner", auth.getBanner);
-  app.get("/api/v1/admin/banner/:id", auth.getBannerById);
+  app.get("/api/v1/admin/banner", [cacheConfigs.long()], auth.getBanner);
+  app.get("/api/v1/admin/banner/:id", [cacheConfigs.long()], auth.getBannerById);
   app.put(
     "/api/v1/admin/banner/:id",
     bannerImage.single("image"),
@@ -111,6 +112,27 @@ module.exports = (app) => {
     "/api/v1/admin/user-subscriptions-course/:courseId",
     [authJwt.verifyToken],
     auth.getSubscriptionsByCourseId
+  );
+
+  // Temporary fix route
+  app.get(
+    "/api/v1/admin/fix-subscriptions",
+    [authJwt.verifyToken],
+    auth.fixSubscriptionCourse
+  );
+
+  // 🔧 TEMPORARY: Fix quiz folder visibility
+  app.post(
+    "/api/v1/admin/fix-folder-visibility",
+    [authJwt.verifyToken],
+    auth.fixFolderVisibility
+  );
+
+  // 🔧 ADMIN: Cleanup incomplete/expired scorecards
+  app.post(
+    "/api/v1/admin/cleanup-scorecards",
+    [authJwt.verifyToken],
+    auth.cleanupIncompleteScorecards
   );
   app.post("/api/v1/admin/subjects", [authJwt.verifyToken], auth.createSubject);
   app.get("/api/v1/admin/subjects", auth.getAllSubjects);
@@ -215,6 +237,23 @@ module.exports = (app) => {
     [authJwt.verifyToken],
     auth.removeTeacherFromCourse
   );
+
+  // ============================================================================
+  // 📚 BATCH COURSE ROUTES
+  // ============================================================================
+  app.post("/api/v1/admin/batch-courses/create", [authJwt.verifyToken], auth.createBatchCourse);
+  app.get("/api/v1/admin/batch-courses", [authJwt.verifyToken], auth.getAllBatchCourses);
+  app.get("/api/v1/admin/batch-courses/:courseId", [authJwt.verifyToken], auth.getBatchCourseById);
+  app.post("/api/v1/admin/batch-courses/:courseId/add-user", [authJwt.verifyToken], auth.addUserToBatchCourse);
+  app.delete("/api/v1/admin/batch-courses/:courseId/remove-user/:userId", [authJwt.verifyToken], auth.removeUserFromBatchCourse);
+  app.post("/api/v1/admin/batch-courses/fix-root-folders", [authJwt.verifyToken], auth.fixBatchCoursesRootFolder);
+  app.get("/api/v1/admin/debug/user-courses/:userId", [authJwt.verifyToken], auth.debugUserCourses);
+  app.post("/api/v1/admin/fix-user-batch-access", [authJwt.verifyToken], auth.fixUserBatchAccess);
+  
+  // TEMP: Debug endpoint without auth for database fix
+  app.post("/api/v1/debug/force-fix-amitesh", auth.fixUserBatchAccess);
+  app.post("/api/v1/admin/check-batch-file-access", [authJwt.verifyToken], auth.checkBatchFileAccess);
+
   app.post(
     "/api/v1/admin/Category/createCategory",
     [authJwt.verifyToken],
@@ -242,9 +281,9 @@ module.exports = (app) => {
     [authJwt.verifyToken],
     auth.createSubCategory
   );
-  // app.get("/api/v1/admin/SubCategory/:courseId/:categoryId", auth.getSubCategories);
   app.get(
-    "/api/v1/admin/Category/:categoryId/SubCategories",
+    "/api/v1/admin/Category/:categoryId/subCategories",
+    [authJwt.verifyToken],
     auth.getSubCategories
   );
   app.put(
@@ -280,6 +319,27 @@ module.exports = (app) => {
     [authJwt.verifyToken],
     auth.deleteCourseVideos
   );
+  
+  // Add Free Class to Folder
+  app.post(
+    "/api/v1/admin/folders/:folderId/free-class",
+    [authJwt.verifyToken],
+    auth.addFreeClassToFolder
+  );
+
+  // ============================================================================
+// 🔧 ASSIGNMENT FOLDER UTILITIES
+// ============================================================================
+app.get("/api/v1/admin/debug-assignment-folders", auth.debugAssignmentFolders); // No auth for debugging
+app.post("/api/v1/admin/fix-assignment-folders", [authJwt.verifyToken], auth.fixAssignmentFolders);
+
+// ============================================================================
+// 📝 ASSIGNMENT SUBMISSION ROUTES
+// ============================================================================
+app.get("/api/v1/admin/assignments", [authJwt.verifyToken], auth.getAllAssignmentSubmissions);
+app.get("/api/v1/admin/assignments/user/:userId", [authJwt.verifyToken], auth.getUserAssignmentSubmissions);
+app.put("/api/v1/admin/assignments/:submissionId/review", [authJwt.verifyToken], auth.updateAssignmentReview);
+  
   app.post("/api/v1/admin/AboutUs", [authJwt.verifyToken], auth.createAboutUs);
   app.get("/api/v1/admin/AboutUs", [authJwt.verifyToken], auth.getAboutUs);
   app.get(
@@ -651,6 +711,49 @@ module.exports = (app) => {
     "/api/v1/admin/installments/:courseId/user/:userId/timeline",
     [authJwt.verifyToken],
     installment.getUserInstallmentTimeline
+  );
+  
+  // 🔥 NEW: Course access control routes
+  app.get(
+    "/api/v1/admin/course-access/:courseId/user/:userId",
+    [authJwt.verifyToken],
+    installment.checkUserCourseAccess
+  );
+  
+  app.get(
+    "/api/v1/admin/payment-timeline/:courseId/user/:userId",
+    [authJwt.verifyToken],
+    installment.getUserPaymentTimeline
+  );
+  
+  // 🔥 NEW: Manual course access check trigger (Admin only)
+  app.post(
+    "/api/v1/admin/run-course-access-check",
+    [authJwt.verifyToken],
+    async (req, res) => {
+      try {
+        const { userType } = req.user;
+        if (userType !== 'ADMIN') {
+          return res.status(403).json({ message: 'Admin access required' });
+        }
+        
+        const { runCourseAccessCheckNow } = require('../jobs/courseAccessJob');
+        const result = await runCourseAccessCheckNow();
+        
+        res.status(200).json({
+          message: 'Course access check completed successfully',
+          result,
+          timestamp: new Date().toISOString()
+        });
+        
+      } catch (error) {
+        console.error('Error running manual course access check:', error);
+        res.status(500).json({
+          message: 'Error running course access check',
+          error: error.message
+        });
+      }
+    }
   );
 
   // added by Himanshu

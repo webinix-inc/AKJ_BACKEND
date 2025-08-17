@@ -37,6 +37,18 @@ const questionSchema = new mongoose.Schema({
     },
     tables: [{
         type: String
+    }],
+    // 🔧 NEW: Parts array for mixed text and LaTeX math content
+    parts: [{
+        kind: {
+            type: String,
+            enum: ['text', 'math'],
+            required: true
+        },
+        content: {
+            type: String,
+            required: true  // LaTeX when kind==='math'
+        }
     }]
 }, { timestamps: true });
 

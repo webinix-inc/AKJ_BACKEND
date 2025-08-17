@@ -16,9 +16,13 @@ const Notification = require("../models/notificationModel");
 const Schedule = require("../models/scheduleModel");
 const Category = require("../models/course/courseCategory");
 const Installment = require("../models/installmentModel");
+const installmentService = require("../services/installmentService");
+const subscriptionService = require("../services/subscriptionService");
+const courseService = require("../services/courseService");
+const productService = require("../services/productService");
 const Product = require("../models/ProductModel");
-const Cart = require("../models/cartModel");
-const Address = require("../models/addressModel");
+// const Cart = require("../models/cartModel"); // UNUSED - Removed
+// const Address = require("../models/addressModel"); // UNUSED - Removed
 // const Order = require('../models/orderModel');
 const CourseCategory = require("../models/course/courseCategory");
 const CourseSubCategory = require("../models/course/courseSubCategory");
@@ -38,53 +42,45 @@ const {
   deleteFilesFromBucket,
 } = require("../configs/aws.config");
 const { GetObjectCommand } = require("@aws-sdk/client-s3");
-const { kpUpload1 } = require("../middlewares/fileUpload");
+const { kpUpload1, TestSeriesUpload } = require("../middlewares/fileUpload");
+const { logger } = require("../utils/logger");
 
 //
-const multer = require("multer");
-const { CloudinaryStorage } = require("multer-storage-cloudinary");
 const Faq = require("../models/faqModel");
 const { createFolder } = require("./courseController");
-const cloudinary = require("cloudinary").v2;
-cloudinary.config({
-  cloud_name: process.env.CLOUD_NAME,
-  api_key: process.env.CLOUD_KEY,
-  api_secret: process.env.CLOUD_SECRET,
-});
-const storage = new CloudinaryStorage({
-  cloudinary: cloudinary,
-  params: {
-    folder: "Amitesh-Project/images/course",
-    resource_type: "video",
-    allowed_formats: ["mp4", "mov", "avi"],
-  },
-});
-const upload = multer({ storage: storage }).array("courseVideo", 100);
 
-const storage13 = new CloudinaryStorage({
-  cloudinary: cloudinary,
-  params: {
-    folder: "Amitesh-Project/images/testSeries",
-    resource_type: "raw",
-    allowed_formats: [
-      "jpg",
-      "jpeg",
-      "png",
-      "PNG",
-      "xlsx",
-      "xls",
-      "pdf",
-      "PDF",
-      "DOC",
-      "DOCX",
-      "doc",
-      "docx",
-      "txt",
-    ],
-  },
-});
-const TestSeriesUpload = multer({ storage: storage13 }).array("documents", 100);
-//
+// Using existing fileUpload configurations instead of creating new ones
+console.log("✅ AdminController: Using existing S3 configurations from fileUpload.js");
+// TestSeriesUpload is now imported from fileUpload.js
+
+// ============================================================================
+// 📋 ADMIN CONTROLLER FUNCTIONS ORGANIZED BY FEATURE
+// ============================================================================
+// 
+// 🔐 AUTHENTICATION & USER MANAGEMENT (lines 53-657)
+// 🖼️ BANNER MANAGEMENT (lines 693-852)
+// 💳 SUBSCRIPTION MANAGEMENT (lines 1050-1543)
+// 📖 SUBJECT & CHAPTER MANAGEMENT (lines 1566-1882) - UNUSED
+// 📄 CONTENT MANAGEMENT (lines 1915-2048 & 3168-3301)
+// 📚 COURSE MANAGEMENT (lines 2069-3096)
+// 🏷️ COURSE CATEGORY MANAGEMENT (lines 2619-2892)
+// 📅 SCHEDULE MANAGEMENT (lines 3323-3467)
+// 🏷️ CATEGORY MANAGEMENT (lines 3523-3742) - DUPLICATE
+// 🏪 PRODUCT MANAGEMENT (lines 3775-4310)
+// 📢 NOTICE MANAGEMENT (lines 4598-4711)
+// 📚 SYLLABUS MANAGEMENT (lines 4729-4834)
+// 📝 TEST SERIES MANAGEMENT (lines 4858-5038)
+// 🎥 VIDEO LECTURE MANAGEMENT (lines 5060-5189)
+// 📅 EXAM SCHEDULE MANAGEMENT (lines 5207-5340)
+// 📹 RECORDING MANAGEMENT (lines 5358-5485)
+// 📋 SURVEY MANAGEMENT (lines 5503-5654)
+// 🔗 FOLLOW US MANAGEMENT (lines 5690-5786)
+// 📊 UTILITY FUNCTIONS (lines 5814+)
+// ============================================================================
+
+// ============================================================================
+// 🔐 AUTHENTICATION & USER MANAGEMENT
+// ============================================================================
 
 exports.registration = async (req, res) => {
   try {
@@ -127,14 +123,31 @@ exports.registration = async (req, res) => {
       req.body.userType = "ADMIN";
       req.body.accountVerification = true;
       const userCreate = await User.create(req.body);
+      
+      // 🚀 LOG ADMIN REGISTRATION SUCCESS
+      logger.adminActivity(
+        userCreate._id,
+        `${userCreate.firstName || ''} ${userCreate.lastName || ''}`,
+        'REGISTRATION',
+        `Email: ${userCreate.email}, Phone: ${userCreate.phone}, IP: ${req.ip}`
+      );
+      
       return res
         .status(200)
         .send({ message: "registered successfully ", data: userCreate });
     } else {
+      // 🚀 LOG REGISTRATION ATTEMPT - ALREADY EXISTS
+      logger.adminActivity(
+        null,
+        email,
+        'REGISTRATION_ATTEMPT',
+        `Failed - User already exists, Phone: ${phone}, IP: ${req.ip}`
+      );
       return res.status(409).send({ message: "Already Exist", data: [] });
     }
   } catch (error) {
-    console.error(error);
+    // 🚀 LOG REGISTRATION ERROR
+    logger.error(error, 'ADMIN_REGISTRATION', `Email: ${email}, Phone: ${phone}`);
     return res.status(500).json({ message: "Server error" });
   }
 };
@@ -216,13 +229,21 @@ exports.signin = async (req, res) => {
     user.currentSessionToken = accessToken;
     await user.save();
 
+    // Log admin login activity
+    logger.adminActivity(
+      user._id, 
+      `${user.firstName} ${user.lastName}`, 
+      'LOGIN', 
+      `UserType: ${user.userType}, IP: ${req.ip}`
+    );
+
     // Send token in the header
     res.setHeader("Authorization", `Bearer ${accessToken}`);
 
     // Send response
     return res.status(201).send({ data: responseObj, accessToken });
   } catch (error) {
-    console.error(error);
+    logger.error(error, 'ADMIN_LOGIN', email);
     return res.status(500).send({ message: "Server error: " + error.message });
   }
 };
@@ -383,21 +404,40 @@ exports.changePassword = async (req, res) => {
           },
           { new: true }
         );
+        
+        // 🚀 LOG PASSWORD CHANGE SUCCESS
+        logger.adminActivity(
+          user._id,
+          `${user.firstName || ''} ${user.lastName || ''}`,
+          'PASSWORD_CHANGE',
+          `Email: ${user.email}, IP: ${req.ip}`
+        );
+        
         return res
           .status(200)
           .send({ message: "Password update successfully.", data: updated });
       } else {
+        // 🚀 LOG PASSWORD MISMATCH
+        logger.adminActivity(
+          user._id,
+          `${user.firstName || ''} ${user.lastName || ''}`,
+          'PASSWORD_CHANGE_FAILED',
+          `Password mismatch, Email: ${user.email}, IP: ${req.ip}`
+        );
         return res
           .status(501)
           .send({ message: "Password Not matched.", data: {} });
       }
     } else {
+      // 🚀 LOG USER NOT FOUND
+      logger.error(new Error('User not found'), 'PASSWORD_CHANGE', `UserID: ${req.params.id}`);
       return res
         .status(404)
         .json({ status: 404, message: "No data found", data: {} });
     }
   } catch (error) {
-    console.log(error);
+    // 🚀 LOG PASSWORD CHANGE ERROR
+    logger.error(error, 'PASSWORD_CHANGE', `UserID: ${req.params.id}`);
     return res
       .status(501)
       .send({ status: 501, message: "server error.", data: {} });
@@ -476,6 +516,14 @@ exports.adminLogoutUser = async (req, res) => {
           : "User had no active sessions";
     }
 
+    // 🚀 LOG ADMIN LOGOUT SUCCESS
+    logger.adminActivity(
+      user._id,
+      `${user.firstName || ''} ${user.lastName || ''}`,
+      'LOGOUT',
+      `Device: ${deviceType || 'all devices'}, Had sessions: Web=${hasWebSession}, Mobile=${hasMobileSession}, IP: ${req.ip}`
+    );
+
     return res.status(200).json({
       status: 200,
       message,
@@ -486,7 +534,8 @@ exports.adminLogoutUser = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error(error);
+    // 🚀 LOG ADMIN LOGOUT ERROR
+    logger.error(error, 'ADMIN_LOGOUT', `UserID: ${userId}, Device: ${deviceType}`);
     return res.status(500).json({
       status: 500,
       message: "Server error",
@@ -717,7 +766,10 @@ exports.uploadProfilePicture = async (req, res) => {
   }
 };
 
-//Banner start from here
+// ============================================================================
+// 🖼️ BANNER MANAGEMENT
+// ============================================================================
+
 exports.getBannerById = async (req, res) => {
   try {
     const bannerId = req.params.bannerId;
@@ -892,248 +944,30 @@ exports.removeBanner = async (req, res) => {
   }
 };
 
-const createOneTimeInstallmentsForValidities = async (
-  courseId,
-  validities,
-  gst,
-  internetHandling
-) => {
-  try {
-    console.log(
-      "Input courseId from createOneTimeInstallmentsForValidities : ",
-      courseId
-    );
-    console.log(
-      "Input gst from createOneTimeInstallmentsForValidities : ",
-      gst
-    );
-    console.log(
-      "Input internetHandling from createOneTimeInstallmentsForValidities : ",
-      internetHandling
-    );
-    console.log(
-      "Validities from createOneTimeInstallmentsForValidities : ",
-      validities
-    );
+// 🔥 MOVED: Installment business logic functions moved to services/installmentService.js
+// This improves separation of concerns and reduces adminController.js file size
 
-    // Validate courseId
-    if (!courseId) {
-      throw new Error("Invalid courseId: courseId is required.");
-    }
-    // Validate validities array
-    if (!Array.isArray(validities) || validities.length === 0) {
-      throw new Error("Invalid validities: must be a non-empty array.");
-    }
-    // Validate gst and internetHandling
-    const gstPercentage = typeof gst === "number" && gst >= 0 ? gst : 0;
-    const internetHandlingPercentage =
-      typeof internetHandling === "number" && internetHandling >= 0
-        ? internetHandling
-        : 0;
-
-    for (const validity of validities) {
-      const planType = `${validity.validity} months`;
-      const price = validity.price;
-      const discount = validity.discount || 0;
-
-      console.log(
-        `Creating plan for ${planType} → Price: ${price}, Discount: ${discount}%`
-      );
-
-      const discountAmount = (price * discount) / 100;
-      let totalAmount = price - discountAmount;
-
-      const gstAmount = (totalAmount * gstPercentage) / 100;
-      const internetHandlingCharge =
-        (totalAmount * internetHandlingPercentage) / 100;
-
-      totalAmount += gstAmount + internetHandlingCharge;
-
-      console.log(`total Amount for ${planType} validity is ${totalAmount}`);
-
-      const existingPlan = await Installment.findOne({ courseId, planType });
-
-      const oneTimeInstallments = [
-        {
-          amount: totalAmount.toFixed(2),
-          dueDate: "DOP",
-          isPaid: false,
-        },
-      ];
-
-      if (existingPlan) {
-        // Update existing one-time plan
-        existingPlan.numberOfInstallments = 1;
-        existingPlan.installments = oneTimeInstallments;
-        existingPlan.totalAmount = totalAmount.toFixed(2);
-        existingPlan.remainingAmount = totalAmount.toFixed(2);
-
-        await existingPlan.save();
-        console.log(`Updated one-time plan for ${planType}`);
-      } else {
-        // Create new one-time plan
-        const newInstallmentPlan = new Installment({
-          courseId,
-          planType,
-          numberOfInstallments: 1,
-          installments: oneTimeInstallments,
-          totalAmount: totalAmount.toFixed(2),
-          remainingAmount: totalAmount.toFixed(2),
-        });
-
-        await newInstallmentPlan.save();
-        console.log(`Created one-time plan for ${planType}`);
-      }
-    }
-  } catch (error) {
-    console.error("Error in createOneTimeInstallmentsForValidities:", error);
-  }
-};
+// ============================================================================
+// 💳 SUBSCRIPTION MANAGEMENT
+// ============================================================================
 
 exports.createSubscription = async (req, res) => {
   try {
-    // Destructure the request body
-    const {
-      course, // This should still be the course ID from the request
-      name,
-      description,
-      type,
-      validities,
-      features, // New field for subscription features
-      pdfDownloadPermissionsApp,
-      pdfDownloadInDevice,
-      pdfDownloadWithinApp,
-      pdfPermissionsWeb,
-      pdfViewAccess,
-      pdfDownloadAccess,
-      gst, // New GST field
-      internetHandling, // New Internet Handling Charges field
-    } = req.body;
-
-    // Validate course existence and fetch full course data
-    console.log("course from createSubscription :", req.body);
-    let courseData = null;
-    if (course) {
-      courseData = await Course.findById(course);
-      if (!courseData) {
-        return res
-          .status(404)
-          .json({ status: 404, message: "Course not found" });
-      }
-    }
-
-    // Check if a subscription already exists for this course
-    const existingSubscription = await Subscription.findOne({
-      course: courseData._id,
-    });
-    if (existingSubscription) {
+    // Extract subscription data from request body
+    const subscriptionData = req.body;
+    
+    // Validate required fields before calling service
+    const validationErrors = subscriptionService.validateSubscriptionData(subscriptionData);
+    if (validationErrors.length > 0) {
       return res.status(400).json({
         status: 400,
-        message: "A subscription for this course already exists",
+        message: "Validation failed",
+        errors: validationErrors
       });
     }
 
-    // Validate type of subscription
-    const validTypes = ["Basic", "Premium", "Recording"];
-    if (type && !validTypes.includes(type)) {
-      return res.status(400).json({
-        status: 400,
-        message: `Invalid subscription type. Allowed types: ${validTypes.join(
-          ", "
-        )}`,
-      });
-    }
-
-    // Validate validities
-    if (validities && !Array.isArray(validities)) {
-      return res
-        .status(400)
-        .json({ status: 400, message: "Validities should be an array" });
-    }
-
-    // Validate features if provided
-    if (features && !Array.isArray(features)) {
-      return res
-        .status(400)
-        .json({ status: 400, message: "Features should be an array" });
-    }
-
-    // Validate GST and Internet Handling Charges
-    if (gst && (typeof gst !== "number" || gst < 0)) {
-      return res.status(400).json({
-        status: 400,
-        message: "GST must be a non-negative number",
-      });
-    }
-
-    if (
-      internetHandling &&
-      (typeof internetHandling !== "number" || internetHandling < 0)
-    ) {
-      return res.status(400).json({
-        status: 400,
-        message: "Internet Handling Charges must be a non-negative number",
-      });
-    }
-
-    // Create new subscription object with all fields
-    const newSubscription = new Subscription({
-      course: courseData, // Store the full course data
-      name,
-      description,
-      type,
-      validities,
-      features, // Optional features field
-      pdfDownloadPermissionsApp,
-      pdfDownloadInDevice,
-      pdfDownloadWithinApp,
-      pdfPermissionsWeb,
-      pdfViewAccess,
-      pdfDownloadAccess,
-      gst, // New GST field
-      internetHandling, // New Internet Handling Charges field
-    });
-
-    // Find the lowest price in validities
-    if (validities.length > 0) {
-      let lowestDiscountedPrice = Number.MAX_VALUE;
-      let correspondingDiscount = 0;
-      let basePrice = 0;
-
-      validities.forEach((item) => {
-        const discount = item.discount || 0;
-        const discountAmount = (item.price * discount) / 100;
-        const finalPrice = item.price - discountAmount;
-
-        if (finalPrice < lowestDiscountedPrice) {
-          lowestDiscountedPrice = finalPrice;
-          correspondingDiscount = discount;
-          basePrice = item.price;
-        }
-      });
-
-      courseData.price = lowestDiscountedPrice;
-      courseData.discount = correspondingDiscount;
-      courseData.oldPrice = basePrice;
-
-      await courseData.save();
-    }
-
-    // Save the subscription to the database
-    const savedSubscription = await newSubscription.save();
-    console.log("here is the  Newly saved subscription :", savedSubscription);
-    // console.log("couserData from Newly created subscription :", courseData);
-    try {
-      await createOneTimeInstallmentsForValidities(
-        courseData._id,
-        validities,
-        savedSubscription.gst,
-        savedSubscription.internetHandling
-      );
-    } catch (err) {
-      console.error("Error creating one-time installments:", err);
-      // Optional: log it somewhere or alert admin if mission-critical
-    }
+    // Call subscription service to handle business logic
+    const savedSubscription = await subscriptionService.createSubscriptionLogic(subscriptionData);
 
     return res.status(201).json({
       status: 201,
@@ -1141,7 +975,28 @@ exports.createSubscription = async (req, res) => {
       data: savedSubscription,
     });
   } catch (error) {
-    console.error("Error in creating subscription:", error.message);
+    console.error("Error in createSubscription controller:", error.message);
+    
+    // Handle specific business logic errors
+    if (error.message.includes("Course not found")) {
+      return res.status(404).json({
+        status: 404,
+        message: error.message,
+        data: null,
+      });
+    }
+    
+    if (error.message.includes("already exists") || 
+        error.message.includes("Invalid subscription type") ||
+        error.message.includes("should be an array") ||
+        error.message.includes("must be a non-negative number")) {
+      return res.status(400).json({
+        status: 400,
+        message: error.message,
+        data: null,
+      });
+    }
+
     return res.status(500).json({
       status: 500,
       message: "Server error while creating subscription",
@@ -1240,109 +1095,11 @@ exports.getSubscriptionsByCourseId = async (req, res) => {
 
 exports.updateSubscription = async (req, res) => {
   try {
-    const { id } = req.params; // Get subscription ID from URL parameters
-    const updateData = req.body; // Data to update from the request body
+    const { id } = req.params;
+    const updateData = req.body;
 
-    // Fetch the current subscription to compare changes, particularly for validities
-    const currentSubscription = await Subscription.findById(id).populate(
-      "course"
-    );
-
-    // Validate the provided course ID, if it's being updated
-    if (
-      updateData.course &&
-      updateData.course.toString() !== currentSubscription.course._id.toString()
-    ) {
-      const courseData = await Course.findById(updateData.course);
-      if (!courseData) {
-        return res
-          .status(404)
-          .json({ status: 404, message: "Course not found" });
-      }
-      updateData.course = courseData._id; // Ensure only the course ID is stored
-    }
-
-    // Validate the type of subscription, if it's being updated
-    const validTypes = ["Basic", "Premium", "Recording"];
-    if (updateData.type && !validTypes.includes(updateData.type)) {
-      return res.status(400).json({
-        status: 400,
-        message: `Invalid subscription type. Allowed types: ${validTypes.join(
-          ", "
-        )}`,
-      });
-    }
-
-    // Handling removed validities
-    const removedValidities = currentSubscription.validities.filter(
-      (v) => !updateData.validities.some((uv) => uv.validity === v.validity)
-    );
-
-    for (const validity of removedValidities) {
-      const associatedInstallments = await Installment.find({
-        courseId: currentSubscription.course,
-        planType: `${validity.validity} months`,
-      });
-      if (associatedInstallments.length > 0) {
-        return res.status(400).json({
-          status: 400,
-          message: `Cannot remove validity of ${validity.validity} months as there are existing installments linked to it.`,
-        });
-      }
-    }
-
-    // Validate validities, if being updated
-    if (updateData.validities && !Array.isArray(updateData.validities)) {
-      return res
-        .status(400)
-        .json({ status: 400, message: "Validities should be an array" });
-    }
-
-    // Validate features, if being updated
-    if (updateData.features && !Array.isArray(updateData.features)) {
-      return res
-        .status(400)
-        .json({ status: 400, message: "Features should be an array" });
-    }
-
-    // Validate GST, if being updated
-    if (
-      updateData.gst !== undefined &&
-      (typeof updateData.gst !== "number" || updateData.gst < 0)
-    ) {
-      return res.status(400).json({
-        status: 400,
-        message: "GST must be a non-negative number",
-      });
-    }
-
-    // Validate Internet Handling Charges, if being updated
-    if (
-      updateData.internetHandling !== undefined &&
-      (typeof updateData.internetHandling !== "number" ||
-        updateData.internetHandling < 0)
-    ) {
-      return res.status(400).json({
-        status: 400,
-        message: "Internet Handling Charges must be a non-negative number",
-      });
-    }
-
-    // Update the subscription
-    await Subscription.findByIdAndUpdate(id, updateData, { new: true });
-
-    // Re-fetch the subscription to include populated course data
-    const updatedSubscription = await Subscription.findById(id).populate(
-      "course"
-    );
-
-    if (!updatedSubscription) {
-      return res.status(404).json({
-        status: 404,
-        message: "Subscription not found",
-        data: null,
-      });
-    }
+    // Call subscription service to handle business logic
+    const updatedSubscription = await subscriptionService.updateSubscriptionLogic(id, updateData);
 
     return res.status(200).json({
       status: 200,
@@ -1350,7 +1107,29 @@ exports.updateSubscription = async (req, res) => {
       data: updatedSubscription,
     });
   } catch (error) {
-    console.error("Error updating subscription:", error.message);
+    console.error("Error in updateSubscription controller:", error.message);
+    
+    // Handle specific business logic errors
+    if (error.message.includes("Subscription not found") || 
+        error.message.includes("Course not found")) {
+      return res.status(404).json({
+        status: 404,
+        message: error.message,
+        data: null,
+      });
+    }
+    
+    if (error.message.includes("Invalid subscription type") ||
+        error.message.includes("should be an array") ||
+        error.message.includes("must be a non-negative number") ||
+        error.message.includes("Cannot remove validity")) {
+      return res.status(400).json({
+        status: 400,
+        message: error.message,
+        data: null,
+      });
+    }
+
     return res.status(500).json({
       status: 500,
       message: "Server error while updating subscription",
@@ -1363,43 +1142,31 @@ exports.deleteSubscription = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // First, find the subscription by ID to access the course ID before deleting
-    const subscription = await Subscription.findById(id);
-    if (!subscription) {
-      return res.status(404).json({
-        status: 404,
-        message: "Subscription not found",
-        data: null,
-      });
-    }
-
-    // Delete the subscription
-    const deletedSubscription = await Subscription.findByIdAndDelete(id);
-    if (!deletedSubscription) {
-      return res.status(404).json({
-        status: 404,
-        message: "Subscription not found",
-        data: null,
-      });
-    }
-
-    // Delete related installments based on the course ID of the deleted subscription
-    const { course } = deletedSubscription;
-    await Installment.deleteMany({ courseId: course });
+    // Call subscription service to handle business logic
+    const result = await subscriptionService.deleteSubscriptionLogic(id);
 
     return res.status(200).json({
       status: 200,
-      message: "Subscription and related installments deleted successfully",
+      message: result.message,
       data: {
-        subscription: deletedSubscription,
+        subscription: result.subscription,
       },
     });
   } catch (error) {
-    console.error(error);
+    console.error("Error in deleteSubscription controller:", error.message);
+    
+    // Handle specific business logic errors
+    if (error.message.includes("Subscription not found")) {
+      return res.status(404).json({
+        status: 404,
+        message: error.message,
+        data: null,
+      });
+    }
+
     return res.status(500).json({
       status: 500,
-      message:
-        "Server error while deleting subscription and related installments",
+      message: "Server error while deleting subscription and related installments",
       data: null,
     });
   }
@@ -1469,6 +1236,10 @@ exports.getUserSubscriptionById = async (req, res) => {
       .json({ status: 500, message: "Server error", error });
   }
 };
+
+// ============================================================================
+// 📖 SUBJECT & CHAPTER MANAGEMENT (UNUSED - TO BE REMOVED)
+// ============================================================================
 
 exports.createSubject = async (req, res) => {
   try {
@@ -1819,6 +1590,10 @@ exports.getChapterByUrl = async (req, res) => {
   }
 };
 
+// ============================================================================
+// 📄 CONTENT MANAGEMENT (Privacy Policy & About Us)
+// ============================================================================
+
 exports.createPrivacy = async (req, res) => {
   try {
     const {
@@ -1973,154 +1748,56 @@ exports.deletePrivacy = async (req, res) => {
       .json({ message: "Internal server error", details: error.message });
   }
 };
+
+// ============================================================================
+// 📚 COURSE MANAGEMENT
+// ============================================================================
+
 exports.createCourse = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
   try {
-    const {
-      title,
-      description,
-      subject,
-      price,
-      oldPrice,
-      startDate,
-      endDate,
-      discount,
-      duration,
-      lessons,
-      weeks,
-      subCategory,
-      approvalStatus,
-      courseType,
-      faqs,
-    } = req.body;
-
-    console.log("FAQs:", faqs);
-    console.log("Type of FAQs:", typeof faqs);
-
-    // Ensure description is an array
-    const descriptionArray = Array.isArray(description)
-      ? description
-      : [description];
-
-    // Validate subCategory ID
-    if (!subCategory || !mongoose.Types.ObjectId.isValid(subCategory)) {
-      return res
-        .status(400)
-        .json({ message: "Invalid or missing subCategory ID." });
+    // Extract course data from request
+    const courseData = req.body;
+    const files = req.files;
+    
+    // Validate required fields before calling service
+    const validationErrors = courseService.validateCourseData(courseData);
+    if (validationErrors.length > 0) {
+      return res.status(400).json({
+        message: "Validation failed",
+        errors: validationErrors
+      });
     }
 
-    // Check for duplicate course
-    const existingCourse = await Course.findOne({ title });
-    if (existingCourse) {
-      return res
-        .status(400)
-        .json({ message: "Course with this title already exists." });
-    }
+    // Call course service to handle business logic
+    const course = await courseService.createCourseLogic(courseData, files);
 
-    // Validate subCategory and get category ID
-    const categoryDoc = await CourseCategory.findOne({
-      "subCategories._id": subCategory,
+    res.status(201).json({ 
+      message: "Course created successfully.", 
+      data: { course } 
     });
-    if (!categoryDoc) {
-      return res
-        .status(404)
-        .json({ message: "Specified subCategory does not exist." });
-    }
-    const category = categoryDoc._id;
-
-    // Handle file uploads
-    let courseImage = [];
-    let courseNotes = [];
-    let courseVideo = [];
-    if (req.files) {
-      if (req.files["courseImage"]) {
-        courseImage = req.files["courseImage"].map((file) => file.location);
-      }
-      if (req.files["courseNotes"]) {
-        courseNotes = req.files["courseNotes"].map((file) => file.location);
-      }
-      if (req.files["courseVideo"]) {
-        courseVideo = req.files["courseVideo"].map((file) => ({
-          url: file.location,
-          type: "Free",
-        }));
-      }
-    }
-
-    // Create the course
-    const course = new Course({
-      title,
-      description: descriptionArray,
-      subject,
-      price,
-      oldPrice,
-      startDate,
-      endDate,
-      discount,
-      duration,
-      lessons,
-      weeks,
-      courseImage,
-      courseNotes,
-      courseVideo,
-      category,
-      subCategory,
-      approvalStatus,
-      courseType,
-    });
-
-    await course.save({ session });
-
-    // Handle FAQs
-    let faqIds = [];
-    if (faqs && faqs.length > 0) {
-      const parsedFaqs = typeof faqs === "string" ? JSON.parse(faqs) : faqs;
-      if (!Array.isArray(parsedFaqs)) {
-        return res.status(400).json({ message: "FAQs must be an array." });
-      }
-      const faqsToInsert = parsedFaqs.map((faq) => ({
-        ...faq,
-        course: course._id,
-      }));
-      const newFaqs = await Faq.insertMany(faqsToInsert, { session });
-      faqIds = newFaqs.map((faq) => faq._id);
-    }
-    course.faqs = faqIds;
-    await course.save({ session });
-
-    // Add course to subCategory
-    await CourseCategory.updateOne(
-      { "subCategories._id": subCategory },
-      { $push: { "subCategories.$.courses": course._id } },
-      { session }
-    );
-
-    // Automatically create a root folder for the course by calling createFolder controller
-    const folderReqBody = {
-      name: `${title}`, // Root folder name
-      courseId: course._id, // Attach course ID
-    };
-    const folderReq = { body: folderReqBody }; // Mock the request to pass to createFolder controller
-    // Call createFolder controller and get the folder response
-    const folderResponse = await createFolder(folderReq);
-    const rootFolderId = folderResponse._id; // Assuming createFolder returns the created folder object
-
-    // Step 4: Update course with rootFolder
-    course.rootFolder = rootFolderId;
-    await course.save({ session });
-    // Commit the transaction
-    await session.commitTransaction();
-    session.endSession();
-    res
-      .status(201)
-      .json({ message: "Course created successfully.", data: { course } });
   } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
-    console.error("Error at createCourse:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
+    console.error("Error in createCourse controller:", error.message);
+    
+    // Handle specific business logic errors
+    if (error.message.includes("Invalid or missing subCategory ID") ||
+        error.message.includes("FAQs must be an array") ||
+        error.message.includes("Invalid subCategory ID format")) {
+      return res.status(400).json({
+        message: error.message
+      });
+    }
+    
+    if (error.message.includes("Course with this title already exists") ||
+        error.message.includes("Specified subCategory does not exist")) {
+      return res.status(400).json({
+        message: error.message
+      });
+    }
+
+    res.status(500).json({ 
+      message: "Server error", 
+      error: error.message 
+    });
   }
 };
 
@@ -2131,7 +1808,7 @@ exports.getAllCourses = async (req, res) => {
     //     ? { isPublished: true } // Show only published courses for users
     //     : {}; // No filter for other user types (e.g., admin)
 
-    const courses = await Course.find().populate("subjects");
+    const courses = await Course.find().populate("subjects").populate("rootFolder");
     return res.status(200).json({ status: 200, data: courses });
   } catch (error) {
     console.error(error);
@@ -2197,115 +1874,11 @@ exports.getCourseById = async (req, res) => {
 exports.updateCourseById = async (req, res) => {
   try {
     const { id } = req.params;
-    const {
-      title,
-      description,
-      subject,
-      price,
-      oldPrice,
-      startDate,
-      endDate,
-      discount,
-      duration,
-      lessons,
-      weeks,
-      subCategory,
-      approvalStatus,
-      courseType,
-    } = req.body;
+    const updateData = req.body;
+    const files = req.files;
 
-    // Find the existing course
-    const course = await Course.findById(id);
-    if (!course) {
-      return res.status(404).json({ status: 404, message: "Course not found" });
-    }
-
-    // Ensure description is an array
-    if (description) {
-      var descriptionArray = Array.isArray(description)
-        ? description
-        : [description];
-    }
-
-    // Validate subCategory if provided and different from current
-    if (subCategory && subCategory !== course.subCategory) {
-      if (!mongoose.Types.ObjectId.isValid(subCategory)) {
-        return res
-          .status(400)
-          .json({ status: 400, message: "Invalid subCategory ID format." });
-      }
-      const categoryDoc = await CourseCategory.findOne({
-        "subCategories._id": subCategory,
-      });
-      if (!categoryDoc) {
-        return res.status(404).json({
-          status: 404,
-          message: "Specified subCategory does not exist.",
-        });
-      }
-
-      // Update category if subCategory is changed
-      await CourseCategory.updateOne(
-        { "subCategories._id": course.subCategory },
-        { $pull: { "subCategories.$.courses": course._id } }
-      );
-      await CourseCategory.updateOne(
-        { "subCategories._id": subCategory },
-        { $push: { "subCategories.$.courses": course._id } }
-      );
-
-      course.subCategory = subCategory;
-      course.category = categoryDoc._id;
-    }
-
-    // Check for unique title, excluding the current course
-    if (title && title !== course.title) {
-      const existingCourse = await Course.findOne({ title });
-      if (existingCourse) {
-        return res.status(400).json({
-          status: 400,
-          message: "Course with this title already exists.",
-        });
-      }
-      course.title = title;
-    }
-
-    // Handle file uploads
-    if (req.files) {
-      if (req.files["courseImage"]) {
-        course.courseImage = req.files["courseImage"].map(
-          (file) => file.location
-        );
-      }
-      if (req.files["courseNotes"]) {
-        course.courseNotes = req.files["courseNotes"].map(
-          (file) => file.location
-        );
-      }
-      if (req.files["courseVideo"]) {
-        course.courseVideo = req.files["courseVideo"].map((file) => ({
-          url: file.location,
-          type: "Free",
-        }));
-      }
-    }
-
-    // Update fields only if values are provided
-    course.description = descriptionArray || course.description;
-    course.subject = subject || course.subject;
-    course.price = price || course.price;
-    course.oldPrice = oldPrice || course.oldPrice;
-    course.startDate = startDate || course.startDate;
-    course.endDate = endDate || course.endDate;
-    course.discount = discount || course.discount;
-    course.duration = duration || course.duration;
-    course.lessons = lessons || course.lessons;
-    course.weeks = weeks || course.weeks;
-    course.approvalStatus = approvalStatus || course.approvalStatus;
-    course.courseType = courseType || course.courseType;
-
-    // Save the updated course in the database
-    await course.save();
+    // Call course service to handle business logic
+    const course = await courseService.updateCourseLogic(id, updateData, files);
 
     return res.status(200).json({
       status: 200,
@@ -2313,7 +1886,25 @@ exports.updateCourseById = async (req, res) => {
       data: course,
     });
   } catch (error) {
-    console.error("Error:", error);
+    console.error("Error in updateCourseById controller:", error.message);
+    
+    // Handle specific business logic errors
+    if (error.message.includes("Course not found")) {
+      return res.status(404).json({
+        status: 404,
+        message: error.message
+      });
+    }
+    
+    if (error.message.includes("Invalid subCategory ID format") ||
+        error.message.includes("Course with this title already exists") ||
+        error.message.includes("Specified subCategory does not exist")) {
+      return res.status(400).json({
+        status: 400,
+        message: error.message
+      });
+    }
+
     return res.status(500).json({
       status: 500,
       message: "Server error",
@@ -2326,99 +1917,66 @@ exports.deleteCourseById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Find and delete the course
-    const course = await Course.findById(id).populate("rootFolder");
-    if (!course) {
-      return res.status(404).json({ status: 404, message: "Course not found" });
-    }
-
-    //recursively delete its rootfolder and everything inside
-    if (course.rootFolder) {
-      await deleteFolder(course.rootFolder);
-    }
-
-    await course.deleteOne();
+    // Call course service to handle business logic
+    const result = await courseService.deleteCourseLogic(id);
 
     return res.status(200).json({
       status: 200,
-      message: "Course and related content deleted successfully",
+      message: result.message,
     });
   } catch (error) {
-    console.error(error);
-    return res
-      .status(500)
-      .json({ status: 500, message: "Server error", error });
+    console.error("Error in deleteCourseById controller:", error.message);
+    
+    // Handle specific business logic errors
+    if (error.message.includes("Course not found")) {
+      return res.status(404).json({ 
+        status: 404, 
+        message: error.message 
+      });
+    }
+
+    return res.status(500).json({ 
+      status: 500, 
+      message: "Server error", 
+      error: error.message 
+    });
   }
 };
 
-async function deleteFolder(folder) {
-  if (!folder) return;
-
-  try {
-    // Delete all subfolders recursively
-    if (folder.folders && Array.isArray(folder.folders)) {
-      for (const subfolderId of folder.folders) {
-        const subfolder = await Folder.findById(subfolderId);
-        if (subfolder) {
-          await deleteFolder(subfolder);
-        }
-      }
-    }
-
-    // Delete all files
-    if (folder.files && Array.isArray(folder.files)) {
-      for (const fileId of folder.files) {
-        const file = await File.findById(fileId);
-        if (file) {
-          await file.deleteOne();
-        }
-      }
-    }
-
-    // Delete the folder itself
-    await folder.deleteOne();
-  } catch (error) {
-    console.error(`Error deleting folder: ${error.message}`);
-    // You might want to throw the error here depending on your error handling strategy
-  }
-}
+// 🔥 MOVED: deleteFolder function moved to courseService.js as deleteFolderRecursively
+// This improves separation of concerns and reduces adminController.js file size
 
 exports.togglePublishCourse = async (req, res) => {
   try {
-    const { id } = req.params; // Extract course ID from the request parameters
-    const { isPublished } = req.body; // Extract isPublished flag from the request body
+    const { id } = req.params;
+    const { isPublished } = req.body;
 
-    // Validate input
-    if (typeof isPublished !== "boolean") {
-      return res.status(400).json({
-        status: 400,
-        message: "'isPublished' must be a boolean value (true or false).",
-      });
-    }
-
-    // Find the course by ID
-    const course = await Course.findById(id);
-
-    if (!course) {
-      return res.status(404).json({
-        status: 404,
-        message: "Course not found.",
-      });
-    }
-
-    // Update the isPublished field
-    course.isPublished = isPublished;
-    await course.save();
+    // Call course service to handle business logic
+    const result = await courseService.toggleCoursePublishStatus(id, isPublished);
 
     return res.status(200).json({
       status: 200,
-      message: `Course successfully ${
-        isPublished ? "published" : "unpublished"
-      }.`,
-      data: course,
+      message: result.message,
+      data: result.course,
     });
   } catch (error) {
-    console.error("Error in togglePublishCourse:", error);
+    console.error("Error in togglePublishCourse controller:", error.message);
+    
+    // Handle specific business logic errors
+    if (error.message.includes("Course not found")) {
+      return res.status(404).json({
+        status: 404,
+        message: error.message,
+      });
+    }
+    
+    if (error.message.includes("must be a boolean value")) {
+      return res.status(400).json({
+        status: 400,
+        message: error.message,
+      });
+    }
+
     return res.status(500).json({
       status: 500,
       message: "Server error",
@@ -2432,56 +1990,75 @@ exports.addTeacherToCourse = async (req, res) => {
     const { courseId } = req.params;
     const { teacherId } = req.body;
 
-    const course = await Course.findById(courseId);
-    if (!course) {
-      return res.status(404).json({ status: 404, message: "Course not found" });
-    }
-
+    // Validate teacher before calling service
     const teacher = await User.findById(teacherId);
     if (!teacher || teacher.userType !== "TEACHER") {
-      return res
-        .status(404)
-        .json({ status: 404, message: "Teacher not found" });
+      return res.status(404).json({ 
+        status: 404, 
+        message: "Teacher not found" 
+      });
     }
-    course.teacher = teacherId;
-    await course.save();
+
+    // Call course service to handle business logic
+    const result = await courseService.addTeacherToCourse(courseId, teacherId);
 
     return res.status(200).json({
       status: 200,
-      message: "Teacher added to course successfully",
-      data: course,
+      message: result.message,
+      data: result.course,
     });
   } catch (error) {
-    console.error(error);
-    return res
-      .status(500)
-      .json({ status: 500, message: "Server error", error });
+    console.error("Error in addTeacherToCourse controller:", error.message);
+    
+    // Handle specific business logic errors
+    if (error.message.includes("Course not found")) {
+      return res.status(404).json({ 
+        status: 404, 
+        message: error.message 
+      });
+    }
+
+    return res.status(500).json({ 
+      status: 500, 
+      message: "Server error", 
+      error: error.message 
+    });
   }
 };
 exports.removeTeacherFromCourse = async (req, res) => {
   try {
     const { courseId } = req.params;
 
-    const course = await Course.findById(courseId);
-    if (!course) {
-      return res.status(404).json({ status: 404, message: "Course not found" });
-    }
-
-    course.teacher = null;
-    await course.save();
+    // Call course service to handle business logic
+    const result = await courseService.removeTeacherFromCourse(courseId);
 
     return res.status(200).json({
       status: 200,
-      message: "Teacher removed from course successfully",
-      data: course,
+      message: result.message,
+      data: result.course,
     });
   } catch (error) {
-    console.error(error);
-    return res
-      .status(500)
-      .json({ status: 500, message: "Server error", error });
+    console.error("Error in removeTeacherFromCourse controller:", error.message);
+    
+    // Handle specific business logic errors
+    if (error.message.includes("Course not found")) {
+      return res.status(404).json({ 
+        status: 404, 
+        message: error.message 
+      });
+    }
+
+    return res.status(500).json({ 
+      status: 500, 
+      message: "Server error", 
+      error: error.message 
+    });
   }
 };
+
+// ============================================================================
+// 🏷️ COURSE CATEGORY MANAGEMENT
+// ============================================================================
 
 exports.createCourseCategory = async (req, res) => {
   try {
@@ -2552,14 +2129,26 @@ exports.getCourseCategories = async (req, res) => {
 };
 
 exports.getAllCourseCategories = async (req, res) => {
-  let findCategory = await CourseCategory.find();
+  try {
+    console.log("📂 Fetching all course categories");
+    
+    const categories = await CourseCategory.find({});
+    
+    console.log(`📂 Found ${categories.length} categories`);
 
-  return res
-    .status(200)
-    .json({ message: "Category Found", status: 200, data: findCategory });
-  // } else {
-  //     return res.status(404).json({ message: "Category not Found", status: 404, data: {}, });
-  // }
+    return res.status(200).json({
+      message: "Categories retrieved successfully",
+      status: 200,
+      data: categories,
+    });
+  } catch (error) {
+    console.error("❌ Error fetching categories:", error);
+    return res.status(500).json({
+      status: 500,
+      message: "Server error while fetching categories",
+      data: error.message,
+    });
+  }
 };
 
 exports.updateCourseCategory = async (req, res) => {
@@ -2608,17 +2197,248 @@ exports.updateCourseCategory = async (req, res) => {
 };
 
 exports.removeCourseCategory = async (req, res) => {
-  const { id } = req.params;
-  const category = await CourseCategory.findById(id);
-  if (!category) {
-    return res
-      .status(404)
-      .json({ message: "Sub Category Not Found", status: 404, data: {} });
-  } else {
+  try {
+    const { id } = req.params;
+    console.log("🗑️ Deleting category with ID:", id);
+    
+    const category = await CourseCategory.findById(id);
+    if (!category) {
+      return res.status(404).json({
+        message: "Category not found",
+        status: 404,
+        data: {},
+      });
+    }
+
     await CourseCategory.findByIdAndDelete(category._id);
-    return res
-      .status(200)
-      .json({ message: "Sub Category Deleted Successfully !" });
+    console.log("✅ Category deleted successfully:", category.name);
+    
+    return res.status(200).json({
+      message: "Category deleted successfully",
+      status: 200,
+      data: {},
+    });
+  } catch (error) {
+    console.error("❌ Error deleting category:", error);
+    return res.status(500).json({
+      status: 500,
+      message: "Server error while deleting category",
+      data: error.message,
+    });
+  }
+};
+
+// ============================================================================
+// 🔧 TEMPORARY FIX FUNCTIONS
+// ============================================================================
+
+exports.fixSubscriptionCourse = async (req, res) => {
+  try {
+    console.log('🔍 Checking subscriptions...');
+    
+    // Find all subscriptions
+    const subscriptions = await Subscription.find().populate('course');
+    console.log(`📊 Found ${subscriptions.length} subscriptions`);
+    
+    let fixedCount = 0;
+    
+    for (const subscription of subscriptions) {
+      console.log(`\n📋 Subscription: ${subscription.name}`);
+      console.log(`   - ID: ${subscription._id}`);
+      console.log(`   - Course: ${subscription.course ? subscription.course.title : 'NULL'}`);
+      
+      if (!subscription.course) {
+        console.log('❌ Course is null - needs fixing');
+        
+        // Find available courses
+        const courses = await Course.find();
+        console.log(`📚 Available courses:`);
+        courses.forEach((course, index) => {
+          console.log(`   ${index + 1}. ${course.title} (${course._id})`);
+        });
+        
+        if (courses.length > 0) {
+          // Associate with the first available course
+          const targetCourse = courses[0];
+          console.log(`🔧 Associating with course: ${targetCourse.title}`);
+          
+          subscription.course = targetCourse._id;
+          await subscription.save();
+          
+          console.log('✅ Subscription updated successfully');
+          fixedCount++;
+        }
+      } else {
+        console.log('✅ Course association is valid');
+      }
+    }
+    
+    console.log('\n🎯 Verification - checking updated subscriptions:');
+    const updatedSubscriptions = await Subscription.find().populate('course');
+    const result = updatedSubscriptions.map(sub => ({
+      name: sub.name,
+      course: sub.course ? sub.course.title : 'NULL',
+      courseId: sub.course ? sub.course._id : null
+    }));
+    
+    return res.status(200).json({
+      status: 200,
+      message: `Fixed ${fixedCount} subscriptions`,
+      data: {
+        fixedCount,
+        subscriptions: result
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Error:', error);
+    return res.status(500).json({
+      status: 500,
+      message: 'Error fixing subscriptions',
+      error: error.message
+    });
+  }
+};
+
+// ============================================================================
+// 🏷️ SUB-CATEGORY MANAGEMENT
+// ============================================================================
+
+/**
+ * Create a new sub-category under a specific category
+ * Route: POST /api/v1/admin/Category/:categoryId/createSubCategory
+ */
+exports.createSubCategory = async (req, res) => {
+  try {
+    const { categoryId } = req.params;
+    const { name, description, status } = req.body;
+
+    console.log("📂 Creating sub-category:", name, "under category:", categoryId);
+    console.log("🔍 Received status value:", status, typeof status);
+
+    // Validate if categoryId is a valid ObjectId
+    if (!mongoose.Types.ObjectId.isValid(categoryId)) {
+      return res.status(400).json({
+        status: 400,
+        message: "Invalid category ID",
+        data: null,
+      });
+    }
+
+    // Find the parent category
+    const parentCategory = await CourseCategory.findById(categoryId);
+    if (!parentCategory) {
+      return res.status(404).json({
+        status: 404,
+        message: "Parent category not found",
+        data: null,
+      });
+    }
+
+    // Check if sub-category with same name already exists under this category
+    const existingSubCategory = parentCategory.subCategories.find(
+      subCat => subCat.name.toLowerCase() === name.toLowerCase()
+    );
+
+    if (existingSubCategory) {
+      return res.status(409).json({
+        status: 409,
+        message: "Sub-category with this name already exists under this category",
+        data: null,
+      });
+    }
+
+    // Prepare sub-category data
+    const subCategoryData = {
+      name: name,
+      status: status === 'false' ? false : true, // Convert string to boolean
+      courses: [] // Initialize empty courses array
+    };
+
+    // Add the new subcategory to the category's subCategories array
+    parentCategory.subCategories.push(subCategoryData);
+
+    // Save the updated category
+    await parentCategory.save();
+
+    console.log("✅ Sub-category created successfully:", name);
+
+    // Return the newly created subcategory (last item in the array)
+    const newSubCategory = parentCategory.subCategories[parentCategory.subCategories.length - 1];
+
+    return res.status(201).json({
+      status: 201,
+      message: "Sub-category created successfully",
+      data: newSubCategory,
+    });
+  } catch (error) {
+    console.error("❌ Error creating sub-category:", error);
+    
+    // Handle validation errors
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({
+        status: 400,
+        message: "Validation error",
+        data: error.errors,
+      });
+    }
+
+    return res.status(500).json({
+      status: 500,
+      message: "Server error while creating sub-category",
+      data: error.message,
+    });
+  }
+};
+
+/**
+ * Get all sub-categories for a specific category
+ * Route: GET /api/v1/admin/Category/:categoryId/subCategories
+ */
+exports.getSubCategories = async (req, res) => {
+  try {
+    console.log("🔍 getSubCategories function called");
+    
+    const { categoryId } = req.params;
+
+    console.log("📂 Fetching sub-categories for category:", categoryId);
+
+    // Validate if categoryId is a valid ObjectId
+    if (!mongoose.Types.ObjectId.isValid(categoryId)) {
+      return res.status(400).json({
+        status: 400,
+        message: "Invalid category ID",
+        data: null,
+      });
+    }
+
+    // Fetch the category with its embedded subcategories
+    const category = await CourseCategory.findById(categoryId).select('name subCategories');
+    if (!category) {
+      return res.status(404).json({
+        status: 404,
+        message: "Category not found",
+        data: null,
+      });
+    }
+
+    // Extract subcategories from the category document
+    const subCategories = category.subCategories || [];
+
+    console.log(`📂 Found ${subCategories.length} sub-categories for category "${category.name}"`);
+
+    return res.status(200).json({
+      status: 200,
+      message: "Sub-categories retrieved successfully",
+      data: subCategories,
+    });
+  } catch (error) {
+    console.error("❌ Error fetching sub-categories:", error);
+    return res.status(500).json({
+      status: 500,
+      message: "Error fetching subcategories",
+      error: error.message,
+    });
   }
 };
 
@@ -2826,14 +2646,27 @@ exports.UploadCourseDocument = async (req, res) => {
     for (const field of allowedFields) {
       if (uploadedFiles[field]) {
         for (const file of uploadedFiles[field]) {
-          const newFile = new File({
+          const fileExtension = file.originalname.split('.').pop().toLowerCase();
+          let fileType = "document"; // default
+          
+          if (['mp4', 'webm', 'mkv', 'avi', 'mov'].includes(fileExtension)) {
+            fileType = "video";
+          } else if (['pdf'].includes(fileExtension)) {
+            fileType = "pdf";
+          } else if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(fileExtension)) {
+            fileType = "image";
+          }
+          
+          const newFile = await File.create({
             url: file.location, // S3 URL
             name: title || file.originalname, // File name
             description: description || "", // Description
+            fileType: fileType,
+            isDownloadable: false, // Default to not downloadable
+            isViewable: false, // Default to not viewable - admin can toggle this later
           });
 
-          const savedFile = await newFile.save();
-          createdFiles.push(savedFile._id);
+          createdFiles.push(newFile._id);
         }
       }
     }
@@ -2928,13 +2761,16 @@ exports.UploadCourseVideo = async (req, res) => {
           const objectKey = file.key; // S3 key (file location in the bucket)
           const directUrl = `https://${authConfig.s3_bucket}.s3.amazonaws.com/${objectKey}`;
 
-          const newFile = new File({
+          const newFile = await File.create({
             name: title || file.originalname, // Default to filename if title is not provided
             url: directUrl,
             description: description || "", // Default to empty string if description is not provided
+            fileType: "video",
+            isDownloadable: false, // Default to not downloadable
+            isViewable: false, // Default to not viewable - admin can toggle this later
           });
 
-          return newFile.save(); // Save each file document
+          return newFile; // File is already saved by create()
         })
       );
 
@@ -3187,6 +3023,10 @@ exports.deleteAboutUs = async (req, res) => {
   }
 };
 
+// ============================================================================
+// 📅 SCHEDULE MANAGEMENT
+// ============================================================================
+
 exports.createSchedule = async (req, res) => {
   try {
     const {
@@ -3387,6 +3227,11 @@ const startInterval = () => {
   }, intervalMilliseconds);
 };
 startInterval();
+
+// ============================================================================
+// 🏷️ CATEGORY MANAGEMENT (DUPLICATE - TO BE REMOVED)
+// ============================================================================
+
 exports.createCategory = async (req, res) => {
   try {
     const { name } = req.body;
@@ -3639,33 +3484,29 @@ exports.deleteSubCategory = async (req, res) => {
     });
   }
 };
+
+// ============================================================================
+// 🏪 PRODUCT MANAGEMENT
+// ============================================================================
+
 exports.createProduct = async (req, res) => {
   try {
-    const { productName, description, price, categoryId, color, stock } =
-      req.body;
-
-    const images = req.files.map((file) => ({
-      url: file.path,
-    }));
-
-    const categories = await Category.findById(categoryId);
-    if (!categories) {
-      return res
-        .status(404)
-        .json({ status: 404, message: "categories not found" });
+    // Extract product data from request
+    const productData = req.body;
+    const files = req.files;
+    
+    // Validate required fields before calling service
+    const validationErrors = productService.validateProductData(productData);
+    if (validationErrors.length > 0) {
+      return res.status(400).json({
+        status: 400,
+        message: "Validation failed",
+        errors: validationErrors
+      });
     }
 
-    const product = new Product({
-      productName,
-      description,
-      image: images,
-      price,
-      categoryId,
-      color,
-      stock,
-    });
-
-    await product.save();
+    // Call product service to handle business logic
+    const product = await productService.createProductLogic(productData, files);
 
     return res.status(201).json({
       status: 201,
@@ -3673,7 +3514,16 @@ exports.createProduct = async (req, res) => {
       data: product,
     });
   } catch (error) {
-    console.error(error);
+    console.error("Error in createProduct controller:", error.message);
+    
+    // Handle specific business logic errors
+    if (error.message.includes("Category not found")) {
+      return res.status(404).json({
+        status: 404,
+        message: error.message,
+      });
+    }
+
     return res.status(500).json({
       status: 500,
       message: "Product creation failed",
@@ -3719,61 +3569,11 @@ exports.getProductById = async (req, res) => {
 exports.updateProduct = async (req, res) => {
   try {
     const productId = req.params.productId;
+    const updateData = req.body;
+    const files = req.files;
 
-    let updatedFields = {
-      ...req.body,
-    };
-
-    if (updatedFields.subCategoryId) {
-      const subCategories = await SubCategory.findById(
-        updatedFields.subcategoryId
-      );
-
-      if (!subCategories) {
-        return res
-          .status(404)
-          .json({ status: 404, message: "subCategories not found" });
-      }
-    }
-
-    if (updatedFields.categoryId) {
-      const categories = await Category.findById(updatedFields.categoryId);
-      if (!categories) {
-        return res
-          .status(404)
-          .json({ status: 404, message: "categories not found" });
-      }
-    }
-    if (updatedFields.subCategoryId) {
-      const subCategories = await Category.findById(
-        updatedFields.subCategoryId
-      );
-      if (!subCategories) {
-        return res
-          .status(404)
-          .json({ status: 404, message: "subCategories not found" });
-      }
-    }
-
-    if (req.files && req.files.length > 0) {
-      const images = req.files.map((file) => ({
-        url: file.path,
-      }));
-
-      updatedFields.image = images;
-    }
-
-    const updatedProduct = await Product.findByIdAndUpdate(
-      productId,
-      updatedFields,
-      { new: true }
-    );
-
-    if (!updatedProduct) {
-      return res
-        .status(404)
-        .json({ status: 404, message: "Product not found" });
-    }
+    // Call product service to handle business logic
+    const updatedProduct = await productService.updateProductLogic(productId, updateData, files);
 
     return res.status(200).json({
       status: 200,
@@ -3781,7 +3581,18 @@ exports.updateProduct = async (req, res) => {
       data: updatedProduct,
     });
   } catch (error) {
-    console.error(error);
+    console.error("Error in updateProduct controller:", error.message);
+    
+    // Handle specific business logic errors
+    if (error.message.includes("Product not found") ||
+        error.message.includes("Category not found") ||
+        error.message.includes("SubCategory not found")) {
+      return res.status(404).json({
+        status: 404,
+        message: error.message,
+      });
+    }
+
     return res.status(500).json({
       status: 500,
       message: "Product update failed",
@@ -4035,61 +3846,20 @@ exports.getProductsByCategory = async (req, res) => {
 };
 exports.searchProducts = async (req, res) => {
   try {
-    const { search } = req.query;
+    const searchParams = req.query;
 
-    const productsCount = await Product.find().count();
-    if (search) {
-      let data1 = [
-        {
-          $lookup: {
-            from: "categories",
-            localField: "categoryId",
-            foreignField: "_id",
-            as: "categoryId",
-          },
-        },
-        { $unwind: "$categoryId" },
-        {
-          $match: {
-            $or: [
-              { "categoryId.name": { $regex: search, $options: "i" } },
-              { productName: { $regex: search, $options: "i" } },
-              { description: { $regex: search, $options: "i" } },
-            ],
-          },
-        },
-        { $sort: { numOfReviews: -1 } },
-      ];
-      let apiFeature = await Product.aggregate(data1);
-      return res.status(200).json({
-        status: 200,
-        message: "Product data found.",
-        data: apiFeature,
-        count: productsCount,
-      });
-    } else {
-      let apiFeature = await Product.aggregate([
-        {
-          $lookup: {
-            from: "categories",
-            localField: "categoryId",
-            foreignField: "_id",
-            as: "categoryId",
-          },
-        },
-        { $unwind: "$categoryId" },
-        { $sort: { numOfReviews: -1 } },
-      ]);
+    // Call product service to handle business logic
+    const result = await productService.searchProductsLogic(searchParams);
 
-      return res.status(200).json({
-        status: 200,
-        message: "Product data found.",
-        data: apiFeature,
-        count: productsCount,
-      });
-    }
+    return res.status(200).json({
+      status: 200,
+      message: result.message,
+      data: result.data,
+      count: result.count,
+    });
   } catch (error) {
-    console.error(error);
+    console.error("Error in searchProducts controller:", error.message);
+    
     res.status(500).json({
       status: 500,
       message: "Error searching products",
@@ -4176,47 +3946,24 @@ exports.getMostDemandedProducts = async (req, res) => {
 };
 exports.paginateProductSearch = async (req, res) => {
   try {
-    const { search, fromDate, toDate, categoryId, status, page, limit } =
-      req.query;
-    let query = {};
-    if (search) {
-      query.$or = [
-        { productName: { $regex: req.query.search, $options: "i" } },
-        { description: { $regex: req.query.search, $options: "i" } },
-      ];
-    }
-    if (status) {
-      query.status = status;
-    }
-    if (categoryId) {
-      query.categoryId = categoryId;
-    }
-    if (fromDate && !toDate) {
-      query.createdAt = { $gte: fromDate };
-    }
-    if (!fromDate && toDate) {
-      query.createdAt = { $lte: toDate };
-    }
-    if (fromDate && toDate) {
-      query.$and = [
-        { createdAt: { $gte: fromDate } },
-        { createdAt: { $lte: toDate } },
-      ];
-    }
-    let options = {
-      page: Number(page) || 1,
-      limit: Number(limit) || 15,
-      sort: { createdAt: -1 },
-      populate: "categoryId",
-    };
-    let data = await Product.paginate(query, options);
-    return res
-      .status(200)
-      .json({ status: 200, message: "Product data found.", data: data });
-  } catch (err) {
-    return res
-      .status(500)
-      .send({ msg: "internal server error ", error: err.message });
+    const searchParams = req.query;
+
+    // Call product service to handle business logic
+    const result = await productService.paginateProductSearchLogic(searchParams);
+
+    return res.status(200).json({ 
+      status: 200, 
+      message: result.message, 
+      data: result.data 
+    });
+  } catch (error) {
+    console.error("Error in paginateProductSearch controller:", error.message);
+    
+    return res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 // exports.getAllOrders = async (req, res) => {
@@ -4593,6 +4340,11 @@ exports.deleteNotice = async (req, res) => {
     });
   }
 };
+
+// ============================================================================
+// 📚 SYLLABUS MANAGEMENT
+// ============================================================================
+
 exports.createSyllabus = async (req, res) => {
   try {
     const { courseId, title } = req.body;
@@ -4722,6 +4474,11 @@ exports.deleteSyllabus = async (req, res) => {
     });
   }
 };
+
+// ============================================================================
+// 📝 TEST SERIES MANAGEMENT
+// ============================================================================
+
 exports.createTestSeries = async (req, res) => {
   try {
     const { courseId, categoryId, subCategoryId, title, description } =
@@ -4924,6 +4681,11 @@ exports.deleteTestSeries = async (req, res) => {
     });
   }
 };
+
+// ============================================================================
+// 🎥 VIDEO LECTURE MANAGEMENT
+// ============================================================================
+
 exports.createVideoLecture = async (req, res) => {
   try {
     const {
@@ -5071,6 +4833,11 @@ exports.getAllVideoLectures = async (req, res) => {
     });
   }
 };
+
+// ============================================================================
+// 📅 EXAM SCHEDULE MANAGEMENT
+// ============================================================================
+
 exports.createExamSchedule = async (req, res) => {
   try {
     const {
@@ -5222,6 +4989,11 @@ exports.getAllExamSchedules = async (req, res) => {
     });
   }
 };
+
+// ============================================================================
+// 📹 RECORDING MANAGEMENT
+// ============================================================================
+
 exports.createRecording = async (req, res) => {
   try {
     const {
@@ -5367,6 +5139,11 @@ exports.getAllRecordings = async (req, res) => {
     });
   }
 };
+
+// ============================================================================
+// 📋 SURVEY MANAGEMENT
+// ============================================================================
+
 exports.createSurveyForm = async (req, res) => {
   try {
     const {
@@ -5554,6 +5331,11 @@ exports.addAdminReply = async (req, res) => {
     });
   }
 };
+
+// ============================================================================
+// 🔗 FOLLOW US MANAGEMENT
+// ============================================================================
+
 exports.createFollowUs = async (req, res) => {
   try {
     const { platform, url, description } = req.body;
@@ -5677,6 +5459,10 @@ exports.deleteFollowUs = async (req, res) => {
   }
 };
 
+// ============================================================================
+// 📊 UTILITY FUNCTIONS
+// ============================================================================
+
 // Added by Himanshu
 exports.updateDownloads = async (req, res) => {
   console.log("updateDownloads function hit");
@@ -5731,5 +5517,1599 @@ exports.updateDownloads = async (req, res) => {
   } catch (error) {
     console.error("Error updating downloads:", error);
     res.status(500).json({ message: "Server error while updating downloads" });
+  }
+};
+
+// ============================================================================
+// 📚 COURSE MANAGEMENT - CREATE COURSE
+// ============================================================================
+
+/**
+ * Create a new course
+ * Route: POST /api/v1/admin/courses/add
+ * Middleware: authJwt.verifyToken, kpUpload
+ */
+exports.createCourse = async (req, res) => {
+  try {
+    console.log("📚 Creating new course with data:", req.body);
+    console.log("📁 Uploaded files:", req.files ? Object.keys(req.files) : 'No files');
+
+    // Extract course data from request body
+    const courseData = {
+      title: req.body.title,
+      description: req.body.description,
+      subject: req.body.subject,
+      price: req.body.price,
+      oldPrice: req.body.oldPrice,
+      startDate: req.body.startDate,
+      endDate: req.body.endDate,
+      discount: req.body.discount,
+      duration: req.body.duration,
+      lessons: req.body.lessons,
+      weeks: req.body.weeks,
+      subCategory: req.body.subCategory,
+      categoryId: req.body.categoryId,
+      level: req.body.level,
+      language: req.body.language,
+      status: req.body.status || 'draft',
+      isPublished: req.body.isPublished === 'true' ? true : false, // Convert string to boolean
+    };
+
+    // Validate required fields
+    if (!courseData.title || !courseData.description) {
+      return res.status(400).json({
+        status: 400,
+        message: "Title and description are required",
+        data: null,
+      });
+    }
+
+    // Use courseService to handle business logic
+    const newCourse = await courseService.createCourseLogic(courseData, req.files);
+
+    console.log("✅ Course created successfully:", newCourse.title);
+
+    return res.status(201).json({
+      status: 201,
+      message: "Course created successfully",
+      data: newCourse,
+    });
+  } catch (error) {
+    console.error("❌ Error creating course:", error);
+    
+    // Handle validation errors
+    if (error.name === 'ValidationError') {
+      console.error("❌ Mongoose ValidationError:", error.errors);
+      return res.status(400).json({
+        status: 400,
+        message: "Validation error",
+        data: error.errors,
+      });
+    }
+    
+    // Handle other specific errors
+    if (error.message && error.message.includes('must be true or false')) {
+      console.error("❌ Boolean validation error:", error.message);
+      return res.status(400).json({
+        status: 400,
+        message: error.message,
+        data: null,
+      });
+    }
+
+    // Handle duplicate key errors
+    if (error.code === 11000) {
+      return res.status(409).json({
+        status: 409,
+        message: "Course with this title already exists",
+        data: null,
+      });
+    }
+
+    return res.status(500).json({
+      status: 500,
+      message: "Server error while creating course",
+      data: error.message,
+    });
+  }
+};
+
+// ============================================================================
+// 📢 COURSE PUBLISH/UNPUBLISH MANAGEMENT
+// ============================================================================
+
+/**
+ * Toggle publish status of a course
+ * Route: PATCH /api/v1/admin/courses/:id/toggle-publish
+ */
+exports.togglePublishCourse = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isPublished } = req.body; // Get desired state from request body
+
+    console.log("🔄 Setting publish status for course:", id, "to:", isPublished);
+
+    // Validate if id is a valid ObjectId
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 400,
+        message: "Invalid course ID",
+        data: null,
+      });
+    }
+
+    // Find the course
+    const course = await Course.findById(id);
+    if (!course) {
+      return res.status(404).json({
+        status: 404,
+        message: "Course not found",
+        data: null,
+      });
+    }
+
+    // Set the publish status to desired state
+    console.log("🔍 Current isPublished value:", course.isPublished, typeof course.isPublished);
+    
+    // If no desired state provided, toggle the current state
+    let newStatus;
+    if (isPublished !== undefined) {
+      // Use the desired state from request
+      newStatus = isPublished === true || isPublished === 'true';
+    } else {
+      // Fallback to toggle behavior
+      const isCurrentlyPublished = course.isPublished === true;
+      newStatus = !isCurrentlyPublished;
+    }
+    
+    // Explicitly set the field to ensure it's a proper boolean
+    course.set('isPublished', newStatus);
+    
+    console.log("🔄 New isPublished value:", course.isPublished, typeof course.isPublished);
+    await course.save();
+
+    console.log(`✅ Course "${course.title}" ${course.isPublished ? 'published' : 'unpublished'} successfully`);
+
+    return res.status(200).json({
+      status: 200,
+      message: `Course ${course.isPublished ? 'published' : 'unpublished'} successfully`,
+      data: {
+        courseId: course._id,
+        title: course.title,
+        isPublished: course.isPublished,
+      },
+    });
+  } catch (error) {
+    console.error("❌ Error toggling course publish status:", error);
+    return res.status(500).json({
+      status: 500,
+      message: "Server error while updating course publish status",
+      data: error.message,
+    });
+  }
+};
+
+/**
+ * Get all published courses (for public/user access)
+ * Route: GET /api/v1/user/courses
+ */
+exports.getAllPublishedCourses = async (req, res) => {
+  try {
+    console.log("📚 Fetching all published courses");
+
+    // Find only published courses
+    const courses = await Course.find({ isPublished: true })
+      .populate("category", "name")
+      .populate("teacher", "name email")
+      .populate("faqs")
+      .sort({ createdAt: -1 });
+
+    console.log(`📚 Found ${courses.length} published courses`);
+
+    return res.status(200).json({
+      status: 200,
+      message: "Published courses retrieved successfully",
+      data: courses,
+    });
+  } catch (error) {
+    console.error("❌ Error fetching published courses:", error);
+    return res.status(500).json({
+      status: 500,
+      message: "Server error while fetching published courses",
+      data: error.message,
+    });
+  }
+};
+
+// ============================================================================
+// 📚 BATCH COURSE MANAGEMENT
+// ============================================================================
+
+/**
+ * Create a new batch course (no pricing, manual enrollment)
+ * Route: POST /api/v1/admin/batch-courses/create
+ */
+exports.createBatchCourse = async (req, res) => {
+  try {
+    const {
+      title,
+      description,
+      category,
+      subCategory,
+      teacher,
+      batchName,
+      batchSize,
+      batchStartDate,
+      batchEndDate,
+      duration,
+      lessons,
+      weeks
+    } = req.body;
+
+    // Validate required fields
+    if (!title || !description || !category || !batchName) {
+      return res.status(400).json({
+        status: 400,
+        message: "Missing required fields: title, description, category, batchName",
+      });
+    }
+
+    // Create batch course with default values for batch type
+    const newBatchCourse = new Course({
+      title,
+      description: Array.isArray(description) ? description : [description],
+      category,
+      subCategory,
+      teacher: teacher ? (Array.isArray(teacher) ? teacher : [teacher]) : [],
+      courseType: "Batch",
+      price: 0, // Batch courses are free
+      oldPrice: 0,
+      isPublished: false, // Default to unpublished
+      batchName,
+      batchSize: batchSize || 50,
+      batchStartDate: batchStartDate ? new Date(batchStartDate) : null,
+      batchEndDate: batchEndDate ? new Date(batchEndDate) : null,
+      duration,
+      lessons,
+      weeks,
+      manualEnrollments: []
+    });
+
+    const savedCourse = await newBatchCourse.save();
+
+    // Create folder for the batch course (same as regular courses)
+    const { createFolder } = require('./courseController');
+    const folderReqBody = {
+      name: savedCourse.title,
+      courseId: savedCourse._id,
+    };
+    const folderReq = { body: folderReqBody };
+    const folderResponse = await createFolder(folderReq);
+    const rootFolderId = folderResponse._id;
+
+    // Update course with rootFolder
+    savedCourse.rootFolder = rootFolderId;
+    await savedCourse.save();
+
+    console.log(`✅ Batch course created: ${savedCourse.title}`);
+
+    res.status(201).json({
+      status: 201,
+      message: "Batch course created successfully",
+      data: savedCourse,
+    });
+
+  } catch (error) {
+    console.error("❌ Error creating batch course:", error);
+
+    res.status(500).json({
+      status: 500,
+      message: "Server error while creating batch course",
+      data: error.message,
+    });
+  }
+};
+
+/**
+ * Get all batch courses
+ * Route: GET /api/v1/admin/batch-courses
+ */
+exports.getAllBatchCourses = async (req, res) => {
+  try {
+    const batchCourses = await Course.find({ courseType: "Batch" })
+      .populate('category', 'name')
+      .populate('teacher', 'firstName lastName email')
+      .populate('manualEnrollments.user', 'firstName lastName email')
+      .populate('manualEnrollments.enrolledBy', 'firstName lastName email')
+      .sort({ createdAt: -1 });
+
+    console.log(`✅ Batch courses fetched: ${batchCourses.length} courses`);
+
+    res.status(200).json({
+      status: 200,
+      message: "Batch courses fetched successfully",
+      data: batchCourses,
+    });
+
+  } catch (error) {
+    console.error("❌ Error fetching batch courses:", error);
+
+    res.status(500).json({
+      status: 500,
+      message: "Server error while fetching batch courses",
+      data: error.message,
+    });
+  }
+};
+
+/**
+ * Add user to batch course (manual enrollment)
+ * Route: POST /api/v1/admin/batch-courses/:courseId/add-user
+ */
+exports.addUserToBatchCourse = async (req, res) => {
+  try {
+    const { courseId } = req.params;
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        status: 400,
+        message: "User ID is required",
+      });
+    }
+
+    // Find the batch course
+    const course = await Course.findOne({ 
+      _id: courseId, 
+      courseType: "Batch" 
+    });
+
+    if (!course) {
+      return res.status(404).json({
+        status: 404,
+        message: "Batch course not found",
+      });
+    }
+
+    // Verify user exists first
+    const User = require('../models/userModel');
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        status: 404,
+        message: "User not found",
+      });
+    }
+
+    // Check if user is already enrolled (check both manualEnrollments and purchasedCourses)
+    const isAlreadyEnrolled = course.manualEnrollments.some(
+      enrollment => enrollment.user.toString() === userId
+    );
+
+    const hasAlreadyPurchased = user.purchasedCourses.some(
+      pc => pc.course.toString() === courseId
+    );
+
+    console.log(`🔍 [DEBUG] Duplicate check results:`);
+    console.log(`🔍 [DEBUG] - User already in manual enrollments: ${isAlreadyEnrolled}`);
+    console.log(`🔍 [DEBUG] - User already has purchased course: ${hasAlreadyPurchased}`);
+    console.log(`🔍 [DEBUG] - Current course manual enrollments: ${course.manualEnrollments.length}`);
+    console.log(`🔍 [DEBUG] - Current user purchased courses: ${user.purchasedCourses.length}`);
+
+    if (isAlreadyEnrolled || hasAlreadyPurchased) {
+      console.log(`⚠️ [DEBUG] User already has access - returning early`);
+      return res.status(400).json({
+        status: 400,
+        message: "User is already enrolled in this batch course",
+      });
+    }
+
+    console.log(`✅ [DEBUG] User does not have access yet - proceeding with addition`);
+
+    // Add user to batch course
+    course.manualEnrollments.push({
+      user: userId,
+      enrolledBy: req.user.id,
+      status: 'Active'
+    });
+
+    // ALSO add the batch course to user's purchasedCourses array
+    user.purchasedCourses.push({
+      course: courseId,
+      assignedByAdmin: {
+        isAssigned: true,
+        assignedAt: new Date(),
+        assignedBy: req.user.id
+      },
+      expiresAt: null // Batch courses don't expire by default
+    });
+
+    // Enhanced debugging before save
+    console.log(`🔧 [DEBUG] About to save changes:`);
+    console.log(`🔧 [DEBUG] - Course manual enrollments count: ${course.manualEnrollments.length}`);
+    console.log(`🔧 [DEBUG] - User purchased courses count: ${user.purchasedCourses.length}`);
+    console.log(`🔧 [DEBUG] - Course ID: ${courseId}`);
+    console.log(`🔧 [DEBUG] - User ID: ${userId}`);
+
+    try {
+      const saveResults = await Promise.all([course.save(), user.save()]);
+      console.log(`✅ [DEBUG] Save successful - Course saved: ${!!saveResults[0]}, User saved: ${!!saveResults[1]}`);
+    } catch (saveError) {
+      console.error(`❌ [DEBUG] Save failed:`, saveError);
+      throw saveError;
+    }
+
+    // Verify the save worked by re-fetching
+    const verifyUser = await User.findById(userId);
+    const verifyCourse = await Course.findById(courseId);
+    
+    const userHasCourse = verifyUser.purchasedCourses.some(pc => pc.course.toString() === courseId);
+    const courseHasUser = verifyCourse.manualEnrollments.some(e => e.user.toString() === userId);
+    
+    console.log(`🔍 [DEBUG] Verification after save:`);
+    console.log(`🔍 [DEBUG] - User has course in purchasedCourses: ${userHasCourse}`);
+    console.log(`🔍 [DEBUG] - Course has user in manualEnrollments: ${courseHasUser}`);
+
+    if (!userHasCourse || !courseHasUser) {
+      console.error(`🚨 [DEBUG] DATABASE SAVE VERIFICATION FAILED!`);
+      console.error(`🚨 [DEBUG] - User purchased courses: ${verifyUser.purchasedCourses.length}`);
+      console.error(`🚨 [DEBUG] - Course manual enrollments: ${verifyCourse.manualEnrollments.length}`);
+    }
+
+    // Populate the new enrollment for response
+    await course.populate('manualEnrollments.user', 'firstName lastName email');
+    await course.populate('manualEnrollments.enrolledBy', 'firstName lastName email');
+
+    console.log(`✅ User added to batch course: ${user.firstName} ${user.lastName} -> ${course.batchName}`);
+
+    
+
+    res.status(200).json({
+      status: 200,
+      message: "User added to batch course successfully",
+      data: course,
+    });
+
+  } catch (error) {
+    console.error("❌ Error adding user to batch course:", error);
+
+    res.status(500).json({
+      status: 500,
+      message: "Server error while adding user to batch course",
+      data: error.message,
+    });
+  }
+};
+
+/**
+ * Remove user from batch course
+ * Route: DELETE /api/v1/admin/batch-courses/:courseId/remove-user/:userId
+ */
+exports.removeUserFromBatchCourse = async (req, res) => {
+  try {
+    const { courseId, userId } = req.params;
+
+    // Find the batch course
+    const course = await Course.findOne({ 
+      _id: courseId, 
+      courseType: "Batch" 
+    });
+
+    if (!course) {
+      return res.status(404).json({
+        status: 404,
+        message: "Batch course not found",
+      });
+    }
+
+    // Find and remove the enrollment
+    const enrollmentIndex = course.manualEnrollments.findIndex(
+      enrollment => enrollment.user.toString() === userId
+    );
+
+    if (enrollmentIndex === -1) {
+      return res.status(404).json({
+        status: 404,
+        message: "User is not enrolled in this batch course",
+      });
+    }
+
+    // Get user info for logging before removal
+    const User = require('../models/userModel');
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({
+        status: 404,
+        message: "User not found",
+      });
+    }
+
+    // Remove from both course.manualEnrollments AND user.purchasedCourses
+    course.manualEnrollments.splice(enrollmentIndex, 1);
+    
+    // Remove from user's purchasedCourses array
+    user.purchasedCourses = user.purchasedCourses.filter(
+      pc => pc.course.toString() !== courseId
+    );
+
+    await Promise.all([course.save(), user.save()]);
+
+    console.log(`✅ User removed from batch course: ${user?.firstName} ${user?.lastName} <- ${course.batchName}`);
+
+    res.status(200).json({
+      status: 200,
+      message: "User removed from batch course successfully",
+      data: course,
+    });
+
+  } catch (error) {
+    console.error("❌ Error removing user from batch course:", error);
+
+    res.status(500).json({
+      status: 500,
+      message: "Server error while removing user from batch course",
+      data: error.message,
+    });
+  }
+};
+
+/**
+ * Get batch course by ID with enrolled users
+ * Route: GET /api/v1/admin/batch-courses/:courseId
+ */
+exports.getBatchCourseById = async (req, res) => {
+  try {
+    const { courseId } = req.params;
+
+    const course = await Course.findOne({ 
+      _id: courseId, 
+      courseType: "Batch" 
+    })
+      .populate('category', 'name')
+      .populate('teacher', 'firstName lastName email')
+      .populate('manualEnrollments.user', 'firstName lastName email phone')
+      .populate('manualEnrollments.enrolledBy', 'firstName lastName email');
+
+    if (!course) {
+      return res.status(404).json({
+        status: 404,
+        message: "Batch course not found",
+      });
+    }
+
+    console.log(`✅ Batch course details fetched: ${course.title} (${course.manualEnrollments.length} enrolled)`);
+
+    res.status(200).json({
+      status: 200,
+      message: "Batch course details fetched successfully",
+      data: course,
+    });
+
+  } catch (error) {
+    console.error("❌ Error fetching batch course details:", error);
+
+    res.status(500).json({
+      status: 500,
+      message: "Server error while fetching batch course details",
+      data: error.message,
+    });
+  }
+};
+
+// Utility function to fix batch courses without rootFolder
+exports.fixBatchCoursesRootFolder = async (req, res) => {
+  try {
+    console.log('🔧 Starting batch course rootFolder fix...');
+    
+    // Find batch courses without rootFolder
+    const batchCoursesWithoutFolder = await Course.find({
+      courseType: "Batch",
+      $or: [
+        { rootFolder: { $exists: false } },
+        { rootFolder: null },
+        { rootFolder: undefined }
+      ]
+    });
+    
+    console.log(`Found ${batchCoursesWithoutFolder.length} batch courses without rootFolder`);
+    
+    if (batchCoursesWithoutFolder.length === 0) {
+      return res.status(200).json({
+        status: 200,
+        message: "All batch courses already have rootFolder",
+        data: { fixed: 0, total: 0 }
+      });
+    }
+    
+    const { createFolder } = require('./courseController');
+    let fixedCount = 0;
+    const results = [];
+    
+    for (const course of batchCoursesWithoutFolder) {
+      try {
+        console.log(`🔧 Fixing course: ${course.title} (${course._id})`);
+        
+        // Create folder for the batch course
+        const folderReqBody = {
+          name: course.title,
+          courseId: course._id,
+        };
+        const folderReq = { body: folderReqBody };
+        const folderResponse = await createFolder(folderReq);
+        const rootFolderId = folderResponse._id;
+        
+        // Update course with rootFolder
+        course.rootFolder = rootFolderId;
+        await course.save();
+        
+        fixedCount++;
+        results.push({
+          courseId: course._id,
+          courseTitle: course.title,
+          rootFolderId: rootFolderId,
+          status: 'fixed'
+        });
+        
+        console.log(`✅ Fixed course: ${course.title} -> rootFolder: ${rootFolderId}`);
+        
+      } catch (error) {
+        console.error(`❌ Error fixing course ${course.title}:`, error);
+        results.push({
+          courseId: course._id,
+          courseTitle: course.title,
+          status: 'error',
+          error: error.message
+        });
+      }
+    }
+    
+    console.log(`🎉 Batch course fix completed: ${fixedCount}/${batchCoursesWithoutFolder.length} fixed`);
+    
+    res.status(200).json({
+      status: 200,
+      message: `Fixed ${fixedCount} out of ${batchCoursesWithoutFolder.length} batch courses`,
+      data: {
+        fixed: fixedCount,
+        total: batchCoursesWithoutFolder.length,
+        results: results
+      }
+    });
+    
+  } catch (error) {
+    console.error("❌ Error in fixBatchCoursesRootFolder:", error);
+    res.status(500).json({
+      status: 500,
+      message: "Server error while fixing batch courses",
+      data: error.message,
+    });
+  }
+};
+
+// Debug endpoint to check user's purchased courses
+exports.debugUserCourses = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    if (!userId) {
+      return res.status(400).json({
+        status: 400,
+        message: "User ID is required",
+      });
+    }
+    
+    const user = await User.findById(userId).populate({
+      path: 'purchasedCourses.course',
+      select: 'title courseType isPublished _id'
+    });
+    
+    if (!user) {
+      return res.status(404).json({
+        status: 404,
+        message: "User not found",
+      });
+    }
+    
+    console.log(`🔍 [DEBUG] User courses for ${user.firstName} ${user.lastName}:`);
+    
+    const courseDetails = user.purchasedCourses.map(pc => ({
+      courseId: pc.course?._id?.toString() || 'N/A',
+      courseTitle: pc.course?.title || 'N/A',
+      courseType: pc.course?.courseType || 'N/A',
+      isPublished: pc.course?.isPublished || false,
+      assignedByAdmin: pc.assignedByAdmin?.isAssigned || false,
+      assignedAt: pc.assignedByAdmin?.assignedAt || null,
+      expiresAt: pc.expiresAt || null
+    }));
+    
+    console.log(`🔍 [DEBUG] Course details:`, courseDetails);
+    
+    res.status(200).json({
+      status: 200,
+      message: "User course debug info retrieved successfully",
+      data: {
+        userId: userId,
+        userName: `${user.firstName} ${user.lastName}`,
+        totalCourses: user.purchasedCourses.length,
+        courses: courseDetails
+      }
+    });
+    
+  } catch (error) {
+    console.error("❌ Error in debugUserCourses:", error);
+    res.status(500).json({
+      status: 500,
+      message: "Server error while debugging user courses",
+      data: error.message,
+    });
+  }
+};
+
+// Quick fix for user batch course access
+exports.fixUserBatchAccess = async (req, res) => {
+  try {
+    const { userId, courseId } = req.body;
+    
+    console.log(`🔧 [DEBUG] fixUserBatchAccess called with:`);
+    console.log(`🔧 [DEBUG] - userId: ${userId}`);
+    console.log(`🔧 [DEBUG] - courseId: ${courseId}`);
+
+// FORCE FIX: Direct database operation for the specific user
+if (!userId && !courseId) {
+  const tempUserId = '6889f297ae1f381179cf6f50';
+  const tempCourseId = '6895a124640829b294034fa0';
+  console.log(`🔧 [FORCE FIX] Direct database operation for user ${tempUserId} to course ${tempCourseId}`);
+  
+  try {
+    const tempUser = await User.findById(tempUserId);
+    const tempCourse = await Course.findById(tempCourseId);
+    
+    if (!tempUser) {
+      return res.status(404).json({ status: 404, message: "User not found" });
+    }
+    
+    if (!tempCourse) {
+      return res.status(404).json({ status: 404, message: "Course not found" });
+    }
+    
+    console.log(`🔧 [FORCE FIX] Found user: ${tempUser.firstName} ${tempUser.lastName}`);
+    console.log(`🔧 [FORCE FIX] Found course: ${tempCourse.title || tempCourse.batchName} (Type: ${tempCourse.courseType})`);
+    
+    // Check current access
+    const hasInPurchased = tempUser.purchasedCourses.some(pc => pc.course.toString() === tempCourseId);
+    const hasInEnrollments = tempCourse.manualEnrollments.some(e => e.user.toString() === tempUserId);
+    
+    console.log(`🔧 [FORCE FIX] Current access status:`);
+    console.log(`🔧 [FORCE FIX] - In purchased courses: ${hasInPurchased}`);
+    console.log(`🔧 [FORCE FIX] - In manual enrollments: ${hasInEnrollments}`);
+    
+    let changes = [];
+    
+    if (!hasInPurchased) {
+      tempUser.purchasedCourses.push({
+        course: tempCourseId,
+        assignedByAdmin: {
+          isAssigned: true,
+          assignedAt: new Date(),
+          assignedBy: tempUserId
+        },
+        expiresAt: null
+      });
+      changes.push("Added to purchased courses");
+      console.log(`🔧 [FORCE FIX] Added course to user's purchased courses`);
+    }
+    
+    if (tempCourse.courseType === 'Batch' && !hasInEnrollments) {
+      tempCourse.manualEnrollments.push({
+        user: tempUserId,
+        enrolledBy: tempUserId,
+        status: 'Active'
+      });
+      changes.push("Added to manual enrollments");
+      console.log(`🔧 [FORCE FIX] Added user to course's manual enrollments`);
+    }
+    
+    if (changes.length > 0) {
+      console.log(`🔧 [FORCE FIX] Saving changes: ${changes.join(', ')}`);
+      
+      // Force save with validation disabled
+      const saveResults = await Promise.all([
+        tempUser.save({ validateBeforeSave: false }),
+        tempCourse.save({ validateBeforeSave: false })
+      ]);
+      
+      console.log(`✅ [FORCE FIX] Save results: User=${!!saveResults[0]}, Course=${!!saveResults[1]}`);
+      
+      // Verify the changes
+      const verifyUser = await User.findById(tempUserId);
+      const verifyCourse = await Course.findById(tempCourseId);
+      
+      const finalUserHas = verifyUser.purchasedCourses.some(pc => pc.course.toString() === tempCourseId);
+      const finalCourseHas = verifyCourse.manualEnrollments.some(e => e.user.toString() === tempUserId);
+      
+      console.log(`🔧 [FORCE FIX] Final verification:`);
+      console.log(`🔧 [FORCE FIX] - User has course: ${finalUserHas}`);
+      console.log(`🔧 [FORCE FIX] - Course has user: ${finalCourseHas}`);
+      
+      return res.status(200).json({
+        status: 200,
+        message: `✅ FORCE FIX: Successfully applied changes - ${changes.join(', ')}`,
+        data: { 
+          userId: tempUserId, 
+          courseId: tempCourseId,
+          changes,
+          verification: { userHasCourse: finalUserHas, courseHasUser: finalCourseHas }
+        }
+      });
+    } else {
+      return res.status(200).json({
+        status: 200,
+        message: `✅ User already has proper access to course`,
+        data: { userId: tempUserId, courseId: tempCourseId }
+      });
+    }
+    
+  } catch (forceFixError) {
+    console.error(`❌ [FORCE FIX] Error:`, forceFixError);
+    return res.status(500).json({
+      status: 500,
+      message: `Force fix failed: ${forceFixError.message}`,
+      error: forceFixError.message
+    });
+  }
+}
+    
+    if (!userId || !courseId) {
+      return res.status(400).json({
+        status: 400,
+        message: "User ID and Course ID are required",
+      });
+    }
+    
+    // Find the user and course
+    const user = await User.findById(userId);
+    const course = await Course.findById(courseId);
+    
+    if (!user) {
+      return res.status(404).json({
+        status: 404,
+        message: "User not found",
+      });
+    }
+    
+    if (!course) {
+      return res.status(404).json({
+        status: 404,
+        message: "Course not found",
+      });
+    }
+    
+    console.log(`🔧 Fixing batch access for user: ${user.firstName} ${user.lastName}`);
+    console.log(`🔧 Course: ${course.title} (${course.courseType})`);
+    
+    // Check if user already has the course
+    const hasAlreadyPurchased = user.purchasedCourses.some(
+      pc => pc.course.toString() === courseId
+    );
+    
+    if (hasAlreadyPurchased) {
+      return res.status(200).json({
+        status: 200,
+        message: "User already has access to this course",
+        data: {
+          userId,
+          courseId,
+          courseName: course.title,
+          userName: `${user.firstName} ${user.lastName}`
+        }
+      });
+    }
+    
+    // Add the batch course to user's purchasedCourses array
+    user.purchasedCourses.push({
+      course: courseId,
+      assignedByAdmin: {
+        isAssigned: true,
+        assignedAt: new Date(),
+        assignedBy: req.user._id
+      },
+      expiresAt: null // Batch courses don't expire by default
+    });
+    
+    // Also ensure user is in course's manualEnrollments
+    const isAlreadyEnrolled = course.manualEnrollments.some(
+      enrollment => enrollment.user.toString() === userId
+    );
+    
+    if (!isAlreadyEnrolled) {
+      course.manualEnrollments.push({
+        user: userId,
+        enrolledBy: req.user._id,
+        status: 'Active'
+      });
+    }
+    
+    await Promise.all([user.save(), course.save()]);
+    
+    console.log(`✅ Fixed batch access for user: ${user.firstName} ${user.lastName} -> ${course.title}`);
+    
+    res.status(200).json({
+      status: 200,
+      message: "User batch course access fixed successfully",
+      data: {
+        userId,
+        courseId,
+        courseName: course.title,
+        courseType: course.courseType,
+        userName: `${user.firstName} ${user.lastName}`,
+        accessGranted: true
+      }
+    });
+    
+  } catch (error) {
+    console.error("❌ Error in fixUserBatchAccess:", error);
+    res.status(500).json({
+      status: 500,
+      message: "Server error while fixing user batch access",
+      data: error.message,
+    });
+  }
+};
+
+// Utility to check and explain batch course file access
+exports.checkBatchFileAccess = async (req, res) => {
+  try {
+    const { courseId, userId } = req.body;
+    
+    if (!courseId) {
+      return res.status(400).json({
+        status: 400,
+        message: "Course ID is required",
+      });
+    }
+    
+    const course = await Course.findById(courseId);
+    if (!course) {
+      return res.status(404).json({
+        status: 404,
+        message: "Course not found",
+      });
+    }
+    
+    if (course.courseType !== "Batch") {
+      return res.status(400).json({
+        status: 400,
+        message: "This utility is only for batch courses",
+      });
+    }
+    
+    let userInfo = null;
+    let hasAccess = false;
+    
+    if (userId) {
+      const user = await User.findById(userId).populate('purchasedCourses.course', 'title courseType');
+      if (user) {
+        hasAccess = user.purchasedCourses.some(pc => pc.course._id.toString() === courseId);
+        userInfo = {
+          userId: user._id,
+          name: `${user.firstName} ${user.lastName}`,
+          hasAccess: hasAccess
+        };
+      }
+    }
+    
+    // Get course folder and files
+    const Folder = require('../models/folderModel');
+    const File = require('../models/fileModel');
+    
+    const rootFolder = await Folder.findById(course.rootFolder).populate('files');
+    if (!rootFolder) {
+      return res.status(404).json({
+        status: 404,
+        message: "Course root folder not found",
+      });
+    }
+    
+    const fileAccessInfo = rootFolder.files.map(file => {
+      const wasManuallyLocked = file.isViewable === false;
+      let userCanAccess = false;
+      
+      if (hasAccess) {
+        // Batch course logic: unlocked by default unless manually locked
+        userCanAccess = !wasManuallyLocked;
+      }
+      
+      return {
+        fileId: file._id,
+        fileName: file.name,
+        originalIsViewable: file.isViewable,
+        wasManuallyLocked: wasManuallyLocked,
+        userCanAccess: userCanAccess,
+        explanation: hasAccess 
+          ? (wasManuallyLocked 
+              ? "🔒 Locked - Admin manually locked this file" 
+              : "🔓 Unlocked - Default batch behavior")
+          : "❌ No access - User not enrolled in batch"
+      };
+    });
+    
+    res.status(200).json({
+      status: 200,
+      message: "Batch file access analysis completed",
+      data: {
+        course: {
+          id: course._id,
+          title: course.title,
+          type: course.courseType
+        },
+        user: userInfo,
+        batchAccessRule: "Files are UNLOCKED by default unless admin manually locks them",
+        totalFiles: rootFolder.files.length,
+        files: fileAccessInfo,
+        summary: {
+          totalFiles: rootFolder.files.length,
+          manuallyLocked: fileAccessInfo.filter(f => f.wasManuallyLocked).length,
+          userCanAccess: fileAccessInfo.filter(f => f.userCanAccess).length
+        }
+      }
+    });
+    
+  } catch (error) {
+    console.error("❌ Error in checkBatchFileAccess:", error);
+    res.status(500).json({
+      status: 500,
+      message: "Server error while checking batch file access",
+      data: error.message,
+    });
+  }
+};
+
+// Add Free Class to Folder
+exports.addFreeClassToFolder = async (req, res) => {
+  try {
+    const { folderId } = req.params;
+    const { name, url, description, type } = req.body;
+
+    console.log(`🔍 [DEBUG] Adding free class to folder ${folderId}:`, { name, url, type });
+
+    // Validate required fields
+    if (!name || !url) {
+      return res.status(400).json({ 
+        message: "Name and URL are required",
+        error: "Missing required fields" 
+      });
+    }
+
+    // Validate YouTube URL
+    const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+/;
+    if (!youtubeRegex.test(url)) {
+      return res.status(400).json({ 
+        message: "Invalid YouTube URL",
+        error: "Please provide a valid YouTube URL" 
+      });
+    }
+
+    // Find the folder
+    const Folder = require("../models/folderModel");
+    const File = require("../models/fileModel");
+    const mongoose = require("mongoose");
+    
+    const folder = await Folder.findById(folderId);
+    if (!folder) {
+      return res.status(404).json({ 
+        message: "Folder not found",
+        error: "The specified folder does not exist" 
+      });
+    }
+
+    // Create a new File model instance for the free class
+    const freeClassFile = new File({
+      name: name.trim(),
+      url: url.trim(),
+      description: description ? description.trim() : "",
+      type: type || "youtube", // Add type field to identify YouTube videos
+      isViewable: true, // Free classes are always viewable
+      isDownloadable: false, // YouTube videos are not downloadable
+    });
+
+    // Save the file first
+    const savedFile = await freeClassFile.save();
+
+    // Add the file ID to folder's files array
+    if (!folder.files) {
+      folder.files = [];
+    }
+    folder.files.push(savedFile._id);
+
+    // Save the folder
+    await folder.save();
+
+    // Re-fetch the folder with populated data to ensure consistency
+    const updatedFolder = await Folder.findById(folderId)
+      .populate("folders")
+      .populate("files");
+
+    console.log(`✅ [DEBUG] Free class added successfully to folder ${folderId}`);
+    console.log(`✅ [DEBUG] Updated folder now has ${updatedFolder.files.length} files`);
+
+    res.status(201).json({ 
+      message: "Free class added successfully",
+      freeClass: savedFile,
+      folder: updatedFolder
+    });
+
+  } catch (error) {
+    console.error("❌ Error adding free class to folder:", error);
+    res.status(500).json({ 
+      message: "Failed to add free class",
+      error: error.message 
+    });
+  }
+};
+
+// ============================================================================
+// 🔧 ASSIGNMENT FOLDER UTILITIES
+
+exports.debugAssignmentFolders = async (req, res) => {
+  try {
+    const Folder = require("../models/folderModel");
+    
+    console.log('🔍 [DEBUG] Checking assignment folders...');
+    
+    // Find all folders with name "Assignments"
+    const assignmentFolders = await Folder.find({ name: "Assignments" });
+    
+    console.log(`🔍 [DEBUG] Found ${assignmentFolders.length} assignment folders`);
+    
+    const folderInfo = assignmentFolders.map(folder => ({
+      id: folder._id,
+      name: folder.name,
+      parentFolderId: folder.parentFolderId,
+      parentFolder: folder.parentFolder, // Old field
+      isSystemFolder: folder.isSystemFolder,
+      folderType: folder.folderType,
+      hasParentFolder: !!folder.parentFolder,
+      hasParentFolderId: !!folder.parentFolderId
+    }));
+    
+    // Also check student folders
+    const studentFolders = await Folder.find({
+      name: { $regex: /_/ }, // Names with underscore
+    }).limit(5); // Limit to first 5 for debugging
+    
+    const studentInfo = studentFolders.map(folder => ({
+      id: folder._id,
+      name: folder.name,
+      parentFolderId: folder.parentFolderId,
+      parentFolder: folder.parentFolder,
+      isSystemFolder: folder.isSystemFolder,
+      folderType: folder.folderType
+    }));
+    
+    res.status(200).json({
+      status: 200,
+      message: 'Assignment folder debug info',
+      data: {
+        assignmentFolders: folderInfo,
+        studentFolders: studentInfo,
+        totalAssignmentFolders: assignmentFolders.length,
+        totalStudentFolders: studentFolders.length
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ [ERROR] Debug assignment folders failed:', error);
+    res.status(500).json({
+      status: 500,
+      message: 'Debug assignment folders failed',
+      error: error.message
+    });
+  }
+};
+
+exports.fixAssignmentFolders = async (req, res) => {
+  try {
+    console.log('🔧 [DEBUG] Starting assignment folder fix...');
+    console.log('🔧 [DEBUG] User:', req.user ? `${req.user.firstName} (${req.user.userType})` : 'No user');
+    
+    // Find all folders with name "Assignments" that have wrong field names
+    const assignmentFolders = await Folder.find({ 
+      name: "Assignments",
+      $or: [
+        { parentFolder: { $exists: true } }, // Old field name
+        { isSystemFolder: { $ne: true } },   // Missing system flag
+        { folderType: { $ne: 'assignments' } } // Wrong folder type
+      ]
+    });
+    
+    console.log(`🔧 [DEBUG] Found ${assignmentFolders.length} assignment folders to fix`);
+    
+    let fixedCount = 0;
+    
+    for (const folder of assignmentFolders) {
+      let needsUpdate = false;
+      const updateData = {};
+      
+      // Fix parentFolder -> parentFolderId
+      if (folder.parentFolder && !folder.parentFolderId) {
+        updateData.parentFolderId = folder.parentFolder;
+        updateData.$unset = { parentFolder: 1 };
+        needsUpdate = true;
+        console.log(`🔧 [DEBUG] Fixing parentFolder for folder ${folder._id}`);
+      }
+      
+      // Add system folder flags
+      if (!folder.isSystemFolder) {
+        updateData.isSystemFolder = true;
+        needsUpdate = true;
+        console.log(`🔧 [DEBUG] Adding isSystemFolder flag for folder ${folder._id}`);
+      }
+      
+      if (folder.folderType !== 'assignments') {
+        updateData.folderType = 'assignments';
+        needsUpdate = true;
+        console.log(`🔧 [DEBUG] Setting folderType to assignments for folder ${folder._id}`);
+      }
+      
+      if (needsUpdate) {
+        await Folder.findByIdAndUpdate(folder._id, updateData);
+        fixedCount++;
+        console.log(`✅ [DEBUG] Fixed assignment folder ${folder._id}`);
+      }
+    }
+    
+    // Fix student assignment folders too
+    const studentFolders = await Folder.find({
+      name: { $regex: /_/ }, // Names with underscore (student folders)
+      $or: [
+        { parentFolder: { $exists: true } },
+        { isSystemFolder: { $ne: true } },
+        { folderType: { $ne: 'student_assignments' } }
+      ]
+    });
+    
+    console.log(`🔧 [DEBUG] Found ${studentFolders.length} student assignment folders to fix`);
+    
+    for (const folder of studentFolders) {
+      // Check if this is actually a student assignment folder by checking its parent
+      const parentFolder = await Folder.findById(folder.parentFolderId || folder.parentFolder);
+      if (parentFolder && parentFolder.name === 'Assignments') {
+        let needsUpdate = false;
+        const updateData = {};
+        
+        // Fix parentFolder -> parentFolderId
+        if (folder.parentFolder && !folder.parentFolderId) {
+          updateData.parentFolderId = folder.parentFolder;
+          updateData.$unset = { parentFolder: 1 };
+          needsUpdate = true;
+        }
+        
+        // Add system folder flags
+        if (!folder.isSystemFolder) {
+          updateData.isSystemFolder = true;
+          needsUpdate = true;
+        }
+        
+        if (folder.folderType !== 'student_assignments') {
+          updateData.folderType = 'student_assignments';
+          needsUpdate = true;
+        }
+        
+        if (needsUpdate) {
+          await Folder.findByIdAndUpdate(folder._id, updateData);
+          fixedCount++;
+          console.log(`✅ [DEBUG] Fixed student assignment folder ${folder._id}`);
+        }
+      }
+    }
+    
+    console.log(`🎉 [DEBUG] Assignment folder fix complete. Fixed ${fixedCount} folders.`);
+    
+    res.status(200).json({
+      status: 200,
+      message: `Assignment folder fix complete. Fixed ${fixedCount} folders.`,
+      data: { fixedCount }
+    });
+    
+  } catch (error) {
+    console.error('❌ [ERROR] Assignment folder fix failed:', error);
+    res.status(500).json({
+      status: 500,
+      message: 'Assignment folder fix failed',
+      error: error.message
+    });
+  }
+};
+
+// 📝 ASSIGNMENT SUBMISSION FUNCTIONS
+// ============================================================================
+
+// Get all assignment submissions for admin
+exports.getAllAssignmentSubmissions = async (req, res) => {
+  try {
+    const AssignmentSubmission = require("../models/assignmentSubmissionModel");
+    
+    console.log('🔍 [DEBUG] Fetching all assignment submissions for admin');
+    
+    const submissions = await AssignmentSubmission.find()
+      .populate('student', 'firstName lastName email phone')
+      .populate('courseRootFolder', 'name')
+      .sort({ createdAt: -1 });
+    
+    console.log(`✅ [DEBUG] Found ${submissions.length} assignment submissions`);
+    
+    res.status(200).json({
+      status: 200,
+      message: "Assignment submissions retrieved successfully",
+      data: submissions
+    });
+    
+  } catch (error) {
+    console.error("❌ Error fetching assignment submissions:", error);
+    res.status(500).json({
+      status: 500,
+      message: "Failed to fetch assignment submissions",
+      error: error.message
+    });
+  }
+};
+
+// Get assignment submissions for a specific user
+exports.getUserAssignmentSubmissions = async (req, res) => {
+  try {
+    const AssignmentSubmission = require("../models/assignmentSubmissionModel");
+    const { userId } = req.params;
+    
+    console.log(`🔍 [DEBUG] Fetching assignment submissions for user: ${userId}`);
+    
+    const submissions = await AssignmentSubmission.find({ student: userId })
+      .populate('courseRootFolder', 'name')
+      .populate('student', 'firstName lastName phone')
+      .sort({ createdAt: -1 });
+    
+    console.log(`✅ [DEBUG] Found ${submissions.length} submissions for user ${userId}`);
+    
+    res.status(200).json({
+      status: 200,
+      message: "User assignment submissions retrieved successfully",
+      data: submissions
+    });
+    
+  } catch (error) {
+    console.error("❌ Error fetching user assignment submissions:", error);
+    res.status(500).json({
+      status: 500,
+      message: "Failed to fetch user assignment submissions",
+      error: error.message
+    });
+  }
+};
+
+// Update assignment submission review
+exports.updateAssignmentReview = async (req, res) => {
+  try {
+    const AssignmentSubmission = require("../models/assignmentSubmissionModel");
+    const { submissionId } = req.params;
+    const { comments, grade, status } = req.body;
+    const adminId = req.user._id;
+    
+    console.log(`🔍 [DEBUG] Updating assignment review for submission: ${submissionId}`);
+    
+    const submission = await AssignmentSubmission.findById(submissionId);
+    if (!submission) {
+      return res.status(404).json({
+        status: 404,
+        message: "Assignment submission not found"
+      });
+    }
+    
+    // Update review information
+    submission.adminReview = {
+      reviewedBy: adminId,
+      reviewDate: new Date(),
+      comments: comments || submission.adminReview.comments,
+      grade: grade || submission.adminReview.grade
+    };
+    
+    if (status) {
+      submission.submissionStatus = status;
+    }
+    
+    await submission.save();
+    
+    // Populate the updated submission
+    const updatedSubmission = await AssignmentSubmission.findById(submissionId)
+      .populate('student', 'firstName lastName email')
+      .populate('courseRootFolder', 'name')
+      .populate('adminReview.reviewedBy', 'firstName lastName');
+    
+    console.log(`✅ [DEBUG] Assignment review updated successfully`);
+    
+    res.status(200).json({
+      status: 200,
+      message: "Assignment review updated successfully",
+      data: updatedSubmission
+    });
+    
+  } catch (error) {
+    console.error("❌ Error updating assignment review:", error);
+    res.status(500).json({
+      status: 500,
+      message: "Failed to update assignment review",
+      error: error.message
+    });
+  }
+};
+
+// 🔧 TEMPORARY: Fix quiz folder visibility for existing folders
+exports.fixFolderVisibility = async (req, res) => {
+  try {
+    console.log('🔧 [ADMIN] Fixing quiz folder visibility...');
+    
+    // Only allow admin users
+    if (req.user.userType !== 'ADMIN') {
+      return res.status(403).json({
+        status: 403,
+        message: 'Access denied. Admin privileges required.'
+      });
+    }
+    
+    const QuizFolder = require('../models/quizFolder');
+    
+    // Find all folders that are currently invisible
+    const invisibleFolders = await QuizFolder.find({ isVisible: false });
+    
+    console.log(`📊 Found ${invisibleFolders.length} invisible folders`);
+    
+    if (invisibleFolders.length === 0) {
+      return res.status(200).json({
+        status: 200,
+        message: 'All folders are already visible!',
+        data: {
+          foldersUpdated: 0,
+          totalFolders: await QuizFolder.countDocuments()
+        }
+      });
+    }
+    
+    // Show which folders will be updated
+    console.log('📁 Folders to be made visible:');
+    invisibleFolders.forEach((folder, index) => {
+      console.log(`   ${index + 1}. "${folder.name}" (ID: ${folder._id})`);
+    });
+    
+    // Update all invisible folders to be visible
+    const result = await QuizFolder.updateMany(
+      { isVisible: false },
+      { $set: { isVisible: true } }
+    );
+    
+    console.log(`✅ SUCCESS: Updated ${result.modifiedCount} folders to be visible`);
+    
+    // Verify the update
+    const stillInvisible = await QuizFolder.find({ isVisible: false });
+    const totalFolders = await QuizFolder.countDocuments();
+    
+    res.status(200).json({
+      status: 200,
+      message: `Successfully updated ${result.modifiedCount} folders to be visible`,
+      data: {
+        foldersUpdated: result.modifiedCount,
+        remainingInvisible: stillInvisible.length,
+        totalFolders: totalFolders,
+        updatedFolders: invisibleFolders.map(f => ({ id: f._id, name: f.name }))
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Error fixing folder visibility:', error);
+    res.status(500).json({
+      status: 500,
+      message: 'Failed to fix folder visibility',
+      error: error.message
+    });
+  }
+};
+
+// 🔧 ADMIN: Cleanup incomplete/expired scorecards
+exports.cleanupIncompleteScorecards = async (req, res) => {
+  try {
+    console.log('🧹 [ADMIN] Starting cleanup of incomplete scorecards...');
+    
+    // Check if user is admin
+    if (req.user.userType !== 'ADMIN') {
+      return res.status(403).json({
+        status: 403,
+        message: 'Access denied. Admin privileges required.'
+      });
+    }
+
+    const Scorecard = require('../models/scorecardModel');
+    const { finishQuizHelper } = require('../utils/scoreUtils');
+    
+    const currentTime = new Date();
+    
+    // Find all incomplete scorecards
+    const incompleteScorecards = await Scorecard.find({ 
+      completed: false 
+    }).populate('quizId', 'quizName').populate('userId', 'name email');
+    
+    if (incompleteScorecards.length === 0) {
+      return res.status(200).json({
+        status: 200,
+        message: 'No incomplete scorecards found.',
+        processed: 0
+      });
+    }
+
+    console.log(`📊 [ADMIN] Found ${incompleteScorecards.length} incomplete scorecards`);
+    
+    let expiredCount = 0;
+    let activeCount = 0;
+    let processedCount = 0;
+    let errorCount = 0;
+    const processedScorecards = [];
+
+    for (const scorecard of incompleteScorecards) {
+      try {
+        const isExpired = scorecard.expectedEndTime && currentTime > scorecard.expectedEndTime;
+        
+        if (isExpired) {
+          console.log(`🕐 [ADMIN] Auto-submitting expired scorecard ${scorecard._id} (User: ${scorecard.userId?.name || 'Unknown'})`);
+          await finishQuizHelper(scorecard);
+          expiredCount++;
+          processedCount++;
+          
+          processedScorecards.push({
+            scorecardId: scorecard._id,
+            userId: scorecard.userId?._id,
+            userName: scorecard.userId?.name || 'Unknown',
+            quizName: scorecard.quizId?.quizName || 'Unknown',
+            action: 'auto-submitted',
+            expiredBy: Math.ceil((currentTime - scorecard.expectedEndTime) / (1000 * 60)) + ' minutes'
+          });
+        } else {
+          activeCount++;
+          const timeRemaining = scorecard.expectedEndTime ? 
+            Math.max(0, Math.ceil((scorecard.expectedEndTime - currentTime) / (1000 * 60))) : 
+            'Unknown';
+          
+          processedScorecards.push({
+            scorecardId: scorecard._id,
+            userId: scorecard.userId?._id,
+            userName: scorecard.userId?.name || 'Unknown',
+            quizName: scorecard.quizId?.quizName || 'Unknown',
+            action: 'still-active',
+            timeRemaining: timeRemaining + ' minutes'
+          });
+        }
+      } catch (error) {
+        console.error(`❌ [ADMIN] Error processing scorecard ${scorecard._id}:`, error);
+        errorCount++;
+      }
+    }
+
+    console.log(`✅ [ADMIN] Cleanup completed: ${expiredCount} expired, ${activeCount} active, ${errorCount} errors`);
+
+    return res.status(200).json({
+      status: 200,
+      message: 'Scorecard cleanup completed',
+      summary: {
+        totalFound: incompleteScorecards.length,
+        expiredAndSubmitted: expiredCount,
+        stillActive: activeCount,
+        errors: errorCount,
+        processed: processedCount
+      },
+      details: processedScorecards
+    });
+
+  } catch (error) {
+    console.error('❌ [ADMIN] Error during scorecard cleanup:', error);
+    return res.status(500).json({
+      status: 500,
+      message: 'Internal server error during scorecard cleanup',
+      error: error.message
+    });
   }
 };

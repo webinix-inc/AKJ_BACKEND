@@ -33,9 +33,25 @@ const LiveClassSchema = new mongoose.Schema({
       required: true,
     },
   ], // Link to the course
+  
+  // Platform selection (Zoom or MeritHub)
+  platform: { 
+    type: String, 
+    enum: ["zoom", "merithub"], 
+    required: true,
+    default: "merithub"
+  },
+  
+  // MeritHub specific fields
   liveLink: { type: String },
   classId: { type: String },
   commonParticipantLink: { type: String },
+  
+  // Zoom specific fields
+  zoomMeetingLink: { type: String },
+  zoomMeetingId: { type: String },
+  zoomPasscode: { type: String },
+  
   createdAt: { type: Date, default: Date.now },
 });
 

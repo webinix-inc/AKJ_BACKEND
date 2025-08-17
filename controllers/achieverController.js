@@ -1,5 +1,6 @@
 const Achiever = require("../models/Achiever");
 const { generatePresignedUrl, generateUploadUrl, deleteFilesFromBucket } = require("../configs/aws.config");
+const authConfig = require("../configs/auth.config");
 const BUCKET_NAME = process.env.S3_BUCKET;
 
 // Get all achievers
@@ -64,8 +65,21 @@ exports.deleteAchiever = async (req, res) => {
   try {
       const achiever = await Achiever.findOneAndDelete({ id });
       if (achiever && achiever.photo) {
-          const publicId = achiever.photo.split('/').pop().split('.')[0];
-          await cloudinary.uploader.destroy(publicId);
+          // Extract S3 key from photo URL for deletion
+          let s3Key;
+          if (achiever.photo.includes('amazonaws.com/')) {
+            s3Key = achiever.photo.split('amazonaws.com/')[1];
+          } else {
+            // Assume it's already a key
+            s3Key = achiever.photo;
+          }
+          
+          try {
+            await deleteFilesFromBucket(authConfig.s3_bucket, [s3Key]);
+            console.log(`✅ Deleted achiever photo from S3: ${s3Key}`);
+          } catch (s3Error) {
+            console.error(`Error deleting achiever photo from S3:`, s3Error);
+          }
       }
       res.status(200).json({ message: "Achiever deleted successfully." });
   } catch (error) {

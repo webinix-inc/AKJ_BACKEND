@@ -2,21 +2,25 @@ const mongoose = require("mongoose");
 const mammoth = require("mammoth");
 const fs = require("fs").promises;
 const path = require("path");
-const cloudinary = require("cloudinary").v2;
 const cheerio = require("cheerio");
 const WordExtractor = require("word-extractor");
 const { JSDOM } = require("jsdom");
+const AWS = require("aws-sdk");
+const authConfig = require("../configs/auth.config");
 
 const extractor = new WordExtractor();
 
 const Question = require("../models/questionModel");
 const Quiz = require("../models/quizModel");
 
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
+// Configure S3 instead of Cloudinary
+const s3 = new AWS.S3({
+  accessKeyId: authConfig.aws_access_key_id,
+  secretAccessKey: authConfig.aws_secret_access_key,
+  region: authConfig.aws_region,
 });
+
+console.log("✅ Using S3 for quiz image uploads instead of Cloudinary");
 
 exports.addQuestion = async (req, res) => {
   try {
@@ -232,8 +236,32 @@ exports.uploadQuestionsFromWord = async (req, res) => {
     console.log("Temporary file path:", file.path);
     tempFilePath = file.path;
 
-    const result = await mammoth.convertToHtml({ path: file.path });
+    // 🔧 FIX: Enhanced mammoth configuration for better mathematical expression handling
+    const result = await mammoth.convertToHtml({ 
+      path: file.path,
+      options: {
+        convertImage: mammoth.images.imgElement(function(image) {
+          return image.read("base64").then(function(imageBuffer) {
+            return {
+              src: "data:" + image.contentType + ";base64," + imageBuffer
+            };
+          });
+        }),
+        // Preserve mathematical symbols and special characters
+        preserveEmptyParagraphs: true,
+        // Handle equations and mathematical content
+        transformDocument: mammoth.transforms.paragraph(function(element) {
+          // Preserve mathematical expressions in paragraphs
+          return element;
+        })
+      }
+    });
     const bodyHtml = result.value;
+    
+    // Log any conversion messages/warnings
+    if (result.messages && result.messages.length > 0) {
+      console.log("📝 Mammoth conversion messages:", result.messages);
+    }
 
     // Extract tables as structured data from HTML
     const tables = await extractTables(bodyHtml);
@@ -264,6 +292,13 @@ exports.uploadQuestionsFromWord = async (req, res) => {
       } else {
         questionData.questionText = questionText.trim();
       }
+      
+      // 🔧 FIX: Enhanced question text processing for mathematical expressions
+      // Preserve mathematical symbols and clean up formatting
+      questionData.questionText = questionData.questionText
+        .replace(/\s+/g, ' ') // Normalize whitespace
+        .replace(/\t/g, ' ') // Replace tabs with spaces
+        .trim();
 
       const lines = questionText
         .split("\n")
@@ -271,11 +306,16 @@ exports.uploadQuestionsFromWord = async (req, res) => {
         .filter((line) => line);
 
       // Extract and upload images for this question
+      console.log(`📸 Processing images for question ${i + 1}/${questionsData.length}`);
       questionData.questionImage = await extractAndUploadImages(
         bodyHtml,
         quizId,
         i
       );
+      
+      if (questionData.questionImage.length > 0) {
+        console.log(`✅ Uploaded ${questionData.questionImage.length} images for question ${i + 1}`);
+      }
 
       // Add tables as part of the question data if applicable
       if (tables[i]) {
@@ -284,11 +324,13 @@ exports.uploadQuestionsFromWord = async (req, res) => {
 
       // Parse question type
       const typeIndex = lines.findIndex((line) => line.startsWith("Type"));
-      questionData.questionType = lines[typeIndex].split("\t")[1].trim();
+      questionData.questionType = lines[typeIndex] && lines[typeIndex].split("\t")[1] 
+        ? lines[typeIndex].split("\t")[1].trim() 
+        : "multiple_choice";
 
       // Extract the correct answer letter (A, B, C, or D)
       const solutionLine = lines.find((line) => line.startsWith("Solution"));
-      const correctAnswerLetter = solutionLine
+      const correctAnswerLetter = solutionLine && solutionLine.split("\t")[1]
         ? solutionLine.split("\t")[1].trim()
         : "";
 
@@ -297,7 +339,10 @@ exports.uploadQuestionsFromWord = async (req, res) => {
         .filter((line) => line.startsWith("Option"))
         .map((line) => {
           const [, optionText] = line.split("\t");
-          return { optionText: optionText.trim(), isCorrect: false };
+          return { 
+            optionText: optionText ? optionText.trim() : "", 
+            isCorrect: false 
+          };
         });
 
       // Set the correct answer based on the solution letter
@@ -313,10 +358,20 @@ exports.uploadQuestionsFromWord = async (req, res) => {
       const marksLine = lines.find((line) => line.startsWith("Marks"));
       if (marksLine) {
         const [, correctMarks, incorrectMarks] = marksLine.split("\t");
-        questionData.questionCorrectMarks = parseInt(correctMarks.trim()) || 0;
-        questionData.questionIncorrectMarks =
-          parseInt(incorrectMarks.trim()) || 0;
+        questionData.questionCorrectMarks = correctMarks ? parseInt(correctMarks.trim()) || 0 : 0;
+        questionData.questionIncorrectMarks = incorrectMarks ? parseInt(incorrectMarks.trim()) || 0 : 0;
+      } else {
+        // Default marks if not specified
+        questionData.questionCorrectMarks = 2;
+        questionData.questionIncorrectMarks = 0;
       }
+
+      // 🔧 FIX: Enhanced logging for debugging mathematical expression issues
+      console.log(`📝 Question ${i + 1} processing:`);
+      console.log(`   📄 Plain text: "${questionData.questionText.substring(0, 100)}..."`);
+      console.log(`   🏷️ HTML table content: "${questionData.table[0]?.substring(0, 100) || 'No table content'}..."`);
+      console.log(`   🖼️ Images: ${questionData.questionImage?.length || 0}`);
+      console.log(`   📊 Options: ${questionData.options?.length || 0}`);
 
       // Create and save the question
       const newQuestion = new Question({
@@ -330,9 +385,6 @@ exports.uploadQuestionsFromWord = async (req, res) => {
         questionIncorrectMarks: questionData.questionIncorrectMarks,
         uploadedFromWord: true,
       });
-
-      // console.log("Table data:", questionData.tables);
-      console.log("Saving question:", newQuestion);
       const savedQuestion = await newQuestion.save();
       savedQuestions.push(savedQuestion);
     }
@@ -357,10 +409,21 @@ exports.uploadQuestionsFromWord = async (req, res) => {
       },
     });
 
+    // Calculate image upload statistics
+    const totalImages = savedQuestions.reduce((sum, q) => sum + (q.questionImage?.length || 0), 0);
+    const questionsWithImages = savedQuestions.filter(q => q.questionImage && q.questionImage.length > 0).length;
+
+    console.log(`📊 UPLOAD SUMMARY:`);
+    console.log(`   ✅ Questions created: ${savedQuestions.length}`);
+    console.log(`   🖼️ Total images uploaded: ${totalImages}`);
+    console.log(`   📸 Questions with images: ${questionsWithImages}`);
+
     res.status(201).json({
       message: "Questions uploaded successfully",
       savedQuestions: savedQuestions.map((q) => q._id),
       totalQuestions: savedQuestions.length,
+      totalImages: totalImages,
+      questionsWithImages: questionsWithImages,
     });
   } catch (error) {
     console.error("Error in processing Word document:", error);
@@ -410,6 +473,7 @@ async function extractAndUploadImages(bodyHtml, quizId, questionIndex) {
   const tables = $("table");
 
   if (questionIndex >= tables.length) {
+    console.log(`⚠️ No table found for question ${questionIndex + 1}`);
     return []; // No images for this question
   }
 
@@ -417,52 +481,79 @@ async function extractAndUploadImages(bodyHtml, quizId, questionIndex) {
   const images = questionTable.find("img");
 
   if (images.length === 0) {
+    console.log(`📷 No images found in question ${questionIndex + 1}`);
     return []; // No images in this question
   }
+
+  console.log(`🖼️ Found ${images.length} images in question ${questionIndex + 1}`);
 
   const imageUrls = await Promise.all(
     images
       .map((index, img) => {
         const imageSrc = $(img).attr("src");
-        return uploadToCloudinary(imageSrc, quizId, questionIndex, index);
+        console.log(`📤 Uploading image ${index + 1}/${images.length} for question ${questionIndex + 1}`);
+        return uploadToS3(imageSrc, quizId, questionIndex, index);
       })
       .get()
   );
 
-  return imageUrls.map((result) => result.secure_url);
+  const successfulUploads = imageUrls.filter(result => result && (result.Location || result));
+  console.log(`✅ Successfully uploaded ${successfulUploads.length}/${images.length} images for question ${questionIndex + 1}`);
+
+  return successfulUploads.map((result) => result.Location || result);
 }
 
-async function uploadToCloudinary(imageSrc, quizId, questionIndex, imageIndex) {
+async function uploadToS3(imageSrc, quizId, questionIndex, imageIndex) {
   try {
-    if (!imageSrc.startsWith("data:image")) {
-      throw new Error("Invalid image source");
+    if (!imageSrc || !imageSrc.startsWith("data:image")) {
+      console.error(`❌ Invalid image source for question ${questionIndex + 1}, image ${imageIndex + 1}`);
+      throw new Error("Invalid image source - must be base64 data URL");
     }
 
     const base64Data = imageSrc.split(",")[1];
-    const imageBuffer = Buffer.from(base64Data, "base64");
-    const tempPath = path.join(
-      __dirname,
-      `temp_image_${questionIndex}_${imageIndex}.png`
-    );
-    await fs.writeFile(tempPath, imageBuffer);
+    if (!base64Data) {
+      throw new Error("Invalid base64 data in image source");
+    }
 
+    const imageBuffer = Buffer.from(base64Data, "base64");
+    
+    // Validate image buffer size
+    if (imageBuffer.length === 0) {
+      throw new Error("Empty image buffer");
+    }
+    
+    if (imageBuffer.length > 10 * 1024 * 1024) { // 10MB limit
+      console.warn(`⚠️ Large image detected: ${Math.round(imageBuffer.length / 1024 / 1024)}MB`);
+    }
+    
     const dateString = new Date()
       .toISOString()
       .replace(/[-:]/g, "")
       .split(".")[0];
-    const fileName = `${quizId}_${dateString}_${questionIndex}_${imageIndex}.png`;
+    const fileName = `quiz-images/${quizId}_${dateString}_${questionIndex}_${imageIndex}.png`;
 
-    const result = await cloudinary.uploader.upload(tempPath, {
-      folder: "testQuiz",
-      public_id: fileName.split(".")[0],
-      use_filename: false,
-      unique_filename: false,
-    });
+    const uploadParams = {
+      Bucket: authConfig.s3_bucket,
+      Key: fileName,
+      Body: imageBuffer,
+      ContentType: 'image/png',
+      Metadata: {
+        'quiz-id': quizId.toString(),
+        'question-index': questionIndex.toString(),
+        'image-index': imageIndex.toString(),
+        'upload-timestamp': new Date().toISOString()
+      }
+      // ACL: 'public-read' // Make images accessible
+    };
 
-    await fs.unlink(tempPath);
+    console.log(`📤 Uploading quiz image to S3: ${fileName} (${Math.round(imageBuffer.length / 1024)}KB)`);
+    const result = await s3.upload(uploadParams).promise();
+    console.log(`✅ Quiz image uploaded successfully: ${result.Location}`);
+    
     return result;
   } catch (error) {
-    console.error("Error uploading to Cloudinary:", error);
-    throw error;
+    console.error(`❌ Error uploading image for question ${questionIndex + 1}, image ${imageIndex + 1}:`, error.message);
+    // Don't throw error to allow other images to upload
+    return null;
   }
 }

@@ -4,7 +4,7 @@ const Schema = mongoose.Schema;
 const fileSchema = new Schema({
   name: { type: String },
   // required: true },
-  // type: { type: String, enum: ['video', 'pdf'], default: null },
+  type: { type: String, enum: ['video', 'pdf', 'youtube', 'document', 'image', 'other'], default: 'other' },
   url: { type: String, required: true },
   description: String,
   isDownloadable: { type: Boolean, default: false },

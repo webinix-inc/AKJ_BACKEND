@@ -66,7 +66,7 @@ const courseSchema = new mongoose.Schema(
     },
     courseType: {
       type: String,
-      enum: ["Free", "Paid"],
+      enum: ["Free", "Paid", "Batch"],
     },
      // New field to toggle publish status
      isPublished: {
@@ -76,10 +76,57 @@ const courseSchema = new mongoose.Schema(
     // Link to associated FAQs
     faqs: [{ type: mongoose.Schema.Types.ObjectId, ref: "Faq" }],
 
-    rootFolder: { type: Schema.Types.ObjectId, ref: 'Folder' },    
+    rootFolder: { type: Schema.Types.ObjectId, ref: 'Folder' },
+    
+    // Batch course specific fields (optional, only used when courseType is "Batch")
+    batchName: {
+      type: String,
+    },
+    batchSize: {
+      type: Number,
+      default: 50,
+    },
+    batchStartDate: {
+      type: Date,
+    },
+    batchEndDate: {
+      type: Date,
+    },
+    // Manual enrollments for batch courses (no payment required)
+    manualEnrollments: [{
+      user: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+      },
+      enrolledDate: {
+        type: Date,
+        default: Date.now
+      },
+      enrolledBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User', // Admin who enrolled the user
+      },
+      status: {
+        type: String,
+        enum: ['Active', 'Inactive', 'Completed'],
+        default: 'Active'
+      }
+    }],
   },
   { timestamps: true }
 );
+
+// Pre-save hook to ensure isPublished is always a proper boolean
+courseSchema.pre("save", function (next) {
+  // Ensure isPublished is always a boolean
+  if (this.isPublished === undefined || this.isPublished === null) {
+    this.isPublished = false;
+  } else if (typeof this.isPublished !== 'boolean') {
+    // Convert string values to boolean
+    this.isPublished = this.isPublished === 'true' || this.isPublished === true;
+  }
+  next();
+});
 
 // Pre-hook to delete associated subjects and media files
 courseSchema.pre("findOneAndDelete", async function (next) {
@@ -118,5 +165,21 @@ courseSchema.pre("findOneAndDelete", async function (next) {
 
   next();
 });
+
+// 🚀 PERFORMANCE INDEXES for 2000+ concurrent users
+// Single field indexes for frequent queries
+courseSchema.index({ isPublished: 1 });
+courseSchema.index({ category: 1 });
+courseSchema.index({ subCategory: 1 });
+courseSchema.index({ price: 1 });
+courseSchema.index({ teacher: 1 });
+courseSchema.index({ createdAt: -1 });
+
+// Compound indexes for complex queries
+courseSchema.index({ isPublished: 1, category: 1 }); // Published courses by category
+courseSchema.index({ isPublished: 1, price: 1 }); // Published courses by price
+courseSchema.index({ category: 1, subCategory: 1 }); // Category navigation
+courseSchema.index({ teacher: 1, isPublished: 1 }); // Teacher's published courses
+courseSchema.index({ isPublished: 1, createdAt: -1 }); // Latest published courses
 
 module.exports = mongoose.model("Course", courseSchema);

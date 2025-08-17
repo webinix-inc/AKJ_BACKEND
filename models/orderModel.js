@@ -22,5 +22,22 @@ const orderSchema = new mongoose.Schema({
   },
 }, { timestamps: true });
 
+// 🚀 PERFORMANCE INDEXES for 2000+ concurrent users
+// Single field indexes for frequent queries
+orderSchema.index({ orderId: 1 }); // Already unique, but adding for performance
+orderSchema.index({ paymentId: 1 });
+orderSchema.index({ userId: 1 });
+orderSchema.index({ courseId: 1 });
+orderSchema.index({ status: 1 });
+orderSchema.index({ paymentMode: 1 });
+orderSchema.index({ createdAt: -1 });
+
+// Compound indexes for complex queries
+orderSchema.index({ userId: 1, status: 1 }); // User's orders by status
+orderSchema.index({ userId: 1, createdAt: -1 }); // User's order history
+orderSchema.index({ courseId: 1, status: 1 }); // Course orders by status
+orderSchema.index({ status: 1, paymentMode: 1 }); // Orders by status and payment mode
+orderSchema.index({ userId: 1, courseId: 1 }); // User-course combinations
+
 module.exports = mongoose.model("Order", orderSchema);
 

@@ -140,7 +140,7 @@ async function scheduleLiveClass(userId, classDetails) {
             classDetails,
             {
                 headers: {
-                    Authorization: `${token}`,
+                    Authorization: `Bearer ${token}`,
                     'Content-Type': 'application/json',
                 },
             }
@@ -191,11 +191,11 @@ async function addUsersToClass(classId, userIds, commonParticipantLink) {
 
         // Make the API request to add users to the class
         const response = await axios.post(
-            ` https://class1.meritgraph.com/v1/${CLIENT_ID}/${classId}/users`,
+            `https://class1.meritgraph.com/v1/${CLIENT_ID}/${classId}/users`,
             requestBody,
             {
                 headers: {
-                    Authorization: `${token}`,
+                    Authorization: `Bearer ${token}`,
                     'Content-Type': 'application/json',
                 },
             }
@@ -241,7 +241,7 @@ async function editClass(classId, classDetails) {
             classDetails,
             {
                 headers: {
-                    Authorization: `${token}`,
+                    Authorization: `Bearer ${token}`,
                     'Content-Type': 'application/json',
                 },
             }
@@ -282,7 +282,7 @@ async function deleteLiveClass(classId) {
             `https://class1.meritgraph.com/v1/${CLIENT_ID}/${classId}`,
             {
                 headers: {
-                    Authorization: `${token}`,
+                    Authorization: `Bearer ${token}`,
                     'Content-Type': 'application/json',
                 },
             }

@@ -160,11 +160,30 @@ exports.sendMessage = async (req, res) => {
     );
 
     // Emit message to receiver if socket.io is available
-    if (req.io) {
-      console.log("Emitting message to receiver:", receiverId);
-      req.io.to(receiverId).emit("message", savedMessage);
+    if (global.io) {
+      console.log("🔔 Emitting message to receiver:", receiverId);
+      console.log("📤 Message data:", {
+        _id: savedMessage._id,
+        sender: savedMessage.sender,
+        receiver: savedMessage.receiver,
+        content: savedMessage.content,
+        attachments: savedMessage.attachments,
+        createdAt: savedMessage.createdAt
+      });
+      global.io.to(receiverId.toString()).emit("message", {
+        _id: savedMessage._id,
+        sender: savedMessage.sender,
+        receiver: savedMessage.receiver,
+        content: savedMessage.content,
+        attachments: savedMessage.attachments,
+        createdAt: savedMessage.createdAt,
+        timestamp: savedMessage.timestamp,
+        isRead: savedMessage.isRead,
+        isBroadcast: savedMessage.isBroadcast
+      });
+      console.log("✅ Message emitted successfully");
     } else {
-      console.warn("Socket.io not initialized");
+      console.warn("❌ Socket.io not initialized");
     }
 
     res.status(201).json({
@@ -520,13 +539,17 @@ exports.getUsersWithMessages = async (req, res) => {
 
         return {
           firstName: user.firstName,
+          lastName: user.lastName, // Include lastName for full name display
           email: user.email || user.userEmail, // Support both field names
-          userType: userType,
-          image:user.image,
+          phone: user.phone, // Include phone for display
+          userType: user.userType, // Use individual user's userType, not requesting user's
+          image: user.image,
           lastMessageTime: messageDetails?.lastMessageTime,
           lastMessage: messageDetails?.lastMessage,
+          lastMessageAttachments: messageDetails?.lastMessageAttachments || [],
           isLastMessageSentByMe:
             messageDetails?.lastMessageSender.toString() === userID,
+          unreadCount: unreadCountMap.get(user._id.toString()) || 0,
           // Include _id for compatibility with expected response
           _id: user._id,
         };

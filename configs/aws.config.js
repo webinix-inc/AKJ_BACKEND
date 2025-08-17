@@ -23,7 +23,7 @@ const generatePresignedUrl = async (bucketName, objectKey) => {
   const command = new GetObjectCommand({
     Bucket: bucketName,
     Key: decodedKey,
-    ACL:'public-read',
+    // ACL removed as bucket has ACLs disabled
   });
 
   try {

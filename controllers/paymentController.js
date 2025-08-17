@@ -1,72 +1,3 @@
-// require("dotenv").config();
-// const Razorpay = require("razorpay");
-
-// // Step 1: Initialize Razorpay instance
-// console.log("🚀 Initializing Razorpay instance...");
-// const razorpay = new Razorpay({
-//   key_id: process.env.RAZORPAY_KEY_ID,
-//   key_secret: process.env.RAZORPAY_KEY_SECRET,
-// });
-
-// if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
-//   console.error("❌ Missing Razorpay API credentials. Check your .env file.");
-// } else {
-//   console.log("✅ Razorpay API credentials loaded successfully.");
-// }
-
-// // Step 2: Log Razorpay Key to verify
-// console.log("🔑 Razorpay Key ID:", process.env.RAZORPAY_KEY_ID);
-
-// // Controller to create an order
-// exports.createOrder = async (req, res) => {
-//   console.log("📌 Received request to create an order.");
-//   console.log("🛠 Request Body:", req.body);
-
-//   const { amount, currency } = req.body;
-
-//   if (!amount || !currency) {
-//     console.error("❌ Missing required fields: amount or currency.");
-//     return res.status(400).json({
-//       status: 400,
-//       message: "Invalid request: Amount and currency are required.",
-//     });
-//   }
-
-//   try {
-//     console.log("📡 Sending request to Razorpay to create order...");
-
-//     const order = await razorpay.orders.create({
-//       amount,
-//       currency,
-//       receipt: `order_rcpt_${Date.now()}`,
-//     });
-
-//     if (!order || !order.id) {
-//       console.error("❌ Order creation failed. No order ID received.");
-//       return res.status(500).json({
-//         status: 500,
-//         message: "Order creation failed. No valid order ID received.",
-//       });
-//     }
-
-//     console.log("✅ Order created successfully:", order);
-
-//     return res.status(200).json({
-//       status: 200,
-//       message: "Order created successfully",
-//       data: order,
-//     });
-//   } catch (error) {
-//     console.error("❌ Razorpay Order Error:", error);
-
-//     return res.status(500).json({
-//       status: 500,
-//       message: "Failed to create Razorpay order",
-//       error: error.message,
-//     });
-//   }
-// };
-
 // ========================= paymentController.js =========================
 const Razorpay = require("razorpay");
 const Order = require("../models/orderModel");
@@ -76,6 +7,7 @@ const Installment = require("../models/installmentModel");
 const LiveClass = require("../models/LiveClass");
 const { addUsersToClass } = require("../configs/merithub.config");
 const crypto = require("crypto");
+const { logger } = require("../utils/logger");
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
@@ -175,9 +107,18 @@ exports.createOrder = async (req, res) => {
     const newOrder = new Order(newOrderData);
     await newOrder.save();
 
+    // 🚀 LOG PAYMENT ORDER CREATION SUCCESS
+    logger.userActivity(
+      userId,
+      'Payment Order',
+      'PAYMENT_ORDER_CREATED',
+      `Amount: ₹${amount}, Course: ${courseId}, Mode: ${paymentMode}, Plan: ${planType || 'N/A'}, OrderID: ${newOrder.orderId}, TrackingID: ${newOrder.trackingNumber}, IP: ${req.ip}`
+    );
+
     return res.status(201).json({ success: true, order: newOrder });
   } catch (error) {
-    console.error("Error creating order:", error);
+    // 🚀 LOG PAYMENT ORDER CREATION ERROR
+    logger.error(error, 'PAYMENT_ORDER_CREATE', `UserID: ${userId}, Amount: ${amount}, Course: ${courseId}, Mode: ${paymentMode}`);
     return res
       .status(500)
       .json({ success: false, message: "Error creating order" });

@@ -13,7 +13,7 @@ module.exports = (app) => {
 
     app.get('/api/v1/testPanel/folders?', [authJwt.verifyToken], QuizFolderController.getQuizFolders);
 
-    app.delete('/api/v1/testPanel/folders/:folderId', QuizFolderController.deleteFolder);
+    app.delete('/api/v1/testPanel/folders/:folderId', [authJwt.verifyToken], QuizFolderController.deleteFolder);
     // app.delete('/api/v1/folders/:folderId/files/:fileId', courseController.deleteFileFromFolder);
 
     // app.post('/api/v1/files/move', courseController.moveFileToFolder);

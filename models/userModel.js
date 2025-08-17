@@ -165,6 +165,22 @@ userSchema.pre("save", function (next) {
   next();
 });
 
+// 🚀 PERFORMANCE INDEXES for 2000+ concurrent users
+// Single field indexes for frequent queries
+userSchema.index({ email: 1 });
+userSchema.index({ phone: 1 });
+userSchema.index({ userType: 1 });
+userSchema.index({ accountVerification: 1 });
+userSchema.index({ isActive: 1 });
+userSchema.index({ createdAt: -1 });
+
+// Compound indexes for complex queries
+userSchema.index({ isActive: 1, userType: 1 }); // Active users by type
+userSchema.index({ email: 1, userType: 1 }); // Login queries
+userSchema.index({ phone: 1, userType: 1 }); // Phone login queries
+userSchema.index({ "purchasedCourses.course": 1 }); // Course access checks
+userSchema.index({ "purchasedCourses.course": 1, isActive: 1 }); // Active course users
+
 const User = mongoose.model("User", userSchema);
 
 module.exports = User;

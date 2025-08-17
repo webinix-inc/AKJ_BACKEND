@@ -13,16 +13,18 @@ const s3 = new S3Client({
 });
 
 // Reusable S3 storage configuration
-const s3Storage = (folderName = "public-read") =>
+const s3Storage = (folderName = "images") =>
   multerS3({
     s3: s3,
     bucket: authConfig.s3_bucket, // Use the bucket name from config (without slashes)
-    // acl: folderName === 'private' ? 'private' : 'public-read', // Set ACL based on folder
+    // ACL removed as bucket has ACLs disabled
     metadata: (req, file, cb) => {
       cb(null, { fieldName: file.fieldname });
     },
     key: (req, file, cb) => {
-      const fileName = `${Date.now().toString()}_${file.originalname}`;
+      // Sanitize filename to avoid special characters and spaces
+      const sanitizedName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+      const fileName = `${Date.now().toString()}_${sanitizedName}`;
       const fullPath = `${folderName}/${fileName}`; // Construct the full path with the folder name
       cb(null, fullPath); // Generate a unique key with the folder structure
     },

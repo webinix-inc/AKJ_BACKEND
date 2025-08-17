@@ -7,7 +7,7 @@ const {
   updateTestimonial,
   getTestimonialByUserId
 } = require('../controllers/testimonialController');
-const { kpUpload } = require('../middlewares/cloudinaryConfig');
+const { kpUpload } = require('../middlewares/fileUpload');
 const authJwt = require('../middlewares/authJwt');
 
 const router = express.Router();

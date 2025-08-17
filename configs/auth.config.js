@@ -5,10 +5,10 @@ module.exports = {
     accessTokenTime: process.env.ACCESS_TOKEN_TIME,
     refreshTokenTime: process.env.REFRESH_TOKEN_TIME,
 
-    // Cloudinary configuration
-    cloud_name: process.env.CLOUD_NAME,
-    api_key: process.env.CLOUD_KEY,
-    api_secret: process.env.CLOUD_SECRET,
+    // Cloudinary configuration (deprecated - now using S3)
+    // cloud_name: process.env.CLOUD_NAME,
+    // api_key: process.env.CLOUD_KEY,
+    // api_secret: process.env.CLOUD_SECRET,
 
     // Amazon S3 configuration
     aws_access_key_id: process.env.AWS_ACCESS_KEY_ID,

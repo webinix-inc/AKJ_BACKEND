@@ -41,7 +41,17 @@ const installmentSchema = new mongoose.Schema({
   status: { type: String, enum: ["pending", "completed"], default: "pending" },
 });
 
-// Compound index for querying user payments quickly within userPayments array
-installmentSchema.index({ courseId: 1, "userPayments.userId": 1 });
+// 🚀 PERFORMANCE INDEXES for 2000+ concurrent users
+// Single field indexes
+installmentSchema.index({ courseId: 1 });
+installmentSchema.index({ planType: 1 });
+installmentSchema.index({ status: 1 });
+installmentSchema.index({ "userPayments.userId": 1 });
+
+// Compound indexes for complex queries
+installmentSchema.index({ courseId: 1, "userPayments.userId": 1 }); // User payments by course
+installmentSchema.index({ courseId: 1, planType: 1 }); // Course plans
+installmentSchema.index({ status: 1, courseId: 1 }); // Status by course
+installmentSchema.index({ "userPayments.userId": 1, "userPayments.isPaid": 1 }); // User payment status
 
 module.exports = mongoose.model("Installment", installmentSchema);

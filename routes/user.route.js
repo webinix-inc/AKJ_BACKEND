@@ -1,5 +1,6 @@
 const auth = require("../controllers/userController");
 const authJwt = require("../middlewares/authJwt");
+const { cacheConfigs } = require("../middlewares/cacheMiddleware");
 
 const { userProfileUpload, bannerUpload } = require('../middlewares/imageUpload')
 
@@ -16,13 +17,13 @@ module.exports = (app) => {
         app.post("/api/v1/user/resendOtp/:id", auth.resendOTP);
         app.post("/api/v1/user/registration", [authJwt.verifyToken], auth.registration);
         app.post("/api/v1/user/socialLogin", auth.socialLogin);
-        app.get("/api/v1/user/getProfile", [authJwt.verifyToken], auth.getProfile);
+        app.get("/api/v1/user/getProfile", [authJwt.verifyToken, cacheConfigs.userProfile()], auth.getProfile);
         app.put("/api/v1/user/updateProfile", [authJwt.verifyToken], userProfileUpload.single('image'), auth.updateProfile);
         app.put("/api/v1/user/getAllProfile", [authJwt.verifyToken], auth.getAllProfiles);
         app.get("/api/v1/admin/getUserProfile/:userId", [authJwt.verifyToken], auth.getUserProfileById);
         app.put("/api/v1/user/updateLocation", [authJwt.verifyToken], auth.updateLocation);
-        app.get("/api/v1/user/banner", [authJwt.verifyToken], auth.getBanner);
-        app.get("/api/v1/user/banner/:id", [authJwt.verifyToken], auth.getBannerById);
+        app.get("/api/v1/user/banner", [authJwt.verifyToken, cacheConfigs.long()], auth.getBanner);
+        app.get("/api/v1/user/banner/:id", [authJwt.verifyToken, cacheConfigs.long()], auth.getBannerById);
         app.post('/api/v1/user/user-subscriptions/add', [authJwt.verifyToken], auth.createUserSubscription);
         app.get('/api/v1/user/user-subscriptions/:id', [authJwt.verifyToken], auth.getUserSubscriptionById);
         app.get('/api/v1/user/user-subscriptions', [authJwt.verifyToken], auth.getAllUserSubscriptions);
@@ -43,10 +44,10 @@ module.exports = (app) => {
         app.get("/api/v1/user/schedules/completed", [authJwt.verifyToken], auth.getAllCompleted);
         app.get("/api/v1/user/schedules/cancelled", [authJwt.verifyToken], auth.getAllCancelled);
         app.get("/api/v1/user/schedules/:id", [authJwt.verifyToken], auth.getScheduleById);
-        app.get('/api/v1/user/categories', [authJwt.verifyToken], auth.getAllCategories);
-        app.get('/api/v1/user/categories/:categoryId', [authJwt.verifyToken], auth.getCategoryById);
-        app.get('/api/v1/user/products', [authJwt.verifyToken], auth.getAllProducts);
-        app.get('/api/v1/user/products/:productId', [authJwt.verifyToken], auth.getProductById);
+        app.get('/api/v1/user/categories', [authJwt.verifyToken, cacheConfigs.long()], auth.getAllCategories);
+        app.get('/api/v1/user/categories/:categoryId', [authJwt.verifyToken, cacheConfigs.long()], auth.getCategoryById);
+        app.get('/api/v1/user/products', [authJwt.verifyToken, cacheConfigs.medium()], auth.getAllProducts);
+        app.get('/api/v1/user/products/:productId', [authJwt.verifyToken, cacheConfigs.medium()], auth.getProductById);
         app.post('/api/v1/user/products/:productId/reviews', [authJwt.verifyToken], auth.createProductReview);
         app.get('/api/v1/user/products/:productId/reviews', [authJwt.verifyToken], auth.getAllProductReviews);
         app.get('/api/v1/user/products/:productId/reviews/:reviewId', [authJwt.verifyToken], auth.getProductReviewById);
@@ -75,9 +76,10 @@ module.exports = (app) => {
         app.get('/api/v1/user/history/order', [authJwt.verifyToken], auth.getOrderHistory);
         app.put('/api/v1/user/orders/:orderId/refunds', [authJwt.verifyToken], auth.createReturnRequest);
         app.get('/api/v1/user/refund-orders', [authJwt.verifyToken], auth.getRefundOrders);
-        app.get('/api/v1/user/enrolled-courses', [authJwt.verifyToken], auth.getUserEnrolledCourses);
-        app.get('/api/v1/user/free-courses', [authJwt.verifyToken], auth.getAllFreeCourses);
-        app.get('/api/v1/user/all-courses', [authJwt.verifyToken], auth.getAllCourses);
+        app.get('/api/v1/user/enrolled-courses', [authJwt.verifyToken, cacheConfigs.courses()], auth.getUserEnrolledCourses);
+        app.get('/api/v1/user/free-courses', [authJwt.verifyToken, cacheConfigs.courses()], auth.getAllFreeCourses);
+        app.get('/api/v1/user/all-courses', [authJwt.verifyToken, cacheConfigs.courses()], auth.getAllCourses);
+        app.get('/api/v1/user/purchased-courses', [authJwt.verifyToken], auth.getUserPurchasedCourses);
         app.get('/api/v1/user/notices', [authJwt.verifyToken], auth.getAllNotices);
         app.get('/api/v1/user/free/notices', [authJwt.verifyToken], auth.getAllFreeCourseNotices);
         app.get('/api/v1/user/notices/:id', [authJwt.verifyToken], auth.getNoticeById);
@@ -111,5 +113,57 @@ module.exports = (app) => {
         app.get('/api/v1/user/search', [authJwt.verifyToken], auth.searchCourses);
         app.get('/api/v1/user/behavior-notes', [authJwt.verifyToken], auth.getAllBehaviorNotes);
         app.get('/api/v1/user/behavior-notes/:id', [authJwt.verifyToken], auth.getBehaviorNoteById);
+
+        // Assignment Submission Routes
+        const multer = require('multer');
+        const multerS3 = require('multer-s3');
+        const { S3Client } = require('@aws-sdk/client-s3');
+        const authConfig = require('../configs/auth.config');
+        const path = require('path');
+
+        // Initialize S3 client for assignments
+        const s3 = new S3Client({
+          region: authConfig.aws_region,
+          credentials: {
+            accessKeyId: authConfig.aws_access_key_id,
+            secretAccessKey: authConfig.aws_secret_access_key,
+          },
+        });
+
+        // S3 storage configuration for assignments
+        const assignmentS3Storage = multerS3({
+          s3: s3,
+          bucket: authConfig.s3_bucket,
+          metadata: (req, file, cb) => {
+            cb(null, { fieldName: file.fieldname });
+          },
+          key: (req, file, cb) => {
+            // Sanitize filename to avoid special characters and spaces
+            const sanitizedName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+            const fileName = `${Date.now().toString()}_${sanitizedName}`;
+            const fullPath = `assignments/${fileName}`; // Store in assignments folder on S3
+            cb(null, fullPath);
+          },
+          contentType: multerS3.AUTO_CONTENT_TYPE,
+        });
+
+        const assignmentUpload = multer({
+          storage: assignmentS3Storage,
+          limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+          fileFilter: (req, file, cb) => {
+            const allowedTypes = /jpeg|jpg|png|gif|pdf|doc|docx/;
+            const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+            const mimetype = allowedTypes.test(file.mimetype);
+            
+            if (mimetype && extname) {
+              return cb(null, true);
+            } else {
+              cb(new Error('Only images, PDFs, and Word documents are allowed'));
+            }
+          }
+        });
+
+        app.post('/api/v1/user/assignments/submit', [authJwt.verifyToken], assignmentUpload.array('assignmentFiles', 5), auth.submitAssignment);
+        app.get('/api/v1/user/assignments', [authJwt.verifyToken], auth.getUserAssignments);
 
 }

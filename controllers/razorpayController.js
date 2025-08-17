@@ -1,516 +1,66 @@
-// const Razorpay = require("razorpay");
-// const Order = require("../models/orderModel");
-// const User = require("../models/userModel");
-// const Course = require("../models/courseModel");
-// const Installment = require("../models/installmentModel");
-// const LiveClass = require("../models/LiveClass");
-// const { addUsersToClass } = require("../configs/merithub.config");
+// ============================================================================
+// 💳 RAZORPAY CONTROLLER - REFACTORED TO USE PAYMENT SERVICE
+// ============================================================================
+// 
+// This controller now uses paymentService.js for all business logic,
+// maintaining the same API contracts and behavior while eliminating
+// code duplication and improving maintainability.
+//
+// All core business logic has been moved to services/paymentService.js
+// This controller focuses purely on HTTP request/response handling.
+//
+// ============================================================================
 
-// // Singleton instance of Razorpay to avoid redundant connections
-// const razorpay = new Razorpay({
-//   key_id: process.env.RAZORPAY_KEY_ID,
-//   key_secret: process.env.RAZORPAY_KEY_SECRET,
-// });
-
-// // Helper: Generate a unique receipt ID
-// const generateReceipt = () => `receipt_${Math.floor(Math.random() * 1e6)}`;
-
-// // Utility to generate a unique tracking number
-// const generateUniqueTrackingNumber = () =>
-//   `TN-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-
-// // Function to create an order with user-specific installment details
-// exports.createOrder = async (req, res) => {
-//   try {
-//     const {
-//       amount,
-//       currency,
-//       userId,
-//       courseId,
-//       planType,
-//       paymentMode,
-//       installmentIndex,
-//       totalInstallments,
-//     } = req.body;
-
-//     if (!userId || !courseId || !paymentMode) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "userId, courseId, and paymentMode are required",
-//       });
-//     }
-
-//     let installmentPlan;
-
-//     if (paymentMode === "installment") {
-//       // Find the course installment plan
-//       installmentPlan = await Installment.findOne({ courseId, planType });
-
-//       if (!installmentPlan) {
-//         return res
-//           .status(404)
-//           .json({ success: false, message: "Installment plan not found" });
-//       }
-
-//       // Check if the user already has a payment entry in the plan
-//       const existingUserPayment = installmentPlan.userPayments.find(
-//         (payment) =>
-//           payment.userId === userId &&
-//           payment.installmentIndex === installmentIndex
-//       );
-
-//       if (!existingUserPayment) {
-//         // If user has no entry for this installment, add one
-//         installmentPlan.userPayments.push({
-//           userId,
-//           installmentIndex,
-//           isPaid: false,
-//           paidAmount: amount,
-//           paymentDate: null,
-//         });
-//       } else {
-//         // If the installment already exists, return an error
-//         return res.status(400).json({
-//           success: false,
-//           message: "Installment already exists for this user",
-//         });
-//       }
-
-//       // Save the updated installment plan
-//       await installmentPlan.save();
-//     }
-
-//     // Calculate the total amount in the smallest currency unit
-//     const totalAmountInSmallestUnit = Math.round(amount * 100);
-
-//     const options = {
-//       amount: totalAmountInSmallestUnit, // Razorpay expects amount in paise or cents
-//       currency,
-//       receipt: generateReceipt(),
-//     };
-
-//     // Create the Razorpay order
-//     const razorpayOrder = await razorpay.orders.create(options);
-
-//     // Create a new order in the system
-//     const newOrderData = {
-//       orderId: razorpayOrder.id,
-//       amount: razorpayOrder.amount,
-//       currency: razorpayOrder.currency,
-//       receipt: razorpayOrder.receipt,
-//       status: "created",
-//       trackingNumber: generateUniqueTrackingNumber(),
-//       userId,
-//       courseId,
-//       paymentMode,
-//       planType,
-//     };
-
-//     if (paymentMode === "installment") {
-//       newOrderData.installmentDetails = {
-//         installmentIndex,
-//         totalInstallments,
-//         installmentAmount: amount, // Keep the original amount for reference
-//         isPaid: false,
-//       };
-//       newOrderData.status = "partial";
-//     }
-
-//     const newOrder = new Order(newOrderData);
-//     await newOrder.save();
-
-//     return res.status(201).json({ success: true, order: newOrder });
-//   } catch (error) {
-//     console.error("Error creating order:", error);
-//     return res
-//       .status(500)
-//       .json({ success: false, message: "Error creating order" });
-//   }
-// };
-
-// // Handle Razorpay webhook events
-// exports.handleWebhook = async (req, res) => {
-//   try {
-//     const {
-//       event,
-//       payload: {
-//         payment: { entity: paymentDetails },
-//       },
-//     } = req.body;
-
-//     console.log(`Received event: ${event}`);
-//     const handlers = {
-//       "payment.captured": handlePaymentCaptured,
-//       // Add more event handlers as needed
-//     };
-
-//     if (handlers[event]) {
-//       await handlers[event](paymentDetails);
-//     } else {
-//       console.log(`Unhandled event type: ${event}`);
-//     }
-
-//     return res
-//       .status(200)
-//       .json({ success: true, message: "Webhook processed successfully" });
-//   } catch (error) {
-//     console.error("Error processing webhook:", error);
-//     return res
-//       .status(500)
-//       .json({ success: false, message: "Internal server error" });
-//   }
-// };
-
-// // Handler for `payment.captured` event
-// const handlePaymentCaptured = async (paymentDetails) => {
-//   const { order_id, id: paymentId, amount } = paymentDetails;
-
-//   if (!amount || isNaN(amount) || amount <= 0) {
-//     console.error(
-//       `Invalid payment amount: ${amount} for payment ID: ${paymentId}`
-//     );
-//     throw new Error("Invalid payment amount");
-//   }
-
-//   const updatedOrder = await updateOrderStatus(paymentDetails);
-//   if (!updatedOrder) {
-//     throw new Error(`Order not found for order_id: ${order_id}`);
-//   }
-
-//   const { userId, courseId, paymentMode, installmentDetails, planType } =
-//     updatedOrder;
-
-//   if (paymentMode === "installment") {
-//     await handleInstallmentPayment(
-//       userId,
-//       courseId,
-//       installmentDetails,
-//       planType
-//     );
-//   }
-
-//   await addCourseToUser(
-//     userId,
-//     courseId,
-//     paymentMode,
-//     installmentDetails,
-//     paymentDetails
-//   );
-// };
-
-// // Update order status in the database
-// const updateOrderStatus = async (paymentDetails) => {
-//   const updatedOrder = await Order.findOneAndUpdate(
-//     { orderId: paymentDetails.order_id },
-//     {
-//       status: "paid",
-//       paymentId: paymentDetails.id,
-//       ...(paymentDetails.paymentMode === "installment" && {
-//         "installmentDetails.isPaid": true, // Mark installment as paid
-//       }),
-//     },
-//     { new: true }
-//   );
-
-//   if (!updatedOrder) {
-//     console.error(`Order not found for order_id: ${paymentDetails.order_id}`);
-//     return null;
-//   }
-
-//   console.log("Order updated with payment details:", updatedOrder);
-//   return updatedOrder;
-// };
-
-// // Handle installment payment
-// const handleInstallmentPayment = async (
-//   userId,
-//   courseId,
-//   installmentDetails,
-//   planType
-// ) => {
-//   const installmentPlan = await Installment.findOne({ courseId, planType });
-
-//   if (!installmentPlan) {
-//     console.error(`Installment plan not found for courseId: ${courseId}`);
-//     throw new Error("Installment plan not found");
-//   }
-
-//   const userPayment = installmentPlan.userPayments.find(
-//     (payment) =>
-//       payment.userId.toString() === userId.toString() &&
-//       payment.installmentIndex === installmentDetails.installmentIndex
-//   );
-
-//   console.log("User Payment ", userPayment);
-//   if (!userPayment || userPayment.isPaid) {
-//     throw new Error(
-//       `Installment not found or already paid for userId: ${userId} at index: ${installmentDetails.installmentIndex}`
-//     );
-//   }
-
-//   userPayment.isPaid = true;
-//   userPayment.paymentDate = new Date();
-//   installmentPlan.remainingAmount -= userPayment.paidAmount;
-
-//   const totalInstallments = installmentPlan.installments.length;
-//   const paidInstallments = installmentPlan.userPayments.filter(
-//     (payment) =>
-//       payment.userId.toString() === userId.toString() && payment.isPaid
-//   ).length;
-
-//   if (paidInstallments === totalInstallments) {
-//     installmentPlan.status = "completed";
-//   }
-
-//   await installmentPlan.save();
-//   console.log("Installment plan updated:", installmentPlan);
-// };
-
-// // Add course to the user's purchased courses
-// // Add course to the user's purchased courses and enroll in associated live classes
-// const addCourseToUser = async (
-//   userId,
-//   courseId,
-//   paymentMode,
-//   installmentDetails,
-//   paymentDetails
-// ) => {
-//   try {
-//     const user = await User.findById(userId);
-//     if (!user) {
-//       throw new Error(`User with ID ${userId} not found`);
-//     }
-
-//     const courseAlreadyPurchased = user.purchasedCourses.some(
-//       (course) => course.course.toString() === courseId.toString()
-//     );
-
-//     // Validate payment amount
-//     const amountPaid = paymentDetails.amount / 100; // Convert from smallest unit (paise/cents)
-//     if (isNaN(amountPaid) || amountPaid <= 0) {
-//       throw new Error(
-//         `Invalid amountPaid value: ${amountPaid} for payment ID ${paymentDetails.id}`
-//       );
-//     }
-
-//     if (!courseAlreadyPurchased) {
-//       const purchasedCourseData = {
-//         course: courseId,
-//         purchaseDate: new Date(),
-//         amountPaid,
-//         paymentMode,
-//       };
-
-//       if (paymentMode === "installment") {
-//         purchasedCourseData.totalInstallments =
-//           installmentDetails.totalInstallments;
-//       }
-
-//       user.purchasedCourses.push(purchasedCourseData);
-//       await user.save();
-
-//       console.info(
-//         `Course with ID ${courseId} added to user ${userId}'s purchased courses.`
-//       );
-//     }
-
-//     // Fetch all live classes associated with the course
-//     const liveClasses = await LiveClass.find({ courseIds: courseId });
-
-//     if (!liveClasses || liveClasses.length === 0) {
-//       console.warn(`No live classes found for courseId: ${courseId}.`);
-//       return;
-//     }
-
-//     const addUsersPromises = liveClasses.map(async (liveClass) => {
-//       const { classId, commonParticipantLink, title, startTime, duration } =
-//         liveClass;
-
-//       if (!classId || !commonParticipantLink) {
-//         console.warn(
-//           `Skipping live class (${liveClass._id}): Missing classId or commonParticipantLink.`
-//         );
-//         return;
-//       }
-
-//       try {
-//         // Add the user to the live class
-//         const response = await addUsersToClass(
-//           classId,
-//           [user.merithubUserId],
-//           commonParticipantLink
-//         );
-//         console.info(
-//           `User ${userId} added to live class (${classId}) successfully.`
-//         );
-
-//         // Extract the user-specific link from the API response
-//         const userResponse = response.find(
-//           (res) => res.userId === user.merithubUserId
-//         );
-//         if (!userResponse || !userResponse.userLink) {
-//           console.warn(
-//             `No user-specific link found for user ${userId} in live class (${classId}).`
-//           );
-//           return;
-//         }
-
-//         const liveUserLink = `https://live.merithub.com/info/room/${process.env.MERIT_HUB_CLIENT_ID}/${userResponse.userLink}?iframe=true`;
-
-//         // Update user's liveClasses field
-//         const liveClassInfo = {
-//           title,
-//           startTime,
-//           duration,
-//           participantLink: liveUserLink,
-//         };
-
-//         await User.findByIdAndUpdate(
-//           userId,
-//           {
-//             $push: {
-//               liveClasses: {
-//                 ...liveClassInfo,
-//                 courseIds: courseId, // Push courseId into courseIds array
-//               },
-//             },
-//           },
-//           { new: true }
-//         );
-
-//         await User.findByIdAndUpdate(
-//           userId,
-//           { $push: { liveClasses: liveClassInfo } },
-//           { new: true }
-//         );
-
-//         return response;
-//       } catch (error) {
-//         console.error(
-//           `Error adding user ${userId} to live class (${classId}): ${error.message}`
-//         );
-//         throw new Error(`Failed to add user to live class (${classId}).`);
-//       }
-//     });
-
-//     // Await completion of all add user operations
-//     await Promise.all(addUsersPromises);
-//     console.info(
-//       `User ${userId} successfully enrolled in all live classes for course ${courseId}.`
-//     );
-//   } catch (error) {
-//     console.error(`Error in addCourseToUser: ${error.message}`);
-//     throw error; // Rethrow for higher-level error handling
-//   }
-// };
-
-const Razorpay = require("razorpay");
-const crypto = require("crypto");
-const Order = require("../models/orderModel");
-const User = require("../models/userModel");
-const Course = require("../models/courseModel");
-const Installment = require("../models/installmentModel");
-const LiveClass = require("../models/LiveClass");
-const { addUsersToClass } = require("../configs/merithub.config");
-
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET,
-});
-
-const generateReceipt = () => `receipt_${Math.floor(Math.random() * 1e6)}`;
-const generateUniqueTrackingNumber = () =>
-  `TN-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+const paymentService = require("../services/paymentService");
+const { logger } = require("../utils/logger");
 
 // 🔹 Razorpay Order Creation API
 exports.createOrder = async (req, res) => {
   try {
-    const {
-      amount,
-      currency,
-      userId,
-      courseId,
-      planType,
-      paymentMode,
-      installmentIndex,
-      totalInstallments,
-    } = req.body;
+    const orderData = req.body;
 
-    if (!userId || !courseId || !paymentMode) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "userId, courseId, and paymentMode are required",
-        });
-    }
+    // Call payment service to handle business logic
+    const result = await paymentService.createRazorpayOrderLogic(orderData);
 
-    if (paymentMode === "installment") {
-      const installmentPlan = await Installment.findOne({ courseId, planType });
-      if (!installmentPlan)
-        return res
-          .status(404)
-          .json({ success: false, message: "Installment plan not found" });
+    // 🚀 LOG PAYMENT ORDER CREATION SUCCESS
+    logger.userActivity(
+      orderData.userId || 'Unknown',
+      orderData.userEmail || orderData.userPhone || 'Unknown User',
+      'PAYMENT_ORDER_CREATED',
+      `Amount: ₹${orderData.amount}, Course: ${orderData.courseId || 'N/A'}, OrderID: ${result.internalOrder.orderId}, TrackingID: ${result.trackingNumber}, IP: ${req.ip}`
+    );
 
-      const exists = installmentPlan.userPayments.some(
-        (p) =>
-          p.userId.toString() === userId &&
-          p.installmentIndex === installmentIndex
-      );
-      if (exists)
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: "Installment already exists for this user",
-          });
-
-      installmentPlan.userPayments.push({
-        userId,
-        installmentIndex,
-        isPaid: false,
-        paidAmount: amount,
-        paymentDate: null,
-      });
-      await installmentPlan.save();
-    }
-
-    const razorpayOrder = await razorpay.orders.create({
-      amount: Math.round(amount * 100),
-      currency,
-      receipt: generateReceipt(),
+    return res.status(201).json({ 
+      success: true, 
+      order: result.internalOrder,
+      razorpayOrder: result.razorpayOrder,
+      trackingNumber: result.trackingNumber
     });
-
-    const orderData = {
-      orderId: razorpayOrder.id,
-      amount: razorpayOrder.amount,
-      currency: razorpayOrder.currency,
-      receipt: razorpayOrder.receipt,
-      status: paymentMode === "installment" ? "partial" : "created",
-      trackingNumber: generateUniqueTrackingNumber(),
-      userId,
-      courseId,
-      paymentMode,
-      planType,
-    };
-
-    if (paymentMode === "installment") {
-      orderData.installmentDetails = {
-        installmentIndex,
-        totalInstallments,
-        installmentAmount: amount,
-        isPaid: false,
-      };
+  } catch (error) {
+    // 🚀 LOG PAYMENT ORDER CREATION ERROR
+    logger.error(error, 'PAYMENT_ORDER_CREATE', `UserID: ${orderData?.userId}, Amount: ${orderData?.amount}, Course: ${orderData?.courseId}`);
+    
+    // Handle specific business logic errors
+    if (error.message.includes("required") || 
+        error.message.includes("not found") ||
+        error.message.includes("already exists")) {
+      return res.status(400).json({
+          success: false,
+        message: error.message,
+      });
     }
 
-    const newOrder = new Order(orderData);
-    await newOrder.save();
-    return res.status(201).json({ success: true, order: newOrder });
-  } catch (error) {
-    console.error("Error creating order:", error);
-    return res
-      .status(500)
-      .json({ success: false, message: "Error creating order" });
+    if (error.message.includes("Installment plan not found")) {
+      return res.status(404).json({
+            success: false,
+        message: error.message,
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Error creating order",
+    });
   }
 };
 
@@ -518,188 +68,177 @@ exports.createOrder = async (req, res) => {
 exports.handleWebhook = async (req, res) => {
   try {
     const signature = req.headers["x-razorpay-signature"];
-    const generatedSignature = crypto
-      .createHmac("sha256", process.env.RAZORPAY_WEBHOOK_SECRET)
-      .update(JSON.stringify(req.body))
-      .digest("hex");
+    const body = req.body;
 
-    if (signature !== generatedSignature) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid webhook signature" });
-    }
+    // Call payment service to handle webhook business logic
+    const result = await paymentService.handlePaymentWebhookLogic({
+      signature,
+      body
+    });
 
-    const {
-      event,
-      payload: {
-        payment: { entity: paymentDetails },
-      },
-    } = req.body;
+    // 🚀 LOG PAYMENT WEBHOOK SUCCESS
+    logger.userActivity(
+      result.userId || 'System',
+      result.userEmail || 'Payment Webhook',
+      'PAYMENT_WEBHOOK_PROCESSED',
+      `Event: ${result.event}, PaymentID: ${result.paymentId}, OrderID: ${result.orderId || 'N/A'}, Status: ${result.status || 'N/A'}, IP: ${req.ip}`
+    );
 
-    if (event === "payment.captured") {
-      await handlePaymentCaptured(paymentDetails);
-    }
-
-    return res
-      .status(200)
-      .json({ success: true, message: "Webhook processed successfully" });
+    return res.status(200).json({ 
+      success: true, 
+      message: "Webhook processed successfully",
+      event: result.event,
+      paymentId: result.paymentId
+    });
   } catch (error) {
-    console.error("Webhook error:", error);
-    return res
-      .status(500)
-      .json({ success: false, message: "Webhook internal error" });
+    // 🚀 LOG PAYMENT WEBHOOK ERROR
+    logger.error(error, 'PAYMENT_WEBHOOK', `Event: ${body?.event}, PaymentID: ${body?.payload?.payment?.entity?.id}, IP: ${req.ip}`);
+    
+    if (error.message.includes("Invalid webhook signature")) {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Webhook internal error",
+    });
   }
 };
 
 // 🔹 Signature Verification Endpoint (Frontend calls this after payment)
 exports.verifySignature = async (req, res) => {
   try {
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } =
-      req.body;
+    const signatureData = req.body;
 
-    const generatedSignature = crypto
-      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
-      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
-      .digest("hex");
+    // Call payment service to handle signature verification business logic
+    const result = await paymentService.verifyPaymentSignatureLogic(signatureData);
 
-    if (generatedSignature === razorpay_signature) {
-      return res.status(200).json({ success: true });
-    } else {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid signature" });
-    }
+    // 🚀 LOG PAYMENT VERIFICATION SUCCESS
+    logger.userActivity(
+      result.order?.userId || signatureData?.userId || 'Unknown',
+      result.order?.userEmail || 'Unknown User',
+      'PAYMENT_VERIFIED',
+      `OrderID: ${result.order?.orderId}, PaymentID: ${signatureData?.razorpayPaymentId}, Amount: ₹${result.order?.amount}, Verified: ${result.verified}, IP: ${req.ip}`
+    );
+
+    return res.status(200).json({ 
+      success: true, 
+      message: result.message,
+      order: result.order,
+      verified: result.verified
+    });
   } catch (error) {
-    console.error("Signature verification error:", error);
-    return res
-      .status(500)
-      .json({ success: false, message: "Verification error" });
+    // 🚀 LOG PAYMENT VERIFICATION ERROR
+    logger.error(error, 'PAYMENT_VERIFICATION', `PaymentID: ${signatureData?.razorpayPaymentId}, OrderID: ${signatureData?.razorpayOrderId}, IP: ${req.ip}`);
+    
+    if (error.message.includes("Invalid payment signature")) {
+      return res.status(400).json({ 
+        success: false, 
+        message: error.message 
+      });
+    }
+
+    if (error.message.includes("Order not found")) {
+      return res.status(404).json({
+        success: false,
+        message: error.message,
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Verification error",
+    });
   }
 };
 
-// 🔹 Payment Captured Handler
-const handlePaymentCaptured = async (paymentDetails) => {
-  const { order_id, id: paymentId, amount } = paymentDetails;
-  if (!amount || isNaN(amount)) throw new Error("Invalid payment amount");
+// 🔹 Get Order Status
+exports.getOrderStatus = async (req, res) => {
+  try {
+    const { orderId } = req.params;
 
-  const order = await Order.findOneAndUpdate(
-    { orderId: order_id },
-    {
-      status: "paid",
-      paymentId,
-      ...(paymentDetails.paymentMode === "installment" && {
-        "installmentDetails.isPaid": true,
-      }),
-    },
-    { new: true }
-  );
-  if (!order) throw new Error(`Order not found for ID: ${order_id}`);
+    // Call payment service to get order status
+    const order = await paymentService.getOrderStatusLogic(orderId);
 
-  const { userId, courseId, paymentMode, installmentDetails, planType } = order;
+    return res.status(200).json({
+      success: true,
+      order
+    });
+  } catch (error) {
+    console.error("Error in getOrderStatus controller:", error.message);
+    
+    if (error.message.includes("Order not found")) {
+      return res.status(404).json({
+        success: false,
+        message: error.message,
+      });
+    }
 
-  if (paymentMode === "installment") {
-    await handleInstallmentPayment(
-      userId,
-      courseId,
-      installmentDetails,
-      planType
-    );
+    return res.status(500).json({
+      success: false,
+      message: "Error fetching order status",
+    });
   }
-
-  await addCourseToUser(
-    userId,
-    courseId,
-    paymentMode,
-    installmentDetails,
-    paymentDetails
-  );
 };
 
-// 🔹 Installment Update Logic
-const handleInstallmentPayment = async (
-  userId,
-  courseId,
-  installmentDetails,
-  planType
-) => {
-  const plan = await Installment.findOne({ courseId, planType });
-  if (!plan) throw new Error("Installment plan not found");
+// 🔹 Get User Orders
+exports.getUserOrders = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const options = req.query;
 
-  const entry = plan.userPayments.find(
-    (p) =>
-      p.userId.toString() === userId &&
-      p.installmentIndex === installmentDetails.installmentIndex
-  );
+    // Call payment service to get user orders
+    const result = await paymentService.getUserOrdersLogic(userId, options);
 
-  if (!entry || entry.isPaid)
-    throw new Error("Installment not found or already paid");
-
-  entry.isPaid = true;
-  entry.paymentDate = new Date();
-  plan.remainingAmount -= entry.paidAmount;
-
-  const paid = plan.userPayments.filter(
-    (p) => p.userId.toString() === userId && p.isPaid
-  ).length;
-  if (paid === plan.installments.length) plan.status = "completed";
-
-  await plan.save();
+    return res.status(200).json({
+      success: true,
+      ...result
+    });
+  } catch (error) {
+    console.error("Error in getUserOrders controller:", error.message);
+    
+    return res.status(500).json({
+      success: false,
+      message: "Error fetching user orders",
+    });
+  }
 };
 
-// 🔹 Course + Live Class Assignment
-const addCourseToUser = async (
-  userId,
-  courseId,
-  paymentMode,
-  installmentDetails,
-  paymentDetails
-) => {
-  const user = await User.findById(userId);
-  if (!user) throw new Error("User not found");
+// 🔹 Calculate Payment Charges
+exports.calculateCharges = async (req, res) => {
+  try {
+    const { basePrice, ...options } = req.body;
 
-  const amountPaid = paymentDetails.amount / 100;
-  const alreadyEnrolled = user.purchasedCourses.some(
-    (c) => c.course.toString() === courseId.toString()
-  );
+    if (!basePrice || basePrice <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid base price is required",
+      });
+    }
 
-  if (!alreadyEnrolled) {
-    const newCourse = {
-      course: courseId,
-      purchaseDate: new Date(),
-      amountPaid,
-      paymentMode,
-    };
-    if (paymentMode === "installment")
-      newCourse.totalInstallments = installmentDetails.totalInstallments;
+    // Call payment service to calculate charges
+    const calculation = paymentService.calculatePaymentChargesLogic(basePrice, options);
 
-    user.purchasedCourses.push(newCourse);
-    await user.save();
+    return res.status(200).json({
+      success: true,
+      calculation
+    });
+  } catch (error) {
+    console.error("Error in calculateCharges controller:", error.message);
+    
+    if (error.message.includes("must be between")) {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Error calculating charges",
+    });
   }
-
-  const classes = await LiveClass.find({ courseIds: courseId });
-  const addUserToClasses = classes.map(async (cls) => {
-    if (!cls.classId || !cls.commonParticipantLink) return;
-
-    const response = await addUsersToClass(
-      cls.classId,
-      [user.merithubUserId],
-      cls.commonParticipantLink
-    );
-    const userRes = response.find((r) => r.userId === user.merithubUserId);
-    if (!userRes?.userLink) return;
-
-    const link = `https://live.merithub.com/info/room/${process.env.MERIT_HUB_CLIENT_ID}/${userRes.userLink}?iframe=true`;
-
-    const info = {
-      title: cls.title,
-      startTime: cls.startTime,
-      duration: cls.duration,
-      participantLink: link,
-      courseIds: courseId,
-    };
-
-    await User.findByIdAndUpdate(userId, { $push: { liveClasses: info } });
-  });
-
-  await Promise.all(addUserToClasses);
 };

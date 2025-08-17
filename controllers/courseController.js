@@ -85,6 +85,23 @@ exports.adminManageCourseAccess = async (req, res) => {
               expiresAt: expirationDate
             });
 
+            // 🔧 FIX: For batch courses, also add to course.manualEnrollments
+            if (course.courseType === "Batch") {
+              const isAlreadyInManualEnrollments = course.manualEnrollments.some(
+                enrollment => enrollment.user.toString() === userId
+              );
+
+              if (!isAlreadyInManualEnrollments) {
+                course.manualEnrollments.push({
+                  user: userId,
+                  enrolledBy: req.user._id,
+                  status: 'Active',
+                  enrolledDate: new Date()
+                });
+                console.log(`✅ [BULK] Added user ${userId} to batch course manualEnrollments`);
+              }
+            }
+
             await user.save();
             results.successful.push({ userId, expiresAt: expirationDate });
           }
@@ -95,6 +112,19 @@ exports.adminManageCourseAccess = async (req, res) => {
             results.failed.push({ userId, reason: "User doesn't have access to this course" });
           } else {
             user.purchasedCourses.splice(courseIndex, 1);
+
+            // 🔧 FIX: For batch courses, also remove from course.manualEnrollments
+            if (course.courseType === "Batch") {
+              const enrollmentIndex = course.manualEnrollments.findIndex(
+                enrollment => enrollment.user.toString() === userId
+              );
+
+              if (enrollmentIndex !== -1) {
+                course.manualEnrollments.splice(enrollmentIndex, 1);
+                console.log(`✅ [BULK] Removed user ${userId} from batch course manualEnrollments`);
+              }
+            }
+
             await user.save();
             results.successful.push({ userId });
           }
@@ -102,6 +132,12 @@ exports.adminManageCourseAccess = async (req, res) => {
       } catch (error) {
         results.failed.push({ userId, reason: error.message });
       }
+    }
+
+    // 🔧 FIX: Save course changes if it's a batch course (manualEnrollments were modified)
+    if (course.courseType === "Batch" && results.successful.length > 0) {
+      await course.save();
+      console.log(`✅ [BULK] Saved batch course changes for ${results.successful.length} users`);
     }
 
     return res.status(200).json({
@@ -322,49 +358,152 @@ exports.getFolderContents = async (req, res) => {
 
     const rootFolder = await getRootFolder(folderId)
     const course = await getCourseFromRootFolder(rootFolder)
-    console.log("course",course);
+
     const courseId = course?course._id:null;
+    
+    console.log(`🔍 [DEBUG] Folder access check for user ${userId}:`);
+    console.log(`🔍 [DEBUG] - FolderId: ${folderId}`);
+    console.log(`🔍 [DEBUG] - Course: ${course ? course.title : 'null'} (${course ? course.courseType : 'N/A'})`);
+    console.log(`🔍 [DEBUG] - CourseId: ${courseId}`);
+    console.log(`🔍 [DEBUG] - RootFolder: ${rootFolder ? rootFolder._id : 'null'}`);
 
-    if (!courseId) {
-      return res.status(404).json({ message: "Course not found" });
+    // 🗂️ NEW: Check if this is a Master Folder or a subfolder of Master Folder
+    const currentFolder = await Folder.findById(folderId);
+    const isMasterFolder = currentFolder && (currentFolder.isMasterFolder || currentFolder.folderType === 'master');
+    
+    // 🗂️ NEW: Also check if the root folder is a Master Folder (for subfolders)
+    const isSubfolderOfMaster = rootFolder && (rootFolder.isMasterFolder || rootFolder.folderType === 'master');
+    
+    // 🗂️ NEW: Check if this is an assignment folder or subfolder of assignment folder
+    const isAssignmentFolder = currentFolder && (currentFolder.folderType === 'assignments' || currentFolder.folderType === 'student_assignments');
+    const isAssignmentSystemFolder = currentFolder && currentFolder.isSystemFolder && (currentFolder.name === 'Assignments' || currentFolder.name?.includes('_'));
+    
+    console.log(`🔍 [DEBUG] Folder type checks:`);
+    console.log(`🔍 [DEBUG] - isMasterFolder: ${isMasterFolder}`);
+    console.log(`🔍 [DEBUG] - isSubfolderOfMaster: ${isSubfolderOfMaster}`);
+    console.log(`🔍 [DEBUG] - isAssignmentFolder: ${isAssignmentFolder}`);
+    console.log(`🔍 [DEBUG] - isAssignmentSystemFolder: ${isAssignmentSystemFolder}`);
+    console.log(`🔍 [DEBUG] - currentFolder.folderType: ${currentFolder?.folderType}`);
+    console.log(`🔍 [DEBUG] - currentFolder.isSystemFolder: ${currentFolder?.isSystemFolder}`);
+    console.log(`🔍 [DEBUG] - currentFolder.name: ${currentFolder?.name}`);
+    
+    if (!courseId && !isMasterFolder && !isSubfolderOfMaster && !isAssignmentFolder && !isAssignmentSystemFolder) {
+      return res.status(404).json({ message: "Course not found and not a Master Folder or its subfolder" });
     }
 
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
+    // 🗂️ NEW: Handle Master Folders, Assignment Folders, and Course Folders differently
+    let folder, hasPurchasedCourse = false;
+
+    if (isMasterFolder || isSubfolderOfMaster || isAssignmentFolder || isAssignmentSystemFolder) {
+      // 🗂️ Master Folder, Assignment Folder, or their subfolders: No course access check needed
+      folder = await Folder.findById(folderId)
+        .populate("folders")
+        .populate("files");
+        
+      if (!folder) {
+        return res.status(404).json({ error: "Master Folder, Assignment Folder, or subfolder not found" });
+      }
+      
+      // For Master Folders, Assignment Folders, and their subfolders, all files are viewable by admin users
+      hasPurchasedCourse = true; // Admin has access to all Master Folder and Assignment content
+      
+    } else {
+      // 🗂️ Course Folder: Check course access
+      const user = await User.findById(userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      hasPurchasedCourse = user.purchasedCourses.some(
+        (pc) => pc.course.toString() === courseId.toString()
+      );
+
+      console.log(`🔍 [DEBUG] User course access check:`);
+      console.log(`🔍 [DEBUG] - User: ${user.firstName} ${user.lastName} (${userId})`);
+      console.log(`🔍 [DEBUG] - User purchased courses:`, user.purchasedCourses.map(pc => ({
+        courseId: pc.course?.toString() || pc.course,
+        assignedByAdmin: pc.assignedByAdmin?.isAssigned
+      })));
+      console.log(`🔍 [DEBUG] - Target courseId: ${courseId}`);
+      console.log(`🔍 [DEBUG] - Has purchased course: ${hasPurchasedCourse}`);
+
+      if (!hasPurchasedCourse) {
+        console.log("❌ User has not purchased course");
+      } else {
+        console.log("✅ User has purchased course");
+      }
+
+      folder = await Folder.findById(folderId)
+        .populate("folders")
+        .populate("files");
+
+      if (!folder) {
+        return res.status(404).json({ error: "Folder not found" });
+      }
     }
 
-    const hasPurchasedCourse = user.purchasedCourses.some(
-      (pc) => pc.course.toString() === courseId.toString()
-    );
-
-    if (!hasPurchasedCourse) {
-      console.log("User has not purchased course");
-    }
-
-    const folder = await Folder.findById(folderId)
-      .populate("folders")
-      .populate("files");
-
-    if (!folder) {
-      return res.status(404).json({ error: "Folder not found" });
-    }
-
+    // 🗂️ Process files with appropriate access control
+    console.log(`🔍 [DEBUG] Processing ${folder.files.length} files:`);
+    console.log(`🔍 [DEBUG] - Course type: ${course ? course.courseType : 'N/A'}`);
+    console.log(`🔍 [DEBUG] - Has purchased course: ${hasPurchasedCourse}`);
+    
     const folderContents = folder.files.map((file) => {
       const fileObj = file.toObject();
+      
+      const isBatchCourse = course && course.courseType === "Batch";
+      let newIsViewable;
 
+      if (isBatchCourse && hasPurchasedCourse) {
+        // 🎯 BATCH COURSE LOGIC: Files are unlocked by default unless manually locked by admin
+        // If admin has explicitly set isViewable to false, respect that (manual lock)
+        // Otherwise, unlock all files for batch users
+        
+        // Check if this file was manually locked by admin (has been explicitly set to false)
+        // For batch courses, we assume files are unlocked by default unless admin locked them
+        const wasManuallyLocked = fileObj.isViewable === false;
+        
+        if (wasManuallyLocked) {
+          // Admin has manually locked this file - keep it locked
+          newIsViewable = false;
+          console.log(`🔒 File "${fileObj.name}" manually locked by admin - keeping locked`);
+        } else {
+          // File is either unlocked or default state - unlock for batch user
+          newIsViewable = true;
+          console.log(`🔓 Unlocking file "${fileObj.name}" for batch course user (default batch behavior)`);
+        }
+      } else {
+        // 📚 REGULAR COURSE LOGIC: Respect original isViewable + user purchase status
+        newIsViewable = fileObj.isViewable || hasPurchasedCourse;
+      }
+
+      console.log(`🔍 [DEBUG] File "${fileObj.name}":`);
+      console.log(`🔍 [DEBUG] - Original isViewable: ${fileObj.isViewable}`);
+      console.log(`🔍 [DEBUG] - Is batch course: ${isBatchCourse}`);
+      console.log(`🔍 [DEBUG] - Has purchased course: ${hasPurchasedCourse}`);
+      console.log(`🔍 [DEBUG] - Final isViewable: ${newIsViewable}`);
 
       return {
         ...fileObj,
-        isViewable:fileObj.isViewable || hasPurchasedCourse
+        isViewable: newIsViewable
       }
-    })
+    });
 
     const folderData = folder.toObject();
     folderData.files = folderContents;
 
+    console.log(`📤 [DEBUG] Sending folder contents response:`);
+    console.log(`📤 [DEBUG] - Total files: ${folderContents.length}`);
+    console.log(`📤 [DEBUG] - File access summary:`, folderContents.map(f => ({
+      name: f.name,
+      originalIsViewable: f.isViewable,
+      finalIsViewable: f.isViewable
+    })));
 
-    res.status(200).json({ message: "Folder contents retrieved", folder: folderData });
+    res.status(200).json({ 
+      message: (isMasterFolder || isSubfolderOfMaster || isAssignmentFolder || isAssignmentSystemFolder) ? 
+        "System Folder contents retrieved" : "Folder contents retrieved", 
+      folder: folderData 
+    });
   } catch (error) {
     console.log("Error getting folder contents:", error);
     res
@@ -392,6 +531,8 @@ exports.getFolderContentsForHomeScreen = async (req, res) => {
       .json({ message: "Failed to get folder contents", error: error.message });
   }
 };
+
+
 
 // exports.deleteFolder = async (req, res) => {
 //   try {

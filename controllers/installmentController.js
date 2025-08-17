@@ -1,21 +1,68 @@
 const Installment = require("../models/installmentModel");
 const Order = require("../models/orderModel");
-const Razorpay = require("razorpay");
 const Course = require("../models/courseModel");
 const Subscription = require("../models/subscriptionModel");
-const crypto = require("crypto");
+const installmentService = require("../services/installmentService");
+const paymentService = require("../services/paymentService");
+const { logger } = require("../utils/logger");
 
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET,
-});
+// Input validation helper
+const validateInstallmentInput = (req, res, next) => {
+  const { courseId, planType, numberOfInstallments, price } = req.body;
+  const errors = [];
+
+  // Required field validation
+  if (!courseId) errors.push("courseId is required");
+  if (!planType) errors.push("planType is required");
+  if (!numberOfInstallments) errors.push("numberOfInstallments is required");
+  if (price === undefined || price === null) errors.push("price is required");
+
+  // Type validation
+  if (courseId && typeof courseId !== 'string') errors.push("courseId must be a string");
+  if (planType && typeof planType !== 'string') errors.push("planType must be a string");
+  if (numberOfInstallments && (!Number.isInteger(numberOfInstallments) || numberOfInstallments < 1)) {
+    errors.push("numberOfInstallments must be a positive integer");
+  }
+  if (price !== undefined && price !== null && (typeof price !== 'number' || price <= 0)) {
+    errors.push("price must be a positive number");
+  }
+
+  // Plan type validation
+  const validPlanTypes = ["3 months", "6 months", "12 months", "24 months"];
+  if (planType && !validPlanTypes.includes(planType)) {
+    errors.push(`planType must be one of: ${validPlanTypes.join(', ')}`);
+  }
+
+  if (errors.length > 0) {
+    return res.status(400).json({ 
+      message: "Validation failed", 
+      errors,
+      receivedData: { courseId, planType, numberOfInstallments, price }
+    });
+  }
+
+  next();
+};
 
 // Set Installment Plan (Admin)
 exports.setCustomInstallments = async (req, res) => {
   try {
-    const { courseId, planType, numberOfInstallments, price, discount } =
-      req.body;
+    // Run validation first
+    await new Promise((resolve, reject) => {
+      validateInstallmentInput(req, res, (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+
+    const { courseId, planType, numberOfInstallments, price, discount = 0 } = req.body;
     console.log("Himanshu -> setCustomInstallments -> req.body:", req.body);
+    
+    // Validate courseId format
+    if (!courseId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ message: "Invalid courseId format" });
+    }
+
     const course = await Course.findById(courseId);
     if (!course) return res.status(404).json({ message: "Course not found" });
 
@@ -23,52 +70,87 @@ exports.setCustomInstallments = async (req, res) => {
     if (!subscription)
       return res.status(404).json({ message: "Subscription not found" });
 
+    // Get discount from subscription validities if not provided
+    let finalDiscount = discount;
+    if (!discount || discount === 0) {
+      const validityData = subscription.validities?.find(v => `${v.validity} months` === planType);
+      finalDiscount = validityData?.discount || 0;
+    }
+
+    // Validate discount range
+    if (finalDiscount < 0 || finalDiscount > 100) {
+      return res.status(400).json({ message: "Discount must be between 0 and 100" });
+    }
+
     const gstPercentage = subscription.gst || 0;
     const internetHandlingPercentage = subscription.internetHandling || 0;
-    const discountValue = (price * discount) / 100;
+    const discountValue = (price * finalDiscount) / 100;
 
     let totalAmount = price - discountValue;
     const gstAmount = (totalAmount * gstPercentage) / 100;
-    const internetHandlingCharge =
-      (totalAmount * internetHandlingPercentage) / 100;
+    const internetHandlingCharge = (totalAmount * internetHandlingPercentage) / 100;
     totalAmount += gstAmount + internetHandlingCharge;
 
+    // Enhanced validation for installments
     if (numberOfInstallments < 1) {
-      return res
-        .status(400)
-        .json({ message: "Invalid number of installments" });
+      return res.status(400).json({ message: "Number of installments must be at least 1" });
     }
 
-    const installmentAmount = totalAmount / numberOfInstallments;
+    // Validate maximum installments based on plan duration
+    const maxInstallments = {
+      "3 months": 3,
+      "6 months": 6, 
+      "12 months": 12,
+      "24 months": 24
+    };
 
-    let planDuration;
-    switch (planType) {
-      case "3 months":
-        planDuration = 3;
-        break;
-      case "6 months":
-        planDuration = 6;
-        break;
-      case "12 months":
-        planDuration = 12;
-        break;
-      default:
-        planDuration = parseInt(planType.trim().split(" ")[0]);
-    }
-
-    if (numberOfInstallments > planDuration) {
+    if (numberOfInstallments > maxInstallments[planType]) {
       return res.status(400).json({
-        message: `Installments cannot exceed plan duration (${planDuration} months)`,
+        message: `Maximum ${maxInstallments[planType]} installments allowed for ${planType} plan`,
+        maxAllowed: maxInstallments[planType],
+        requested: numberOfInstallments
       });
     }
 
+    // Validate minimum installment amount (₹50)
+    const minInstallmentAmount = 50;
+    if (totalAmount / numberOfInstallments < minInstallmentAmount) {
+      return res.status(400).json({
+        message: `Minimum installment amount is ₹${minInstallmentAmount}. Total amount ₹${totalAmount.toFixed(2)} cannot be divided into ${numberOfInstallments} installments.`
+      });
+    }
+
+    // Improved installment amount calculation with proper rounding
+    const baseInstallmentAmount = Math.floor((totalAmount / numberOfInstallments) * 100) / 100;
+    const remainder = Math.round((totalAmount - (baseInstallmentAmount * numberOfInstallments)) * 100) / 100;
+    
+    console.log(`Price calculation breakdown:`);
+    console.log(`- Original price: ₹${price}`);
+    console.log(`- Discount (${finalDiscount}%): -₹${discountValue.toFixed(2)}`);
+    console.log(`- After discount: ₹${(price - discountValue).toFixed(2)}`);
+    console.log(`- GST (${gstPercentage}%): +₹${gstAmount.toFixed(2)}`);
+    console.log(`- Internet handling (${internetHandlingPercentage}%): +₹${internetHandlingCharge.toFixed(2)}`);
+    console.log(`- Total amount: ₹${totalAmount.toFixed(2)}`);
+    console.log(`- Base installment: ₹${baseInstallmentAmount}`);
+    console.log(`- Remainder distributed: ₹${remainder}`);
+
+    // Create installments with proper amount distribution
     const installments = [];
     for (let i = 0; i < numberOfInstallments; i++) {
+      // Add remainder to first installment to ensure total matches exactly
+      const installmentAmount = i === 0 ? baseInstallmentAmount + remainder : baseInstallmentAmount;
+      
       installments.push({
-        amount: installmentAmount.toFixed(2),
+        amount: parseFloat(installmentAmount.toFixed(2)),
         dueDate: i === 0 ? "DOP" : `DOP + ${i} month${i > 1 ? "s" : ""}`,
         isPaid: false,
       });
+    }
+
+    // Verify total amount matches (quality check)
+    const calculatedTotal = installments.reduce((sum, inst) => sum + inst.amount, 0);
+    if (Math.abs(calculatedTotal - totalAmount) > 0.01) {
+      console.warn(`Amount mismatch: Expected ₹${totalAmount.toFixed(2)}, Got ₹${calculatedTotal.toFixed(2)}`);
     }
 
     const existingPlan = await Installment.findOne({ courseId, planType });
@@ -97,7 +179,31 @@ exports.setCustomInstallments = async (req, res) => {
       .status(201)
       .json({ message: "Installment plan set", data: newInstallmentPlan });
   } catch (error) {
-    res.status(500).json({ message: "Error setting installment plan", error });
+    console.error("Error in setCustomInstallments:", {
+      error: error.message,
+      stack: error.stack,
+      requestBody: req.body,
+      timestamp: new Date().toISOString()
+    });
+    
+    // Handle specific error types
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({ 
+        message: "Validation error", 
+        details: error.errors 
+      });
+    }
+    if (error.name === 'CastError') {
+      return res.status(400).json({ 
+        message: "Invalid data format", 
+        field: error.path 
+      });
+    }
+    
+    res.status(500).json({ 
+      message: "Error setting installment plan", 
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
   }
 };
 
@@ -105,19 +211,70 @@ exports.setCustomInstallments = async (req, res) => {
 exports.getInstallments = async (req, res) => {
   try {
     const { courseId } = req.params;
-    const course = await Course.findById(courseId);
-    if (!course) return res.status(404).json({ message: "Course not found" });
-
-    const installments = await Installment.find({ courseId });
-    if (!installments.length) {
-      return res.status(404).json({ message: "No installment plans found" });
+    
+    // Input validation
+    if (!courseId) {
+      return res.status(400).json({ message: "courseId is required" });
     }
 
-    res
-      .status(200)
-      .json({ message: "Installment plans retrieved", data: installments });
+    // Validate ObjectId format
+    if (!courseId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ message: "Invalid courseId format" });
+    }
+
+    const course = await Course.findById(courseId);
+    if (!course) {
+      return res.status(404).json({ 
+        message: "Course not found",
+        courseId
+      });
+    }
+
+    const installments = await Installment.find({ courseId }).sort({ createdAt: -1 });
+    if (!installments.length) {
+      return res.status(404).json({ 
+        message: "No installment plans found for this course",
+        courseId,
+        courseName: course.title || course.name
+      });
+    }
+
+    // Enhance response with additional metadata
+    const enhancedInstallments = installments.map(plan => ({
+      ...plan.toObject(),
+      courseName: course.title || course.name,
+      totalInstallments: plan.installments.length,
+      paidInstallments: plan.installments.filter(inst => inst.isPaid).length,
+      nextDueInstallment: plan.installments.find(inst => !inst.isPaid) || null
+    }));
+
+    res.status(200).json({ 
+      message: "Installment plans retrieved successfully", 
+      data: enhancedInstallments,
+      count: installments.length,
+      courseInfo: {
+        id: course._id,
+        name: course.title || course.name
+      }
+    });
   } catch (error) {
-    res.status(500).json({ message: "Error retrieving plans", error });
+    console.error("Error in getInstallments:", {
+      error: error.message,
+      courseId: req.params.courseId,
+      timestamp: new Date().toISOString()
+    });
+    
+    if (error.name === 'CastError') {
+      return res.status(400).json({ 
+        message: "Invalid courseId format", 
+        field: error.path 
+      });
+    }
+    
+    res.status(500).json({ 
+      message: "Error retrieving installment plans", 
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
   }
 };
 
@@ -127,77 +284,149 @@ exports.makeInstallmentPayment = async (req, res) => {
     const { installmentId } = req.params;
     const { userId, installmentIndex } = req.body;
 
+    // Input validation
+    if (!installmentId) {
+      return res.status(400).json({ message: "installmentId is required" });
+    }
+    if (!userId) {
+      return res.status(400).json({ message: "userId is required" });
+    }
+    if (installmentIndex === undefined || installmentIndex === null) {
+      return res.status(400).json({ message: "installmentIndex is required" });
+    }
+
+    // Validate ObjectId format
+    if (!installmentId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ message: "Invalid installmentId format" });
+    }
+    if (!userId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ message: "Invalid userId format" });
+    }
+
+    // Validate installmentIndex is a valid integer
+    if (!Number.isInteger(installmentIndex) || installmentIndex < 0) {
+      return res.status(400).json({ message: "installmentIndex must be a non-negative integer" });
+    }
+
     const installmentPlan = await Installment.findById(installmentId);
     if (!installmentPlan)
-      return res.status(404).json({ message: "Plan not found" });
+      return res.status(404).json({ message: "Installment plan not found" });
 
-    if (
-      installmentIndex < 0 ||
-      installmentIndex >= installmentPlan.installments.length
-    ) {
-      return res.status(400).json({ message: "Invalid installment index" });
+    if (installmentIndex >= installmentPlan.installments.length) {
+      return res.status(400).json({ 
+        message: "Invalid installment index",
+        maxIndex: installmentPlan.installments.length - 1,
+        providedIndex: installmentIndex
+      });
     }
 
     const installment = installmentPlan.installments[installmentIndex];
     if (installment.isPaid)
       return res.status(400).json({ message: "Already paid" });
 
-    const paymentOptions = {
-      amount: installment.amount * 100,
+    // Prepare order data for payment service
+    const orderData = {
+      amount: installment.amount,
       currency: "INR",
-      receipt: `receipt_${Math.floor(Math.random() * 1e6)}`,
+      userId,
+      courseId: installmentPlan.courseId,
+      planType: installmentPlan.planType,
+      paymentMode: "installment",
+      installmentIndex,
+      totalInstallments: installmentPlan.installments.length,
+      notes: {
+        installmentPlanId: installmentId
+      }
     };
-    const razorpayOrder = await razorpay.orders.create(paymentOptions);
 
+    // Use payment service to create Razorpay order
+    const result = await paymentService.createRazorpayOrderLogic(orderData);
+
+    // Update installment plan with user ID if not set
     if (!installmentPlan.userId) {
       installmentPlan.userId = userId;
       await installmentPlan.save();
     }
 
-    const newOrder = new Order({
-      orderId: razorpayOrder.id,
-      amount: razorpayOrder.amount,
-      currency: razorpayOrder.currency,
+    // 🚀 LOG INSTALLMENT PAYMENT ORDER CREATION SUCCESS
+    logger.userActivity(
       userId,
-      courseId: installmentPlan.courseId,
-      installmentPlanId: installmentId,
-      installmentIndex,
-      status: "created",
-      trackingNumber: `TN-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      paymentMode: "installment",
-    });
-
-    await newOrder.save();
+      result.internalOrder?.userEmail || 'Unknown User',
+      'INSTALLMENT_PAYMENT_ORDER_CREATED',
+      `Amount: ₹${installment.amount}, Course: ${installmentPlan.courseId}, Plan: ${installmentPlan.planType}, Installment: ${installmentIndex + 1}/${installmentPlan.installments.length}, OrderID: ${result.internalOrder?.orderId}, TrackingID: ${result.trackingNumber}, IP: ${req.ip}`
+    );
 
     res.status(201).json({
       success: true,
-      order: razorpayOrder,
+      order: result.razorpayOrder,
+      internalOrder: result.internalOrder,
+      trackingNumber: result.trackingNumber,
       message: "Installment payment order created",
     });
   } catch (error) {
-    console.error("Error creating installment payment order:", error);
-    res.status(500).json({ message: "Error creating order", error });
+    // 🚀 LOG INSTALLMENT PAYMENT ORDER CREATION ERROR
+    logger.error(error, 'INSTALLMENT_PAYMENT_ORDER_CREATE', `InstallmentID: ${req.params.installmentId}, UserID: ${req.body.userId}, Index: ${req.body.installmentIndex}`);
+    
+    if (error.name === 'CastError') {
+      return res.status(400).json({ 
+        message: "Invalid ID format", 
+        field: error.path 
+      });
+    }
+    
+    res.status(500).json({ 
+      message: "Error creating installment payment order", 
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
   }
 };
 
 // Razorpay Webhook Confirmation
 exports.confirmInstallmentPayment = async (req, res) => {
   try {
+    // Validate webhook signature
     const signature = req.headers["x-razorpay-signature"];
+    if (!signature) {
+      return res.status(400).json({ message: "Missing webhook signature" });
+    }
+
+    if (!process.env.RAZORPAY_WEBHOOK_SECRET) {
+      console.error("RAZORPAY_WEBHOOK_SECRET not configured");
+      return res.status(500).json({ message: "Webhook configuration error" });
+    }
+
     const generatedSignature = crypto
       .createHmac("sha256", process.env.RAZORPAY_WEBHOOK_SECRET)
       .update(JSON.stringify(req.body))
       .digest("hex");
 
     if (signature !== generatedSignature) {
+      console.warn("Invalid webhook signature received", {
+        received: signature,
+        expected: generatedSignature,
+        timestamp: new Date().toISOString()
+      });
       return res.status(400).json({ message: "Invalid webhook signature" });
     }
 
     const { event, payload } = req.body;
+    
+    // Validate webhook payload structure
+    if (!event) {
+      return res.status(400).json({ message: "Missing event type in webhook" });
+    }
+    if (!payload) {
+      return res.status(400).json({ message: "Missing payload in webhook" });
+    }
+
     const paymentEntity = payload?.payment?.entity;
+    if (!paymentEntity) {
+      return res.status(400).json({ message: "Missing payment entity in webhook" });
+    }
 
     if (event !== "payment.captured") {
-      return res.status(400).json({ message: "Not a payment.captured event" });
+      console.log(`Ignoring webhook event: ${event}`);
+      return res.status(200).json({ message: `Event ${event} ignored` });
     }
 
     const {
@@ -237,10 +466,24 @@ exports.confirmInstallmentPayment = async (req, res) => {
     }
 
     await installmentPlan.save();
+
+    // 🚀 LOG INSTALLMENT PAYMENT CONFIRMATION SUCCESS
+    logger.userActivity(
+      order.userId,
+      'Installment Payment',
+      'INSTALLMENT_PAYMENT_CONFIRMED',
+      `Amount: ₹${installment.amount}, Course: ${installmentPlan.courseId}, Plan: ${installmentPlan.planType}, Installment: ${order.installmentIndex + 1}/${installmentPlan.installments.length}, OrderID: ${order.orderId}, Status: ${installmentPlan.status}, Remaining: ₹${installmentPlan.remainingAmount}, IP: ${req.ip}`
+    );
+
     res.status(200).json({ message: "Installment payment confirmed" });
   } catch (error) {
-    console.error("Webhook error:", error);
-    res.status(500).json({ message: "Webhook error", error });
+    // 🚀 LOG INSTALLMENT PAYMENT CONFIRMATION ERROR
+    logger.error(error, 'INSTALLMENT_PAYMENT_CONFIRMATION', `Event: ${req.body?.event}, OrderID: ${req.body?.payload?.payment?.entity?.order_id}, IP: ${req.ip}`);
+    
+    res.status(500).json({ 
+      message: "Webhook processing error", 
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
   }
 };
 
@@ -248,19 +491,66 @@ exports.confirmInstallmentPayment = async (req, res) => {
 exports.getOutstandingBalance = async (req, res) => {
   try {
     const { courseId, userId } = req.params;
+    
+    // Input validation
+    if (!courseId) {
+      return res.status(400).json({ message: "courseId is required" });
+    }
+    if (!userId) {
+      return res.status(400).json({ message: "userId is required" });
+    }
+
+    // Validate ObjectId format
+    if (!courseId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ message: "Invalid courseId format" });
+    }
+    if (!userId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ message: "Invalid userId format" });
+    }
+
     const plan = await Installment.findOne({ courseId, userId });
 
     if (!plan)
-      return res.status(404).json({ message: "Installment plan not found" });
+      return res.status(404).json({ 
+        message: "No installment plan found for this user and course",
+        courseId,
+        userId
+      });
+
+    // Calculate actual remaining amount
+    const paidAmount = plan.installments
+      .filter(inst => inst.isPaid)
+      .reduce((sum, inst) => sum + inst.amount, 0);
+    const actualRemainingAmount = plan.totalAmount - paidAmount;
 
     res.status(200).json({
       message: "Outstanding balance retrieved",
-      remainingAmount: plan.remainingAmount,
+      remainingAmount: actualRemainingAmount,
+      totalAmount: plan.totalAmount,
+      paidAmount,
       installments: plan.installments,
+      planType: plan.planType,
+      numberOfInstallments: plan.numberOfInstallments
     });
   } catch (error) {
-    console.error("Balance error:", error);
-    res.status(500).json({ message: "Balance fetch error", error });
+    console.error("Error in getOutstandingBalance:", {
+      error: error.message,
+      courseId: req.params.courseId,
+      userId: req.params.userId,
+      timestamp: new Date().toISOString()
+    });
+    
+    if (error.name === 'CastError') {
+      return res.status(400).json({ 
+        message: "Invalid ID format", 
+        field: error.path 
+      });
+    }
+    
+    res.status(500).json({ 
+      message: "Error retrieving outstanding balance", 
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
   }
 };
 
@@ -269,14 +559,38 @@ exports.getUserInstallmentTimeline = async (req, res) => {
   try {
     const { courseId, userId } = req.params;
 
-    const plan = await Installment.findOne({
+    // Input validation
+    if (!courseId) {
+      return res.status(400).json({ message: "courseId is required" });
+    }
+    if (!userId) {
+      return res.status(400).json({ message: "userId is required" });
+    }
+
+    // Validate ObjectId format
+    if (!courseId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ message: "Invalid courseId format" });
+    }
+    if (!userId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ message: "Invalid userId format" });
+    }
+
+    // Try to find plan with userPayments first, then fallback to general plan
+    let plan = await Installment.findOne({
       courseId,
       "userPayments.userId": userId,
     });
 
+    // Fallback: look for any plan for this course if user-specific not found
+    if (!plan) {
+      plan = await Installment.findOne({ courseId });
+    }
+
     if (!plan) {
       return res.status(404).json({
-        message: "No installment plan found for this course and user",
+        message: "No installment plan found for this course",
+        courseId,
+        userId
       });
     }
 
@@ -313,7 +627,133 @@ exports.getUserInstallmentTimeline = async (req, res) => {
 
     res.status(200).json({ message: "Timeline retrieved", timeline });
   } catch (error) {
-    console.error("Timeline error:", error);
-    res.status(500).json({ message: "Timeline error", error });
+    console.error("Error in getUserInstallmentTimeline:", {
+      error: error.message,
+      courseId: req.params.courseId,
+      userId: req.params.userId,
+      timestamp: new Date().toISOString()
+    });
+    
+    if (error.name === 'CastError') {
+      return res.status(400).json({ 
+        message: "Invalid ID format", 
+        field: error.path 
+      });
+    }
+    
+    res.status(500).json({ 
+      message: "Error retrieving installment timeline", 
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+};
+
+// 🔥 NEW: Check user's course access based on installment payments
+exports.checkUserCourseAccess = async (req, res) => {
+  try {
+    const { courseId, userId } = req.params;
+    
+    // Input validation
+    if (!courseId) {
+      return res.status(400).json({ message: "courseId is required" });
+    }
+    if (!userId) {
+      return res.status(400).json({ message: "userId is required" });
+    }
+
+    // Validate ObjectId format
+    if (!courseId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ message: "Invalid courseId format" });
+    }
+    if (!userId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ message: "Invalid userId format" });
+    }
+
+    const { checkUserInstallmentStatus } = require('../services/courseAccessService');
+    const accessStatus = await checkUserInstallmentStatus(userId, courseId);
+    
+    res.status(200).json({
+      message: "Course access status retrieved",
+      hasAccess: accessStatus.hasAccess,
+      reason: accessStatus.reason,
+      ...(accessStatus.message && { statusMessage: accessStatus.message }),
+      ...(accessStatus.planType && { planType: accessStatus.planType }),
+      ...(accessStatus.overdueInstallments && { overdueInstallments: accessStatus.overdueInstallments }),
+      ...(accessStatus.totalOverdueAmount && { totalOverdueAmount: accessStatus.totalOverdueAmount }),
+      ...(accessStatus.nextDueInstallment && { nextDueInstallment: accessStatus.nextDueInstallment }),
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error("Error in checkUserCourseAccess:", {
+      error: error.message,
+      courseId: req.params.courseId,
+      userId: req.params.userId,
+      timestamp: new Date().toISOString()
+    });
+    
+    if (error.name === 'CastError') {
+      return res.status(400).json({ 
+        message: "Invalid ID format", 
+        field: error.path 
+      });
+    }
+    
+    res.status(500).json({ 
+      message: "Error checking course access", 
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+};
+
+// 🔥 NEW: Get detailed payment timeline for user's course
+exports.getUserPaymentTimeline = async (req, res) => {
+  try {
+    const { courseId, userId } = req.params;
+    
+    // Input validation
+    if (!courseId) {
+      return res.status(400).json({ message: "courseId is required" });
+    }
+    if (!userId) {
+      return res.status(400).json({ message: "userId is required" });
+    }
+
+    // Validate ObjectId format
+    if (!courseId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ message: "Invalid courseId format" });
+    }
+    if (!userId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ message: "Invalid userId format" });
+    }
+
+    const { getUserPaymentTimeline } = require('../services/courseAccessService');
+    const timelineData = await getUserPaymentTimeline(userId, courseId);
+    
+    res.status(200).json({
+      message: "Payment timeline retrieved successfully",
+      ...timelineData,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error("Error in getUserPaymentTimeline:", {
+      error: error.message,
+      courseId: req.params.courseId,
+      userId: req.params.userId,
+      timestamp: new Date().toISOString()
+    });
+    
+    if (error.name === 'CastError') {
+      return res.status(400).json({ 
+        message: "Invalid ID format", 
+        field: error.path 
+      });
+    }
+    
+    res.status(500).json({ 
+      message: "Error retrieving payment timeline", 
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
   }
 };

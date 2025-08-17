@@ -2,13 +2,13 @@ const bcrypt = require("bcryptjs");
 const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
 const authConfig = require("../configs/auth.config");
-var newOTP = require("otp-generators");
+// var newOTP = require("otp-generators"); // Replaced with generateOTP function
 const User = require("../models/userModel");
 const Banner = require("../models/bannerModel");
 const Subscription = require("../models/subscriptionModel");
 const UserSubscription = require("../models/userSubscriptionModel");
 const Notification = require("../models/notificationModel");
-const Chat = require("../models/chatModel");
+const Message = require("../models/messageModel");
 const Schedule = require("../models/scheduleModel");
 const Category = require("../models/course/courseCategory");
 const Product = require("../models/ProductModel");
@@ -30,6 +30,7 @@ const BehaviorNote = require("../models/behaviourModel");
 const { addUser, updateUser } = require("../configs/merithub.config");
 // const nodemailer = require('nodemailer');
 const { redisClient } = require("../configs/redis");
+const { logger } = require("../utils/logger");
 
 const reffralCode = async () => {
   var digits = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -38,6 +39,85 @@ const reffralCode = async () => {
     OTP += digits[Math.floor(Math.random() * 36)];
   }
   return OTP;
+};
+
+// Function to send automatic welcome message when user logs in
+const sendWelcomeMessage = async (userId, userName = "Student", isNewUser = false) => {
+  try {
+    // Find admin user to send welcome message from
+    const adminUser = await User.findOne({ userType: "ADMIN" }).select("_id firstName lastName");
+    if (!adminUser) {
+      console.log("No admin user found for welcome message");
+      return;
+    }
+
+    // Check if welcome message already exists for this user (from admin to user)
+    const existingWelcome = await Message.findOne({
+      sender: adminUser._id,
+      receiver: userId,
+      isBroadcast: false,
+      content: { $regex: /welcome|Welcome/i }
+    });
+
+    // Only send welcome message if it doesn't exist
+    if (!existingWelcome) {
+      const welcomeContent = isNewUser 
+        ? `🎉 Welcome to Wakad Classes, ${userName}! 
+
+We're excited to have you join our learning community! Here's what you can do:
+
+📚 Browse our courses and start learning
+📝 Take tests to evaluate your progress  
+📹 Join live classes with expert teachers
+💬 Use this chat for any questions or support
+
+Our team is here to help you succeed. Feel free to ask anything!
+
+Best regards,
+Wakad Classes Team`
+        : `👋 Welcome back, ${userName}! 
+
+Great to see you again at Wakad Classes. 
+
+Need any help with your courses or have questions? Just message us here!
+
+Happy learning! 🚀`;
+
+      const welcomeMessage = new Message({
+        sender: adminUser._id,  // FROM admin
+        receiver: userId,      // TO user
+        content: welcomeContent,
+        attachments: [],
+        isRead: false,
+        isBroadcast: false,
+        status: "sent",
+        timestamp: new Date(),
+      });
+
+      await welcomeMessage.save();
+      console.log(`✅ Welcome message created: Admin ${adminUser._id} → User ${userId}`);
+      
+      // Emit socket event for real-time delivery if socket is available
+      if (global.io) {
+        global.io.to(userId.toString()).emit("message", {
+          _id: welcomeMessage._id,
+          content: welcomeMessage.content,
+          sender: adminUser._id,
+          receiver: userId,
+          createdAt: welcomeMessage.createdAt,
+          attachments: [],
+          isBroadcast: false
+        });
+        console.log(`🔔 Welcome message emitted to user ${userId}`);
+      }
+
+      console.log(`📨 Welcome message sent from admin to user ${userId}`);
+    } else {
+      console.log(`⚠️ Welcome message already exists for user ${userId}`);
+    }
+  } catch (error) {
+    console.error("❌ Error sending welcome message:", error);
+  }
 };
 
 const generateTrackingNumber = () => {
@@ -102,10 +182,7 @@ exports.signup = async (req, res) => {
       firstName,
       lastName,
       phone,
-      email,
-      school,
-      class: className,
-      rollNo,
+      email,       
     } = req.body;
 
     if (!phone || phone.trim() === "") {
@@ -133,11 +210,8 @@ exports.signup = async (req, res) => {
         .json({ status: 400, message: "Invalid email format" });
     }
 
-    let otp = newOTP.generate(4, {
-      alphabets: false,
-      upperCase: false,
-      specialChar: false,
-    });
+    // Use the consistent generateOTP function
+    let otp = generateOTP();
     // let otpExpiration = new Date(Date.now() + 5 * 60 * 1000);
     let otpExpiration = new Date(Date.now() + 30 * 1000);
     let accountVerification = false;
@@ -148,6 +222,13 @@ exports.signup = async (req, res) => {
       userType: "USER",
     });
     if (user) {
+      // 🚀 LOG REGISTRATION ATTEMPT - ALREADY EXISTS
+      logger.userActivity(
+        user._id,
+        `${user.firstName} ${user.lastName}`,
+        'REGISTRATION_ATTEMPT',
+        `Failed - User already exists, Email: ${email}, Phone: ${phone}, IP: ${req.ip}`
+      );
       return res
         .status(400)
         .send({ status: 400, message: "User already exists" });
@@ -157,9 +238,6 @@ exports.signup = async (req, res) => {
       lastName,
       phone,
       email,
-      school,
-      class: className,
-      rollNo,
       otp,
       otpExpiration,
       accountVerification,
@@ -168,13 +246,22 @@ exports.signup = async (req, res) => {
 
     await newUser.save();
 
+    // 🚀 LOG USER REGISTRATION SUCCESS
+    logger.userActivity(
+      newUser._id,
+      `${newUser.firstName} ${newUser.lastName}`,
+      'REGISTRATION',
+      `Email: ${newUser.email}, Phone: ${newUser.phone}, IP: ${req.ip}`
+    );
+
     return res.status(201).json({
       status: 201,
       message: "User created successfully",
       user: newUser,
     });
   } catch (error) {
-    console.log(error);
+    // 🚀 LOG USER REGISTRATION ERROR
+    logger.error(error, 'USER_REGISTRATION', `Email: ${email}, Phone: ${phone}`);
     return res
       .status(500)
       .json({ status: 500, message: "Error creating user", error });
@@ -185,11 +272,7 @@ exports.registration = async (req, res) => {
     const user = await User.findOne({ _id: req.user._id });
     if (user) {
       if (req.body.refferalCode == null || req.body.refferalCode == undefined) {
-        req.body.otp = newOTP.generate(4, {
-          alphabets: false,
-          upperCase: false,
-          specialChar: false,
-        });
+        req.body.otp = generateOTP();
         // req.body.otpExpiration = new Date(Date.now() + 5 * 60 * 1000);
         req.body.otpExpiration = new Date(Date.now() + 30 * 1000);
         req.body.accountVerification = false;
@@ -215,11 +298,7 @@ exports.registration = async (req, res) => {
           refferalCode: req.body.refferalCode,
         });
         if (findUser) {
-          req.body.otp = newOTP.generate(4, {
-            alphabets: false,
-            upperCase: false,
-            specialChar: false,
-          });
+          req.body.otp = generateOTP();
           // req.body.otpExpiration = new Date(Date.now() + 5 * 60 * 1000);
           req.body.otpExpiration = new Date(Date.now() + 30 * 1000);
           req.body.accountVerification = false;
@@ -272,6 +351,8 @@ exports.socialLogin = async (req, res) => {
       $and: [{ $or: [{ email }, { phone }] }, { userType: "USER" }],
     });
     if (user) {
+      // Existing user - no welcome message needed (already sent during registration)
+      
       jwt.sign(
         { id: user._id, userType: user.userType },
         authConfig.secret,
@@ -299,6 +380,9 @@ exports.socialLogin = async (req, res) => {
         userType: "USER",
       });
       if (newUser) {
+        // New user - send welcome message
+        await sendWelcomeMessage(newUser._id, newUser.firstName || firstName, true);
+        
         jwt.sign({ id: newUser._id }, authConfig.secret, (err, token) => {
           if (err) {
             return res.status(401).send("Invalid Credentials");
@@ -316,7 +400,7 @@ exports.socialLogin = async (req, res) => {
     }
   } catch (err) {
     console.error(err);
-    return createResponse(res, 500, "Internal server error");
+    return res.status(500).json({ status: 500, message: "Internal server error" });
   }
 };
 
@@ -397,14 +481,23 @@ exports.logoutUser = async (req, res) => {
         ? { "activeTokens.webToken": null }
         : { "activeTokens.mobileToken": null };
 
-    await User.findOneAndUpdate({ _id: userId }, updateQuery);
+    const user = await User.findOneAndUpdate({ _id: userId }, updateQuery, { new: true });
+
+    // 🚀 LOG USER LOGOUT SUCCESS
+    logger.userActivity(
+      userId,
+      user.firstName || user.email || user.phone || 'Unknown',
+      'LOGOUT',
+      `Device: ${deviceType}, IP: ${req.ip}`
+    );
 
     return res.status(200).json({
       status: 200,
       message: `Successfully logged out from ${deviceType}`,
     });
   } catch (error) {
-    console.error(error);
+    // 🚀 LOG USER LOGOUT ERROR
+    logger.error(error, 'USER_LOGOUT', `UserID: ${userId}, Device: ${deviceType}`);
     return res.status(500).json({
       status: 500,
       message: "Server error",
@@ -461,6 +554,9 @@ exports.signupWithPhone = async (req, res) => {
 
     // Save the new user to the database
     await newUser.save();
+
+    // Send welcome message to new user
+    await sendWelcomeMessage(newUser._id, newUser.firstName || "Student", true);
 
     // Generate OTP and set expiration
     const otp = generateOTP();
@@ -571,38 +667,67 @@ exports.verifyOtp = async (req, res) => {
       return res.status(404).send({ message: "user not found" });
     }
 
+    let isValidOTP = false;
+
+    // First try Redis (for signupWithPhone)
     const redisKey = `otp:${user._id}`;
     const storedOTP = await redisClient.get(redisKey);
 
-    if (!storedOTP || storedOTP !== otp) {
-      return res.status(400).json({ message: "Invalid or expired OTP" });
+    if (storedOTP && storedOTP === otp) {
+      // OTP found in Redis and matches
+      isValidOTP = true;
+      await redisClient.del(redisKey); // Clean up Redis
+    } else if (user.otp && user.otpExpiration) {
+      // Fallback to database OTP (for signup)
+      if (user.otp === otp && new Date() < user.otpExpiration) {
+        isValidOTP = true;
+        // Clean up database OTP
+        await User.findByIdAndUpdate(user._id, {
+          $unset: { otp: 1, otpExpiration: 1 }
+        });
+      }
     }
 
-    await redisClient.del(redisKey);
+    if (!isValidOTP) {
+      return res.status(400).json({ 
+        status: 400, 
+        message: "Invalid or expired OTP" 
+      });
+    }
 
+    // Update user verification status
     const updated = await User.findByIdAndUpdate(
       { _id: user._id },
       { accountVerification: true },
       { new: true }
     );
+
+    // NOTE: Welcome message is sent during user creation in socialLogin/signup, not here
+    // This prevents duplicate welcome messages during OTP verification
+
+    // Generate JWT token
     const accessToken = jwt.sign({ id: user._id }, authConfig.secret, {
       expiresIn: authConfig.accessTokenTime,
     });
+
     let obj = {
       userId: updated._id,
-      otp: updated.otp,
       phone: updated.phone,
       token: accessToken,
       completeProfile: updated.completeProfile,
     };
-    return res
-      .status(200)
-      .send({ status: 200, message: "logged in successfully", data: obj });
+
+    return res.status(200).send({ 
+      status: 200, 
+      message: "logged in successfully", 
+      data: obj 
+    });
   } catch (err) {
     console.log(err.message);
-    return res
-      .status(500)
-      .send({ error: "internal server error" + err.message });
+    return res.status(500).send({ 
+      status: 500, 
+      error: "internal server error: " + err.message 
+    });
   }
 };
 
@@ -658,6 +783,17 @@ exports.login = async (req, res) => {
       expiresIn: authConfig.accessTokenTime,
     });
 
+    // Send welcome message after successful login
+    await sendWelcomeMessage(user._id, user.firstName || "Student", false);
+
+    // Log user login activity
+    logger.userActivity(
+      user._id, 
+      user.firstName || user.email || user.phone, 
+      'LOGIN', 
+      `Login method: ${otp ? 'OTP' : 'PASSWORD'}, IP: ${req.ip}`
+    );
+
     // last Login can be used
     // await User.findByIdAndUpdate(user._id, {
     //   lastLogin: new Date()
@@ -678,7 +814,7 @@ exports.login = async (req, res) => {
       data: responseObj,
     });
   } catch (err) {
-    console.error(err);
+    logger.error(err, 'USER_LOGIN', identifier);
     return res.status(500).json({
       message: "Internal server error",
       error: err.message,
@@ -704,6 +840,8 @@ exports.getProfile = async (req, res) => {
     return sendResponse(res, 500, "Server error");
   }
 };
+
+
 
 // Controller to update the current user's profile
 exports.updateProfile = async (req, res) => {
@@ -1292,165 +1430,51 @@ exports.getAllNotificationsForUser = async (req, res) => {
     });
   }
 };
+// DEPRECATED: Message functionality moved to chatController.js to avoid duplication
+// Use /api/v1/chat/send endpoint instead
 exports.sendMessage = async (req, res) => {
-  try {
-    const { sender, receiver, content } = req.body;
-
-    if (
-      !mongoose.Types.ObjectId.isValid(sender) ||
-      !mongoose.Types.ObjectId.isValid(receiver)
-    ) {
-      return res.status(StatusCodes.BAD_REQUEST).json({
-        status: StatusCodes.BAD_REQUEST,
-        message: "Invalid sender or receiver ID",
-      });
-    }
-
-    const senderUser = await User.findById(sender);
-    const receiverUser = await User.findById(receiver);
-
-    if (!senderUser) {
-      return res.status(404).json({ status: 404, message: "Sender not found" });
-    }
-
-    if (!receiverUser) {
-      return res
-        .status(404)
-        .json({ status: 404, message: "Receiver not found" });
-    }
-
-    const newMessage = await Chat.create({ sender, receiver, content });
-    res.status(201).json({
-      message: "Message sent successfully",
-      data: newMessage,
-    });
-  } catch (error) {
-    res.status(500).json({
-      error: error.message,
-    });
-  }
+  return res.status(410).json({
+    status: 410,
+    message: "This endpoint is deprecated. Please use /api/v1/chat/send instead.",
+    redirectTo: "/api/v1/chat/send"
+  });
 };
+// DEPRECATED: Use /api/v1/chat/:requestedUserID instead
 exports.getConversation = async (req, res) => {
-  try {
-    const { user1, user2 } = req.params;
-    const messages = await Chat.find({
-      $or: [
-        { sender: user1, receiver: user2 },
-        { sender: user2, receiver: user1 },
-      ],
-    })
-      .sort({ createdAt: 1 })
-      .populate("sender receiver");
-
-    res.status(200).json({
-      message: "Conversation retrieved successfully",
-      data: messages,
-    });
-  } catch (error) {
-    res.status(500).json({
-      error: error.message,
-    });
-  }
+  return res.status(410).json({
+    status: 410,
+    message: "This endpoint is deprecated. Please use /api/v1/chat/:requestedUserID instead.",
+    redirectTo: "/api/v1/chat/:requestedUserID"
+  });
 };
+// DEPRECATED: Message functionality moved to chatController.js
 exports.updateMessage = async (req, res) => {
-  try {
-    const { messageId } = req.params;
-    const { content } = req.body;
-
-    const updatedMessage = await Chat.findByIdAndUpdate(
-      messageId,
-      { content },
-      { new: true }
-    );
-
-    if (!updatedMessage) {
-      return res.status(404).json({
-        status: 404,
-        message: "Message not found",
-      });
-    }
-
-    res.status(200).json({
-      status: 200,
-      message: "Message updated successfully",
-      data: updatedMessage,
-    });
-  } catch (error) {
-    res.status(500).json({
-      error: error.message,
-    });
-  }
+  return res.status(410).json({
+    status: 410,
+    message: "This endpoint is deprecated. Use chatController for message operations."
+  });
 };
+// DEPRECATED: Message functionality moved to chatController.js
 exports.deleteMessage = async (req, res) => {
-  try {
-    const { messageId } = req.params;
-
-    const deletedMessage = await Chat.findByIdAndDelete(messageId);
-
-    if (!deletedMessage) {
-      return res.status(404).json({
-        status: 404,
-        message: "Message not found",
-      });
-    }
-
-    res.status(200).json({
-      status: 200,
-      message: "Message deleted successfully",
-    });
-  } catch (error) {
-    res.status(500).json({
-      error: error.message,
-    });
-  }
+  return res.status(410).json({
+    status: 410,
+    message: "This endpoint is deprecated. Use chatController for message operations."
+  });
 };
+// DEPRECATED: Use /api/v1/chat/markAsRead/:partnerId instead
 exports.markAsRead = async (req, res) => {
-  try {
-    const { messageId } = req.params;
-
-    const updatedMessage = await Chat.findByIdAndUpdate(
-      messageId,
-      { isRead: true },
-      { new: true }
-    );
-
-    if (!updatedMessage) {
-      return res.status(404).json({
-        status: 404,
-        message: "Message not found",
-      });
-    }
-
-    res.status(200).json({
-      status: 200,
-      message: "Message marked as read",
-      data: updatedMessage,
-    });
-  } catch (error) {
-    res.status(500).json({
-      error: error.message,
-    });
-  }
+  return res.status(410).json({
+    status: 410,
+    message: "This endpoint is deprecated. Use /api/v1/chat/markAsRead/:partnerId instead.",
+    redirectTo: "/api/v1/chat/markAsRead/:partnerId"
+  });
 };
+// DEPRECATED: Message functionality moved to chatController.js
 exports.getUnreadMessagesCount = async (req, res) => {
-  try {
-    const { userId } = req.params;
-
-    const unreadCount = await Chat.countDocuments({
-      receiver: userId,
-      isRead: false,
-    });
-
-    res.status(200).json({
-      status: 200,
-      message: "Unread messages count retrieved successfully",
-      data: unreadCount,
-    });
-  } catch (error) {
-    res.status(500).json({
-      error: error.message,
-    });
-  }
+  return res.status(410).json({
+    status: 410,
+    message: "This endpoint is deprecated. Use chatController for message operations."
+  });
 };
 exports.getAllSchedules = async (req, res) => {
   try {
@@ -2891,7 +2915,13 @@ exports.getUserEnrolledCourses = async (req, res) => {
     const subscriptions = await UserSubscription.find({
       user: userId,
     }).populate("course");
-    if (subscriptions.length === 0) {
+    
+    // Filter subscriptions to only include published courses
+    const publishedSubscriptions = subscriptions.filter(sub => 
+      sub.course && sub.course.isPublished
+    );
+    
+    if (publishedSubscriptions.length === 0) {
       return res.status(404).json({
         status: 404,
         message: "No enrolled courses found",
@@ -2899,7 +2929,7 @@ exports.getUserEnrolledCourses = async (req, res) => {
       });
     }
 
-    const courses = subscriptions.map((sub) => sub.course);
+    const courses = publishedSubscriptions.map((sub) => sub.course);
 
     return res.status(200).json({
       status: 200,
@@ -2915,7 +2945,11 @@ exports.getUserEnrolledCourses = async (req, res) => {
 };
 exports.getAllFreeCourses = async (req, res) => {
   try {
-    const freeCourses = await Course.find({ courseType: "Free" });
+    // Only return free courses that are also published
+    const freeCourses = await Course.find({ 
+      courseType: "Free", 
+      isPublished: true 
+    });
 
     if (!freeCourses || freeCourses.length === 0) {
       return res
@@ -2955,6 +2989,113 @@ exports.getAllCourses = async (req, res) => {
       .json({ status: 500, message: "Server error", error: error.message });
   }
 };
+
+exports.getUserPurchasedCourses = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    console.log(`🔍 [DEBUG] Fetching purchased courses for user: ${userId}`);
+
+    const user = await User.findById(userId).populate({
+      path: 'purchasedCourses.course',
+      model: 'Course',
+      select: 'title description price courseImage category subCategory isPublished courseType rootFolder'
+    });
+    
+    if (!user) {
+      console.log(`❌ [DEBUG] User not found: ${userId}`);
+      return res
+        .status(404)
+        .json({ status: 404, message: "User not found", data: null });
+    }
+
+    console.log(`🔍 [DEBUG] User found: ${user.firstName} ${user.lastName}`);
+    console.log(`🔍 [DEBUG] Raw purchasedCourses count: ${user.purchasedCourses?.length || 0}`);
+    console.log(`🔍 [DEBUG] Raw purchasedCourses:`, user.purchasedCourses?.map(pc => ({
+      courseId: pc.course?._id || pc.course,
+      courseTitle: pc.course?.title,
+      courseType: pc.course?.courseType,
+      isPublished: pc.course?.isPublished,
+      rootFolder: pc.course?.rootFolder,
+      rootFolderType: typeof pc.course?.rootFolder,
+      assignedByAdmin: pc.assignedByAdmin?.isAssigned,
+      expiresAt: pc.expiresAt
+    })));
+    
+    // Additional debug: Log courses that have undefined rootFolder
+    const coursesWithoutRootFolder = user.purchasedCourses?.filter(pc => 
+      pc.course && !pc.course.rootFolder
+    );
+    if (coursesWithoutRootFolder?.length > 0) {
+      console.log(`🚨 [DEBUG] Courses without rootFolder:`, coursesWithoutRootFolder.map(pc => ({
+        courseId: pc.course._id,
+        courseTitle: pc.course.title,
+        courseType: pc.course.courseType
+      })));
+    }
+
+    // Filter out expired courses and unpublished regular courses, but allow unpublished batch courses
+    const activePurchasedCourses = user.purchasedCourses.filter(pc => {
+      // Exclude expired courses
+      if (pc.expiresAt && pc.expiresAt <= new Date()) {
+        console.log(`🔍 [DEBUG] Filtering out expired course: ${pc.course?.title}`);
+        return false;
+      }
+      
+      // Exclude courses that don't exist
+      if (!pc.course) {
+        console.log(`🔍 [DEBUG] Filtering out course with no data: ${pc.course}`);
+        return false;
+      }
+      
+      // For batch courses, allow access even if unpublished (batches are invitation-only)
+      if (pc.course.courseType === "Batch") {
+        console.log(`🔍 [DEBUG] Including batch course: ${pc.course.title} (published: ${pc.course.isPublished})`);
+        return true;
+      }
+      
+      // For regular courses, only include published ones
+      if (!pc.course.isPublished) {
+        console.log(`🔍 [DEBUG] Filtering out unpublished regular course: ${pc.course.title}`);
+        return false;
+      }
+      
+      console.log(`🔍 [DEBUG] Including published regular course: ${pc.course.title}`);
+      return true; // Include active published regular courses and all batch courses
+    });
+
+    console.log(`🔍 [DEBUG] Active purchased courses count after filtering: ${activePurchasedCourses.length}`);
+
+    const courses = activePurchasedCourses.map(pc => ({
+      ...pc.course.toObject(),
+      purchaseInfo: {
+        purchasedAt: pc.assignedByAdmin?.assignedAt || pc.purchasedAt,
+        expiresAt: pc.expiresAt,
+        assignedByAdmin: pc.assignedByAdmin?.isAssigned || false,
+        assignedBy: pc.assignedByAdmin?.assignedBy
+      }
+    }));
+
+    console.log(`🔍 [DEBUG] Final response - courses count: ${courses.length}`);
+    console.log(`🔍 [DEBUG] Final courses:`, courses.map(c => ({
+      id: c._id,
+      title: c.title,
+      courseType: c.courseType,
+      isPublished: c.isPublished
+    })));
+
+    return res.status(200).json({
+      status: 200,
+      message: "Purchased courses retrieved successfully",
+      data: courses,
+    });
+  } catch (error) {
+    console.error(error);
+    return res
+      .status(500)
+      .json({ status: 500, message: "Server error", error: error.message });
+  }
+};
+
 exports.getAllNotices = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -4240,6 +4381,227 @@ exports.getUserPermissions = async (req, res) => {
     return res.status(500).json({
       message: "Internal server error",
       error: error.message,
+    });
+  }
+};
+
+// ============================================================================
+// 📝 ASSIGNMENT SUBMISSION FUNCTIONS
+// ============================================================================
+
+// Submit assignment for batch course
+exports.submitAssignment = async (req, res) => {
+  try {
+    const AssignmentSubmission = require("../models/assignmentSubmissionModel");
+    const Folder = require("../models/folderModel");
+    const File = require("../models/fileModel");
+    const multer = require('multer');
+    const path = require('path');
+    
+    const userId = req.user._id;
+    const { courseId, assignmentTitle, assignmentDescription, studentNotes } = req.body;
+    
+    console.log(`🔍 [DEBUG] Assignment submission for user ${userId}, courseRootFolder ${courseId}`);
+    
+    // Validate required fields
+    if (!courseId || !assignmentTitle) {
+      return res.status(400).json({
+        status: 400,
+        message: "Course ID and assignment title are required"
+      });
+    }
+    
+    // Check if user has access to the course
+    const User = require("../models/userModel");
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({
+        status: 404,
+        message: "User not found"
+      });
+    }
+    
+    // Find the course by rootFolder ID
+    const Course = require("../models/courseModel");
+    const course = await Course.findOne({ rootFolder: courseId });
+    
+    if (!course) {
+      return res.status(404).json({
+        status: 404,
+        message: "Course not found"
+      });
+    }
+    
+    // Check if user has access to this course
+    const hasAccess = user.purchasedCourses.some(
+      pc => pc.course.toString() === course._id.toString()
+    );
+    
+    if (!hasAccess) {
+      return res.status(403).json({
+        status: 403,
+        message: "You don't have access to this course"
+      });
+    }
+    
+    // Create or find Assignment folder in course structure
+    let assignmentFolder = await Folder.findOne({ 
+      name: "Assignments", 
+      parentFolderId: courseId 
+    });
+    
+    if (!assignmentFolder) {
+      // Create Assignment folder
+      assignmentFolder = new Folder({
+        name: "Assignments",
+        parentFolderId: courseId,
+        files: [],
+        folders: [],
+        isSystemFolder: true,
+        folderType: 'assignments'
+      });
+      await assignmentFolder.save();
+      
+      // Add to parent folder
+      const parentFolder = await Folder.findById(courseId);
+      if (parentFolder) {
+        parentFolder.folders.push(assignmentFolder._id);
+        await parentFolder.save();
+      }
+    }
+    
+    // Create student-specific folder inside Assignments
+    const studentFolderName = `${user.firstName || 'Student'}_${user.phone || userId}`;
+    let studentFolder = await Folder.findOne({ 
+      name: studentFolderName, 
+      parentFolderId: assignmentFolder._id 
+    });
+    
+    if (!studentFolder) {
+      studentFolder = new Folder({
+        name: studentFolderName,
+        parentFolderId: assignmentFolder._id,
+        files: [],
+        folders: [],
+        isSystemFolder: true,
+        folderType: 'student_assignments'
+      });
+      await studentFolder.save();
+      
+      // Add to assignment folder
+      assignmentFolder.folders.push(studentFolder._id);
+      await assignmentFolder.save();
+    }
+    
+    // Process uploaded files and save to student folder
+    const submittedFiles = [];
+    
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        const fileType = path.extname(file.originalname).toLowerCase();
+        let fileTypeCategory = 'other';
+        
+        if (['.jpg', '.jpeg', '.png', '.gif', '.bmp'].includes(fileType)) {
+          fileTypeCategory = 'image';
+        } else if (fileType === '.pdf') {
+          fileTypeCategory = 'pdf';
+        } else if (['.doc', '.docx'].includes(fileType)) {
+          fileTypeCategory = 'document';
+        }
+        
+        // Create File model instance
+        const fileDoc = new File({
+          name: file.originalname,
+          url: file.location, // AWS S3 URL (multerS3 provides this)
+          type: fileTypeCategory,
+          isViewable: true,
+          isDownloadable: true
+        });
+        
+        await fileDoc.save();
+        
+        // Add file to student folder
+        studentFolder.files.push(fileDoc._id);
+        
+        submittedFiles.push({
+          fileId: fileDoc._id, // Add the File model ID for streaming
+          fileName: file.originalname,
+          fileUrl: file.location,
+          fileType: fileTypeCategory,
+          fileSize: file.size,
+          uploadedAt: new Date()
+        });
+      }
+      
+      await studentFolder.save();
+    }
+    
+    // Create assignment submission record
+    const assignmentSubmission = new AssignmentSubmission({
+      student: userId,
+      courseRootFolder: courseId,
+      assignmentTitle: assignmentTitle.trim(),
+      assignmentDescription: assignmentDescription ? assignmentDescription.trim() : '',
+      submittedFiles: submittedFiles,
+      studentNotes: studentNotes ? studentNotes.trim() : '',
+      submissionStatus: 'submitted'
+    });
+    
+    await assignmentSubmission.save();
+    
+    console.log(`✅ [DEBUG] Assignment submitted successfully: ${assignmentSubmission._id}`);
+    
+    res.status(201).json({
+      status: 201,
+      message: "Assignment submitted successfully",
+      data: assignmentSubmission
+    });
+    
+  } catch (error) {
+    console.error("❌ Error submitting assignment:", error);
+    res.status(500).json({
+      status: 500,
+      message: "Failed to submit assignment",
+      error: error.message
+    });
+  }
+};
+
+// Get user's assignment submissions
+exports.getUserAssignments = async (req, res) => {
+  try {
+    const AssignmentSubmission = require("../models/assignmentSubmissionModel");
+    const userId = req.user._id;
+    
+    console.log(`🔍 [DEBUG] Fetching assignments for user: ${userId}`);
+    
+    const assignments = await AssignmentSubmission.find({ student: userId })
+      .populate('courseRootFolder', 'name')
+      .populate('adminReview.reviewedBy', 'firstName lastName')
+      .sort({ createdAt: -1 });
+    
+    console.log(`✅ [DEBUG] Found ${assignments.length} assignments for user`);
+    console.log(`🔍 [DEBUG] Assignment details:`, assignments.map(a => ({
+      id: a._id,
+      title: a.assignmentTitle,
+      courseRootFolder: a.courseRootFolder,
+      submittedFiles: a.submittedFiles.length,
+      createdAt: a.createdAt
+    })));
+    
+    res.status(200).json({
+      status: 200,
+      message: "User assignments retrieved successfully",
+      data: assignments
+    });
+    
+  } catch (error) {
+    console.error("❌ Error fetching user assignments:", error);
+    res.status(500).json({
+      status: 500,
+      message: "Failed to fetch user assignments",
+      error: error.message
     });
   }
 };

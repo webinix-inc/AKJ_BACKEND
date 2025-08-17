@@ -13,9 +13,17 @@ const quizFolderSchema = new Schema(
     quizzes: [{ type: Schema.Types.ObjectId, ref: "Quiz" }],
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
     courses: [{ type: Schema.Types.ObjectId, ref: "Course" }],
-    isVisible: { type: Boolean, default: false }, // New field for visibility
+    isVisible: { type: Boolean, default: true }, // 🔧 FIX: Default to visible so users can see assigned test folders
   },
   { timestamps: true }
 );
+
+// 🚀 PERFORMANCE INDEXES for 2000+ concurrent users
+quizFolderSchema.index({ parentFolderId: 1 });
+quizFolderSchema.index({ createdBy: 1 });
+quizFolderSchema.index({ isVisible: 1 });
+quizFolderSchema.index({ courses: 1 });
+quizFolderSchema.index({ createdAt: -1 });
+quizFolderSchema.index({ parentFolderId: 1, isVisible: 1 }); // Visible subfolders
 
 module.exports = mongoose.model("QuizFolder", quizFolderSchema);

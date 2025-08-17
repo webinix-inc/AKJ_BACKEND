@@ -1,107 +1,3 @@
-// const redisClient = quizQueue.client;
-
-// // Constants for Redis keys and timing
-// const CACHE_KEYS = {
-//     SCORECARD: (id) => `scorecard:${id}`,
-//     ANSWERS: (id) => `answers:${id}`,
-//     PENDING_SAVES: 'pending_saves'
-// };
-
-// const BATCH_SAVE_INTERVAL = 5 * 60 * 1000; // 5 minutes
-// const CACHE_CLEANUP_DELAY = 2 * 60 * 1000;
-
-// // New endpoint for viewing score details
-// exports.viewScore = async (req, res) => {
-//     try {
-//         const { scorecardId } = req.params;
-
-//         // Try cache first
-//         const [cachedScorecard, cachedAnswers] = await Promise.all([
-//             redisClient.hgetall(CACHE_KEYS.SCORECARD(scorecardId)),
-//             redisClient.hgetall(CACHE_KEYS.ANSWERS(scorecardId))
-//         ]);
-
-//         let scoreDetails;
-//         if (cachedScorecard && cachedAnswers) {
-//             scoreDetails = {
-//                 score: parseInt(cachedScorecard.score),
-//                 correctQuestions: parseInt(cachedScorecard.correctQuestions),
-//                 incorrectQuestions: parseInt(cachedScorecard.incorrectQuestions),
-//                 answers: Object.entries(cachedAnswers).map(([questionId, answerStr]) => ({
-//                     questionId,
-//                     ...JSON.parse(answerStr)
-//                 }))
-//             };
-//         } else {
-//             // Fallback to MongoDB
-//             const scorecard = await Scorecard.findById(scorecardId)
-//                 .populate('answers.questionId', 'questionText questionType');
-
-//             if (!scorecard) {
-//                 return res.status(404).json({ message: 'Scorecard not found' });
-//             }
-
-//             scoreDetails = {
-//                 score: scorecard.score,
-//                 correctQuestions: scorecard.correctQuestions,
-//                 incorrectQuestions: scorecard.incorrectQuestions,
-//                 answers: scorecard.answers
-//             };
-//         }
-
-//         res.status(200).json({
-//             message: 'Score details retrieved',
-//             scoreDetails
-//         });
-//     } catch (error) {
-//         console.error('Error in viewing score:', error);
-//         res.status(500).json({ message: 'Internal server error', error: error.message });
-//     }
-// };
-
-// exports.getQuizResults = async (req, res) => {
-//     try {
-//         const { quizId } = req.params;
-
-//         // Fetch the quiz
-//         const quiz = await Quiz.findById(quizId);
-//         if (!quiz) {
-//             return res.status(404).json({ message: 'Quiz not found' });
-//         }
-
-//         // Fetch all completed scorecards for this quiz
-//         const scorecards = await Scorecard.find({
-//             quizId: quizId,
-//             status: 'completed'|| 'auto-submitted'
-//         }).populate('userId', 'firstName email');
-
-//         // Process the scorecards to get the required information
-//         const results = await Promise.all(scorecards.map(async (scorecard) => {
-//             const notAttempted = quiz.questions.length - (scorecard.correctQuestions + scorecard.incorrectQuestions);
-
-//             return {
-//                 studentName: scorecard.userId.firstName,
-//                 studentEmail: scorecard.userId.email,
-//                 score: scorecard.score,
-//                 correctQuestions: scorecard.correctQuestions,
-//                 incorrectQuestions: scorecard.incorrectQuestions,
-//                 notAttempted: notAttempted,
-//                 totalQuestions: quiz.questions.length
-//             };
-//         }));
-
-//         res.status(200).json({
-//             quizName: quiz.quizName,
-//             totalParticipants: results.length,
-//             results: results
-//         });
-
-//     } catch (error) {
-//         console.error('Error in getQuizResults:', error);
-//         res.status(500).json({ message: 'Internal server error' });
-//     }
-// };
-
 const moment = require("moment-timezone");
 
 const Scorecard = require("../models/scorecardModel");
@@ -127,134 +23,163 @@ const BATCH_WRITE_INTERVAL = 60 * 3; // 3 minutes
 
 exports.validateQuizStart = async (req, res) => {
   try {
-      const { quizId } = req.params;
-      const userId = req.user._id;
-      const indianTimeZone = "Asia/Kolkata";
-      const now = moment.tz(indianTimeZone);
+    const { quizId } = req.params;
+    const userId = req.user._id;
+    const indianTimeZone = "Asia/Kolkata";
+    const now = moment.tz(indianTimeZone);
 
-      const quiz = await Quiz.findById(quizId);
-      if (!quiz) {
-          return res.status(404).json({ 
-              success: false,
-              message: "Quiz not found" 
-          });
-      }
+    const quiz = await Quiz.findById(quizId);
+    if (!quiz) {
+      return res.status(404).json({
+        success: false,
+        message: "Quiz not found",
+      });
+    }
 
-      let canStartQuiz = false;
-      let endDateTime;
+    let canStartQuiz = false;
+    let endDateTime;
 
-      if (quiz.availabilityType === "always") {
-          canStartQuiz = quiz.isActive;
-          if (!canStartQuiz) {
-              return res.status(403).json({ 
-                  success: false,
-                  message: "This quiz is not currently active." 
-              });
-          }
-      } else if (quiz.availabilityType === "scheduled") {
-          const startDateTime = moment.tz(
-              `${quiz.scheduledStartDate} ${quiz.scheduledStartTime}`,
-              "DD-MM-YYYY HH:mm",
-              indianTimeZone
-          );
-          endDateTime = moment.tz(
-              `${quiz.scheduledEndDate} ${quiz.scheduledEndTime}`,
-              "DD-MM-YYYY HH:mm",
-              indianTimeZone
-          );
-
-          if (now.isBefore(startDateTime)) {
-              return res.status(403).json({ 
-                  success: false,
-                  message: "This quiz is not available yet." 
-              });
-          }
-          if (now.isAfter(endDateTime)) {
-              return res.status(403).json({ 
-                  success: false,
-                  message: "The time for this quiz has passed." 
-              });
-          }
-          canStartQuiz = true;
-      }
-
+    if (quiz.availabilityType === "always") {
+      canStartQuiz = quiz.isActive;
       if (!canStartQuiz) {
-          return res.status(403).json({ 
-              success: false,
-              message: "Unable to start the quiz at this time." 
-          });
-      }
-
-      let userAttempt = quiz.userAttempts.find(
-          (attempt) => attempt.userId.toString() === userId
-      );
-      
-      if (!userAttempt) {
-          userAttempt = { userId, attemptCount: 0 };
-      }
-
-      if (userAttempt.attemptCount >= quiz.maxAttempts) {
-          return res.status(403).json({
-              success: false,
-              message: 'Maximum attempts reached for this quiz',
-              maxAttempts: quiz.maxAttempts,
-              userAttempts: userAttempt.attemptCount
-          });
-      }
-
-      const existingScorecard = await Scorecard.findOne({
-          userId,
-          quizId,
-          completed: false,
-      });
-      
-      if (existingScorecard) {
-          return res.status(400).json({ 
-              success: false,
-              message: "You have an ongoing attempt for this quiz" 
-          });
-      }
-
-      const fullDurationInMinutes = quiz.duration.hours * 60 + quiz.duration.minutes;
-      const endTimeByDuration = now.clone().add(fullDurationInMinutes, "minutes");
-      
-      let actualEndTime;
-      if (quiz.availabilityType === "scheduled" && endDateTime) {
-          actualEndTime = moment.min(endTimeByDuration, endDateTime);
-      } else {
-          actualEndTime = endTimeByDuration;
-      }
-
-      const actualDurationMinutes = actualEndTime.diff(now, "minutes");
-
-      if (actualDurationMinutes < 1) {
-          return res.status(403).json({
-              success: false,
-              message: "Not enough time remaining to start the quiz",
-              remainingMinutes: actualDurationMinutes,
-          });
-      }
-
-      return res.status(200).json({
-          success: true,
-          message: "Quiz can be started",
-          quizDetails: {
-              quizId,
-              currentAttempts: userAttempt.attemptCount,
-              maxAttempts: quiz.maxAttempts,
-              durationMinutes: actualDurationMinutes,
-              startTime: now.format("DD-MM-YYYY HH:mm"),
-              expectedEndTime: actualEndTime.format("DD-MM-YYYY HH:mm")
-          }
-      });
-
-  } catch (error) {
-      console.error("Error in validating quiz:", error);
-      res.status(500).json({ 
+        return res.status(403).json({
           success: false,
-          message: "Internal server error", 
-          error: error.message 
+          message: "This quiz is not currently active.",
+        });
+      }
+    } else if (quiz.availabilityType === "scheduled") {
+      const startDateTime = moment.tz(
+        `${quiz.scheduledStartDate} ${quiz.scheduledStartTime}`,
+        "DD-MM-YYYY HH:mm",
+        indianTimeZone
+      );
+      endDateTime = moment.tz(
+        `${quiz.scheduledEndDate} ${quiz.scheduledEndTime}`,
+        "DD-MM-YYYY HH:mm",
+        indianTimeZone
+      );
+
+      if (now.isBefore(startDateTime)) {
+        return res.status(403).json({
+          success: false,
+          message: "This quiz is not available yet.",
+        });
+      }
+      if (now.isAfter(endDateTime)) {
+        return res.status(403).json({
+          success: false,
+          message: "The time for this quiz has passed.",
+        });
+      }
+      canStartQuiz = true;
+    }
+
+    if (!canStartQuiz) {
+      return res.status(403).json({
+        success: false,
+        message: "Unable to start the quiz at this time.",
       });
+    }
+
+    // Safely get or initialize attempt count
+    const attemptIndex = quiz.userAttempts.findIndex(
+      (attempt) => attempt.userId.toString() === userId.toString()
+    );
+
+    const userAttempt = attemptIndex === -1
+      ? { userId, attemptCount: 0 }
+      : quiz.userAttempts[attemptIndex];
+
+    if (userAttempt.attemptCount >= quiz.maxAttempts) {
+      return res.status(403).json({
+        success: false,
+        message: "Maximum attempts reached for this quiz",
+        maxAttempts: quiz.maxAttempts,
+        userAttempts: userAttempt.attemptCount,
+      });
+    }
+
+    // Check for any ongoing quiz
+    const existingScorecard = await Scorecard.findOne({
+      userId,
+      quizId,
+      completed: false,
+    });
+
+    if (existingScorecard) {
+      // 🔧 FIX: Check if the existing scorecard has expired
+      const currentTime = new Date();
+      const isExpired = existingScorecard.expectedEndTime && 
+                       currentTime > existingScorecard.expectedEndTime;
+      
+      if (isExpired) {
+        console.log(`🕐 [QUIZ_VALIDATION] Auto-submitting expired scorecard ${existingScorecard._id} for user ${userId}`);
+        try {
+          // Auto-submit the expired scorecard
+          await finishQuizHelper(existingScorecard);
+          console.log(`✅ [QUIZ_VALIDATION] Expired scorecard auto-submitted successfully`);
+        } catch (error) {
+          console.error(`❌ [QUIZ_VALIDATION] Error auto-submitting expired scorecard:`, error);
+          // Continue with the new attempt even if auto-submission fails
+        }
+      } else {
+        // Scorecard is still active, block new attempt
+        const timeRemaining = existingScorecard.expectedEndTime ? 
+          Math.max(0, Math.ceil((existingScorecard.expectedEndTime - currentTime) / (1000 * 60))) : 
+          'Unknown';
+        
+        return res.status(400).json({
+          success: false,
+          message: "You have an ongoing attempt for this quiz",
+          details: {
+            scorecardId: existingScorecard._id,
+            timeRemaining: `${timeRemaining} minutes`,
+            startedAt: existingScorecard.createdAt
+          }
+        });
+      }
+    }
+
+    const fullDurationInMinutes =
+      quiz.duration.hours * 60 + quiz.duration.minutes;
+    const endTimeByDuration = now.clone().add(fullDurationInMinutes, "minutes");
+
+    let actualEndTime;
+    if (quiz.availabilityType === "scheduled" && endDateTime) {
+      actualEndTime = moment.min(endTimeByDuration, endDateTime);
+    } else {
+      actualEndTime = endTimeByDuration;
+    }
+
+    const actualDurationMinutes = actualEndTime.diff(now, "minutes");
+
+    if (actualDurationMinutes < 1) {
+      return res.status(403).json({
+        success: false,
+        message: "Not enough time remaining to start the quiz",
+        remainingMinutes: actualDurationMinutes,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Quiz can be started",
+      quizDetails: {
+        quizId,
+        currentAttempts: userAttempt.attemptCount,
+        maxAttempts: quiz.maxAttempts,
+        durationMinutes: actualDurationMinutes,
+        startTime: now.format("DD-MM-YYYY HH:mm"),
+        expectedEndTime: actualEndTime.format("DD-MM-YYYY HH:mm"),
+      },
+    });
+  } catch (error) {
+    console.error("Error in validating quiz:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 
@@ -269,96 +194,45 @@ exports.startQuiz = async (req, res) => {
     if (!quiz) {
       return res.status(404).json({ message: "Quiz not found" });
     }
-    // console.log('Quiz:', quiz);
 
-    // let canStartQuiz = false;
-    // let startDateTime, endDateTime;
-
-    // if (quiz.availabilityType === "always") {
-    //   canStartQuiz = quiz.isActive;
-    //   if (!canStartQuiz) {
-    //     return res
-    //       .status(403)
-    //       .json({ message: "This quiz is not currently active." });
-    //   }
-    // } else if (quiz.availabilityType === "scheduled") {
-    //   startDateTime = moment.tz(
-    //     `${quiz.scheduledStartDate} ${quiz.scheduledStartTime}`,
-    //     "DD-MM-YYYY HH:mm",
-    //     indianTimeZone
-    //   );
-    //   endDateTime = moment.tz(
-    //     `${quiz.scheduledEndDate} ${quiz.scheduledEndTime}`,
-    //     "DD-MM-YYYY HH:mm",
-    //     indianTimeZone
-    //   );
-
-    //   if (now.isBefore(startDateTime)) {
-    //     return res
-    //       .status(403)
-    //       .json({ message: "This quiz is not available yet." });
-    //   }
-    //   if (now.isAfter(endDateTime)) {
-    //     return res
-    //       .status(403)
-    //       .json({ message: "The time for this quiz has passed." });
-    //   }
-
-    //   canStartQuiz = true;
-    // }
-
-    // if (!canStartQuiz) {
-    //   return res
-    //     .status(403)
-    //     .json({ message: "Unable to start the quiz at this time." });
-    // }
-
-    // Validate attempt limits
-    let userAttempt = quiz.userAttempts.find(
-      (attempt) => attempt.userId.toString() === userId
+    const attemptIndex = quiz.userAttempts.findIndex(
+      (attempt) => attempt.userId.toString() === userId.toString()
     );
-    if (!userAttempt) {
-      userAttempt = { userId, attemptCount: 0 };
-      quiz.userAttempts.push(userAttempt);
-    }
 
-    if (userAttempt.attemptCount >= quiz.maxAttempts) {
+    if (attemptIndex === -1) {
+      quiz.userAttempts.push({ userId, attemptCount: 1 });
+    } else {
+      if (quiz.userAttempts[attemptIndex].attemptCount >= quiz.maxAttempts) {
         return res.status(403).json({
-            message: 'Maximum attempts reached for this quiz',
-            maxAttempts: quiz.maxAttempts,
-            userAttempts: userAttempt.attemptCount
+          message: "Maximum attempts reached for this quiz",
+          maxAttempts: quiz.maxAttempts,
+          userAttempts: quiz.userAttempts[attemptIndex].attemptCount,
         });
+      }
+      quiz.userAttempts[attemptIndex].attemptCount += 1;
     }
 
-    // Check for ongoing attempts
-    // const existingScorecard = await Scorecard.findOne({
-    //   userId,
-    //   quizId,
-    //   completed: false,
-    // });
-    // if (existingScorecard) {
-    //   return res
-    //     .status(400)
-    //     .json({ message: "You have an ongoing attempt for this quiz" });
-    // }
-
-    userAttempt.attemptCount++;
+    console.log("Before save:", quiz.userAttempts);
     await quiz.save();
+    console.log("After save:", quiz.userAttempts);
 
     // Calculate end time
-    const fullDurationInMinutes = quiz.duration.hours * 60 + quiz.duration.minutes;
-    const endTimeByDuration = currentTime.clone().add(fullDurationInMinutes, "minutes");
-    
+    const fullDurationInMinutes =
+      quiz.duration.hours * 60 + quiz.duration.minutes;
+    const endTimeByDuration = currentTime
+      .clone()
+      .add(fullDurationInMinutes, "minutes");
+
     let actualEndTime;
     if (quiz.availabilityType === "scheduled") {
-        const endDateTime = moment.tz(
-            `${quiz.scheduledEndDate} ${quiz.scheduledEndTime}`,
-            "DD-MM-YYYY HH:mm",
-            indianTimeZone
-        );
-        actualEndTime = moment.min(endTimeByDuration, endDateTime);
+      const endDateTime = moment.tz(
+        `${quiz.scheduledEndDate} ${quiz.scheduledEndTime}`,
+        "DD-MM-YYYY HH:mm",
+        indianTimeZone
+      );
+      actualEndTime = moment.min(endTimeByDuration, endDateTime);
     } else {
-        actualEndTime = endTimeByDuration;
+      actualEndTime = endTimeByDuration;
     }
 
     const scorecard = new Scorecard({
@@ -371,7 +245,6 @@ exports.startQuiz = async (req, res) => {
 
     await scorecard.save();
 
-    // Schedule auto-submission job
     await quizQueue.add(
       "autoSubmit",
       { scorecardId: scorecard._id },
@@ -385,7 +258,6 @@ exports.startQuiz = async (req, res) => {
       }
     );
 
-    // Start the cron job
     startCronJob();
 
     res.status(201).json({
@@ -394,13 +266,15 @@ exports.startQuiz = async (req, res) => {
       startTime: currentTime.format("DD-MM-YYYY HH:mm"),
       expectedEndTime: actualEndTime.format("DD-MM-YYYY HH:mm"),
       durationMinutes: actualEndTime.diff(currentTime, "minutes"),
-      attemptNumber: userAttempt.attemptCount,
+      attemptNumber:
+        attemptIndex === -1 ? 1 : quiz.userAttempts[attemptIndex].attemptCount,
     });
   } catch (error) {
     console.error("Error in starting quiz:", error);
-    res
-      .status(500)
-      .json({ message: "Internal server error", error: error.message });
+    res.status(500).json({
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 
@@ -460,8 +334,11 @@ exports.submitAnswer = async (req, res) => {
 
     if (!Array.isArray(cachedAnswers)) {
       cachedAnswers = [];
-      console.warn('Initialized empty answers array for scorecard:', scorecardId);
-  }
+      console.warn(
+        "Initialized empty answers array for scorecard:",
+        scorecardId
+      );
+    }
 
     const answerData = {
       questionId,
@@ -555,7 +432,9 @@ exports.finishQuiz = async (req, res) => {
     }
 
     finalAnswers = finalAnswers.reduce((acc, answer) => {
-      const existingIndex = acc.findIndex(a => a.questionId === answer.questionId);
+      const existingIndex = acc.findIndex(
+        (a) => a.questionId === answer.questionId
+      );
       if (existingIndex !== -1) {
         acc[existingIndex] = answer; // to replace with latest answer
       } else {
@@ -623,90 +502,96 @@ exports.getScorecardDetails = async (req, res) => {
 // const Quiz = require('../models/Quiz');
 
 exports.getUserQuizHistory = async (req, res) => {
-    try {
-        const { quizId } = req.params;
-        const userId = req.user._id;
+  try {
+    const { quizId } = req.params;
+    const userId = req.user._id;
 
-        const scorecards = await Scorecard.find({userId, quizId})
-        .sort({ createdAt: -1 })
-        .populate('answers.questionId', 'questionText marks') 
-        .lean(); 
-        
-        const quiz = await Quiz.findById(quizId)
-            .select('title quizTotalMarks maxAttempts')
-            .lean();
+    const scorecards = await Scorecard.find({ userId, quizId })
+      .sort({ createdAt: -1 })
+      .populate("answers.questionId", "questionText marks")
+      .lean();
 
-        if (!quiz) {
-            return res.status(404).json({
-                success: false,
-                message: "Quiz not found"
-            });
-        }
+    const quiz = await Quiz.findById(quizId)
+      .select("title quizTotalMarks maxAttempts")
+      .lean();
 
-        const formattedScoreCards = scorecards.map((scorecard, index) => {
-            const attemptNumber = scorecards.length - index;
-            
-            const startTime = new Date(scorecard.startTime);
-            const endTime = scorecard.endTime ? new Date(scorecard.endTime) : null;
-            const timeTaken = endTime ? Math.floor((endTime - startTime) / 1000 / 60) : null; 
-
-            const scorePercentage = ((scorecard.score / scorecard.totalMarks) * 100).toFixed(2);
-
-            return {
-                attemptId: scorecard._id,
-                attemptNumber,
-                startTime: startTime.toISOString(),
-                endTime: endTime?.toISOString() || null,
-                timeTaken, 
-                status: scorecard.status,
-                score: {
-                    obtained: scorecard.score,
-                    total: scorecard.totalMarks,
-                    percentage: scorePercentage,
-                },
-                questions: {
-                    correct: scorecard.correctQuestions,
-                    incorrect: scorecard.incorrectQuestions,
-                    total: scorecard.answers.length,
-                },
-                isAutoSubmitted: scorecard.autoSubmitted,
-                completed: scorecard.completed,
-                questionDetails: scorecard.answers.map(answer => ({
-                    questionId: answer.questionId._id,
-                    questionText: answer.questionId.questionText,
-                    marksObtained: answer.marks,
-                    maxMarks: answer.questionId.marks,
-                    isCorrect: answer.isCorrect,
-                    answeredAt: answer.answeredAt
-                }))
-            };
-        });
-
-        const summary = {
-            quizTitle: quiz.title,
-            totalAttempts: scorecards.length,
-            maxAttempts: quiz.maxAttempts,
-            attemptsRemaining: quiz.maxAttempts - scorecards.length,
-            highestScore: Math.max(...scorecards.map(s => s.score), 0),
-            averageScore: (scorecards.reduce((sum, s) => sum + s.score, 0) / scorecards.length || 0).toFixed(2),
-            quizTotalMarks: quiz.quizTotalMarks,
-            lastAttemptDate: scorecards[0]?.createdAt || null,
-        };
-
-        res.status(200).json({
-            success: true,
-            summary,
-            attempts: formattedScoreCards
-        });
-
-    } catch (error) {
-        console.error("Error fetching quiz history:", error);
-        res.status(500).json({
-            success: false,
-            message: "Internal server error",
-            error: error.message
-        });
+    if (!quiz) {
+      return res.status(404).json({
+        success: false,
+        message: "Quiz not found",
+      });
     }
+
+    const formattedScoreCards = scorecards.map((scorecard, index) => {
+      const attemptNumber = scorecards.length - index;
+
+      const startTime = new Date(scorecard.startTime);
+      const endTime = scorecard.endTime ? new Date(scorecard.endTime) : null;
+      const timeTaken = endTime
+        ? Math.floor((endTime - startTime) / 1000 / 60)
+        : null;
+
+      const scorePercentage = (
+        (scorecard.score / scorecard.totalMarks) *
+        100
+      ).toFixed(2);
+
+      return {
+        attemptId: scorecard._id,
+        attemptNumber,
+        startTime: startTime.toISOString(),
+        endTime: endTime?.toISOString() || null,
+        timeTaken,
+        status: scorecard.status,
+        score: {
+          obtained: scorecard.score,
+          total: scorecard.totalMarks,
+          percentage: scorePercentage,
+        },
+        questions: {
+          correct: scorecard.correctQuestions,
+          incorrect: scorecard.incorrectQuestions,
+          total: scorecard.answers.length,
+        },
+        isAutoSubmitted: scorecard.autoSubmitted,
+        completed: scorecard.completed,
+        questionDetails: scorecard.answers.map((answer) => ({
+          questionId: answer.questionId._id,
+          questionText: answer.questionId.questionText,
+          marksObtained: answer.marks,
+          maxMarks: answer.questionId.marks,
+          isCorrect: answer.isCorrect,
+          answeredAt: answer.answeredAt,
+        })),
+      };
+    });
+
+    const summary = {
+      quizTitle: quiz.title,
+      totalAttempts: scorecards.length,
+      maxAttempts: quiz.maxAttempts,
+      attemptsRemaining: quiz.maxAttempts - scorecards.length,
+      highestScore: Math.max(...scorecards.map((s) => s.score), 0),
+      averageScore: (
+        scorecards.reduce((sum, s) => sum + s.score, 0) / scorecards.length || 0
+      ).toFixed(2),
+      quizTotalMarks: quiz.quizTotalMarks,
+      lastAttemptDate: scorecards[0]?.createdAt || null,
+    };
+
+    res.status(200).json({
+      success: true,
+      summary,
+      attempts: formattedScoreCards,
+    });
+  } catch (error) {
+    console.error("Error fetching quiz history:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
 };
 
 exports.processAutoSubmit = async (job) => {

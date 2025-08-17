@@ -1,31 +1,75 @@
 require("dotenv").config();
 
 const mongoose = require("mongoose");
-const cloudinary = require("cloudinary").v2;
-// const moment = require('moment');
+const AWS = require("aws-sdk");
 const moment = require("moment-timezone");
 const schedule = require("node-schedule");
+const authConfig = require("../configs/auth.config");
 
 const Quiz = require("../models/quizModel");
 const Question = require("../models/questionModel");
 const QuizFolder = require("../models/quizFolder");
 
+// Configure S3 for image deletion
+const s3 = new AWS.S3({
+  accessKeyId: authConfig.aws_access_key_id,
+  secretAccessKey: authConfig.aws_secret_access_key,
+  region: authConfig.aws_region,
+});
+
 exports.createQuiz = async (req, res) => {
-  // console.log("Inside createQuiz");
-  // console.log("req.user: ", req.user);
+  console.log("Creating quiz - Request body:", req.body);
+  console.log("Creating quiz - Folder ID:", req.params.folderId);
+  console.log("Creating quiz - User:", req.user?._id);
+  
   try {
     const { quizName, duration, category } = req.body;
     const { folderId } = req.params;
+    
+    // Validate input
     if (!quizName || !duration || !category) {
-      return res.status(400).json({ message: "All fields are required" });
+      console.log("Missing required fields:", { quizName, duration, category });
+      return res.status(400).json({ 
+        success: false,
+        message: "All fields are required",
+        missingFields: {
+          quizName: !quizName,
+          duration: !duration,
+          category: !category
+        }
+      });
     }
 
+    // Validate folderId
+    if (!folderId || !mongoose.Types.ObjectId.isValid(folderId)) {
+      console.log("Invalid folder ID:", folderId);
+      return res.status(400).json({ 
+        success: false,
+        message: "Invalid folder ID provided" 
+      });
+    }
+
+    // Check if quiz name already exists
     const quizExists = await Quiz.findOne({ quizName }).lean();
-
     if (quizExists) {
-      return res.status(400).json({ message: "Quiz already exists" });
+      console.log("Quiz already exists:", quizName);
+      return res.status(400).json({ 
+        success: false,
+        message: "Quiz with this name already exists" 
+      });
     }
 
+    // Validate folder exists
+    const folder = await QuizFolder.findById(folderId);
+    if (!folder) {
+      console.log("Folder not found:", folderId);
+      return res.status(404).json({ 
+        success: false,
+        message: "Folder not found" 
+      });
+    }
+
+    // Create quiz
     const quiz = await Quiz.create({
       creatorId: req.user._id,
       quizName,
@@ -33,17 +77,43 @@ exports.createQuiz = async (req, res) => {
       category,
     });
 
-    const folder = await QuizFolder.findById(folderId);
-    if (!folder) {
-      return res.status(404).json({ message: "Folder not found" });
-    }
+    console.log("Quiz created successfully:", quiz._id);
 
+    // Add quiz to folder
     folder.quizzes.push(quiz._id);
     await folder.save();
 
-    res.status(201).json({ message: "Quiz created successfully", quiz });
+    console.log("Quiz added to folder successfully");
+
+    // 🔧 FIX: Invalidate cache for this folder after quiz creation
+    try {
+      const { invalidateCache } = require('../middlewares/cacheMiddleware');
+      await invalidateCache(`quiz:cache:/api/v1/admin/folder/${folderId}*`);
+      console.log(`✅ [DEBUG] Cache invalidated for folder: ${folderId}`);
+    } catch (cacheError) {
+      console.error(`⚠️ [DEBUG] Cache invalidation failed:`, cacheError);
+      // Continue execution even if cache invalidation fails
+    }
+
+    // Return success response with populated quiz data
+    const populatedQuiz = await Quiz.findById(quiz._id)
+      .populate('creatorId', 'firstName lastName')
+      .lean();
+
+    res.status(201).json({ 
+      success: true,
+      message: "Quiz created successfully", 
+      quiz: populatedQuiz,
+      folderId: folderId
+    });
+    
   } catch (error) {
-    res.status(400).json({ error });
+    console.error("Error creating quiz:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "Internal server error while creating quiz",
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
+    });
   }
 };
 
@@ -51,27 +121,53 @@ exports.fetchQuizzesByFolder = async (req, res) => {
   try {
     const { folderId } = req.params;
 
-    // Validate folder existence
-    const folder = await QuizFolder.findById(folderId)
-      .populate("quizzes")
-      .lean();
-    if (!folder) {
-      return res.status(404).json({ message: "Folder not found" });
+    console.log("Fetching quizzes for folder:", folderId);
+
+    // Validate folderId
+    if (!folderId || !mongoose.Types.ObjectId.isValid(folderId)) {
+      console.log("Invalid folder ID:", folderId);
+      return res.status(400).json({ 
+        success: false,
+        message: "Invalid folder ID provided" 
+      });
     }
 
-    // Fetch quizzes associated with the folder
-    const quizzes = await Quiz.find({ _id: { $in: folder.quizzes } }).lean();
+    // Validate folder existence and populate quizzes
+    const folder = await QuizFolder.findById(folderId)
+      .populate({
+        path: 'quizzes',
+        populate: {
+          path: 'creatorId',
+          select: 'firstName lastName'
+        }
+      })
+      .lean();
+      
+    if (!folder) {
+      console.log("Folder not found:", folderId);
+      return res.status(404).json({ 
+        success: false,
+        message: "Folder not found" 
+      });
+    }
+
+    console.log(`Found folder with ${folder.quizzes?.length || 0} quizzes`);
 
     res.status(200).json({
+      success: true,
       message: "Quizzes retrieved successfully",
       folderId,
-      quizzes,
+      quizzes: folder.quizzes || [],
+      folderName: folder.name
     });
+    
   } catch (error) {
-    console.error("Error fetching quizzes by folder ID", error);
-    res
-      .status(500)
-      .json({ message: "Internal server error", error: error.message });
+    console.error("Error fetching quizzes by folder ID:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "Internal server error while fetching quizzes",
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
+    });
   }
 };
 
@@ -118,6 +214,15 @@ exports.updateQuiz = async (req, res) => {
 
     if (!updatedQuiz) {
       return res.status(404).json({ message: "Quiz not found" });
+    }
+
+    // 🔧 FIX: Invalidate cache after quiz update
+    try {
+      const { invalidateCache } = require('../middlewares/cacheMiddleware');
+      await invalidateCache(`quiz:cache:*`);
+      console.log(`✅ [DEBUG] Cache invalidated after quiz update: ${quizId}`);
+    } catch (cacheError) {
+      console.error(`⚠️ [DEBUG] Cache invalidation failed:`, cacheError);
     }
 
     res
@@ -467,57 +572,98 @@ exports.setQuizAttempts = async (req, res) => {
 exports.deleteQuiz = async (req, res) => {
   try {
     const { quizId } = req.params;
+    console.log(`🗑️ [DEBUG] Starting quiz deletion for ID: ${quizId}`);
+    
     const quiz = await Quiz.findById(quizId);
 
     if (!quiz) {
+      console.log(`❌ [DEBUG] Quiz not found: ${quizId}`);
       return res.status(404).json({ message: "Quiz not found" });
     }
 
-    process.nextTick(async () => {
-      try {
-        const questions = await Question.find({ quizId: quiz._id });
+    console.log(`📋 [DEBUG] Found quiz: ${quiz.quizName}`);
 
-        const deletedImages = new Set();
-        for (let question of questions) {
-          if (question.questionImage && question.questionImage.length > 0) {
-            for (let imageUrl of question.questionImage) {
-              if (!deletedImages.has(imageUrl)) {
-                console.log("Deleting image:", imageUrl);
-                const publicId = `testQuiz/${
-                  imageUrl.split("/").slice(-1)[0].split(".")[0]
-                }`;
-                console.log("Public ID:", publicId);
-                try {
-                  await cloudinary.uploader.destroy(publicId);
-                  deletedImages.add(imageUrl);
-                } catch (cloudinaryError) {
-                  console.error(
-                    `Error deleting Cloudinary image ${publicId}:`,
-                    cloudinaryError
-                  );
-                }
+    // 🔧 FIX: Make deletion synchronous to ensure completion before response
+    try {
+      const questions = await Question.find({ quizId: quiz._id });
+      console.log(`🔍 [DEBUG] Found ${questions.length} questions to delete`);
+
+      const deletedImages = new Set();
+      for (let question of questions) {
+        if (question.questionImage && question.questionImage.length > 0) {
+          for (let imageUrl of question.questionImage) {
+            if (!deletedImages.has(imageUrl)) {
+              console.log("Deleting S3 image:", imageUrl);
+              
+              // Extract S3 key from URL
+              let s3Key;
+              if (imageUrl.includes('amazonaws.com/')) {
+                // Extract key from S3 URL
+                s3Key = imageUrl.split('amazonaws.com/')[1];
+              } else if (imageUrl.startsWith('quiz-images/')) {
+                // Direct S3 key
+                s3Key = imageUrl;
+              } else {
+                // Fallback: assume it's a filename in quiz-images folder
+                const fileName = imageUrl.split("/").slice(-1)[0];
+                s3Key = `quiz-images/${fileName}`;
+              }
+              
+              console.log("S3 Key:", s3Key);
+              try {
+                await s3.deleteObject({
+                  Bucket: authConfig.s3_bucket,
+                  Key: s3Key
+                }).promise();
+                deletedImages.add(imageUrl);
+                console.log(`✅ Deleted S3 image: ${s3Key}`);
+              } catch (s3Error) {
+                console.error(
+                  `Error deleting S3 image ${s3Key}:`,
+                  s3Error
+                );
+                // Continue with deletion even if S3 cleanup fails
               }
             }
           }
         }
-
-        await Question.deleteMany({ quizId: quiz._id });
-
-        await Quiz.findByIdAndDelete(quiz._id);
-
-        console.log(
-          `Quiz ${quizId} and all associated data deleted successfully`
-        );
-      } catch (error) {
-        console.error(`Error in background deletion of quiz ${quizId}:`, error);
       }
-    });
 
-    res
-      .status(200)
-      .json({ message: "Quiz deletion process initiated successfully" });
+      // Delete all questions first
+      const questionDeleteResult = await Question.deleteMany({ quizId: quiz._id });
+      console.log(`🗑️ [DEBUG] Deleted ${questionDeleteResult.deletedCount} questions`);
+
+      // Then delete the quiz
+      const quizDeleteResult = await Quiz.findByIdAndDelete(quiz._id);
+      console.log(`🗑️ [DEBUG] Quiz deleted: ${!!quizDeleteResult}`);
+
+      console.log(`✅ Quiz ${quizId} and all associated data deleted successfully`);
+      
+      // 🔧 FIX: Invalidate cache after quiz deletion
+      try {
+        const { invalidateCache } = require('../middlewares/cacheMiddleware');
+        await invalidateCache(`quiz:cache:*`);
+        console.log(`✅ [DEBUG] Cache invalidated after quiz deletion: ${quizId}`);
+      } catch (cacheError) {
+        console.error(`⚠️ [DEBUG] Cache invalidation failed:`, cacheError);
+      }
+      
+      res.status(200).json({ 
+        message: "Quiz deleted successfully",
+        deletedQuestions: questionDeleteResult.deletedCount,
+        deletedImages: deletedImages.size
+      });
+      
+    } catch (deletionError) {
+      console.error(`❌ Error in quiz deletion process:`, deletionError);
+      res.status(500).json({ 
+        message: "Error during quiz deletion", 
+        error: deletionError.message 
+      });
+    }
+
   } catch (error) {
-    console.error("Error in initiating quiz deletion", error);
+    console.error("Error in quiz deletion controller:", error);
     res
       .status(500)
       .json({ message: "Internal server error", error: error.message });
