@@ -706,68 +706,116 @@ exports.moveFileToFolder = async (req, res) => {
   try {
     const { fileIds, sourceFolderId, destinationFolderId } = req.body;
 
+    console.log('🔍 [DEBUG] File import/move request:', { fileIds, sourceFolderId, destinationFolderId });
+
+    if (!destinationFolderId) {
+      return res.status(400).json({ error: "Destination folder ID is required" });
+    }
+
     const fileIdsArray = Array.isArray(fileIds) ? fileIds : [fileIds];
 
-    // const sourceFolder = await Folder.findById(sourceFolderId);
-    // if(!sourceFolder){
-    //   return res.status(404).json({ error: "Source folder not found" });
-    // }
+    if (fileIdsArray.length === 0) {
+      return res.status(400).json({ error: "No files specified for import" });
+    }
 
     const destinationFolder = await Folder.findById(destinationFolderId);
     if (!destinationFolder) {
       return res.status(404).json({ error: "Destination folder not found" });
     }
 
-    const movedFiles = [];
+    const importedFiles = [];
+    const skippedFiles = [];
+
     for (const fileId of fileIdsArray) {
-      const file = await File.findById(fileId);
-      if (!file) {
-        continue;
+      try {
+        const file = await File.findById(fileId);
+        if (!file) {
+          console.warn(`⚠️ [WARN] File not found: ${fileId}`);
+          skippedFiles.push({ fileId, reason: 'File not found' });
+          continue;
+        }
+
+        // Check if file already exists in destination folder to avoid duplicates
+        const existingFile = destinationFolder.files.find(f => 
+          f.toString() === fileId.toString()
+        );
+        
+        if (existingFile) {
+          console.warn(`⚠️ [WARN] File already exists in destination: ${fileId}`);
+          skippedFiles.push({ fileId, reason: 'File already exists in destination' });
+          continue;
+        }
+
+        // Create a copy of the file for import (not move)
+        const duplicateFile = await File.create({
+          name: file.name,
+          url: file.url,
+          description: file.description,
+          isDownloadable: file.isDownloadable,
+          isViewable: file.isViewable,
+        });
+
+        destinationFolder.files.push(duplicateFile._id);
+        importedFiles.push(duplicateFile);
+
+        console.log(`✅ [DEBUG] File imported successfully: ${file.name} -> ${duplicateFile._id}`);
+      } catch (fileError) {
+        console.error(`❌ [ERROR] Failed to import file ${fileId}:`, fileError);
+        skippedFiles.push({ fileId, reason: fileError.message });
       }
-
-      const duplicateFile = await File.create({
-        name: file.name,
-        url: file.url,
-        description: file.description,
-        isDownloadable: file.isDownloadable,
-        isViewable: file.isViewable,
-      });
-
-      destinationFolder.files.push(duplicateFile._id);
-      await destinationFolder.save();
-
-      movedFiles.push(duplicateFile);
     }
 
-    const successfulMoves = movedFiles.length;
+    // Save the destination folder with new files
+    await destinationFolder.save();
 
-    res
-      .status(200)
-      .json({
-        message: `${successfulMoves} file(s) moved successfully`,
-        movedFiles,
-        destinationFolder,
-        totalFilesMoved: successfulMoves,
-      });
+    const successfulImports = importedFiles.length;
+    const totalRequested = fileIdsArray.length;
+
+    console.log(`📊 [DEBUG] Import summary: ${successfulImports}/${totalRequested} files imported`);
+
+    res.status(200).json({
+      message: `${successfulImports} file(s) imported successfully${skippedFiles.length > 0 ? ` (${skippedFiles.length} skipped)` : ''}`,
+      importedFiles,
+      skippedFiles,
+      destinationFolder: {
+        _id: destinationFolder._id,
+        name: destinationFolder.name
+      },
+      totalFilesImported: successfulImports,
+      totalFilesSkipped: skippedFiles.length
+    });
   } catch (error) {
-    console.log("Error moving file:", error);
-    res
-      .status(500)
-      .json({ message: "Failed to move file", error: error.message });
+    console.error("❌ [ERROR] File import operation failed:", error);
+    res.status(500).json({ 
+      message: "Failed to import files", 
+      error: error.message 
+    });
   }
 };
 
-//move ccomplete folder into another folder
+//import/copy complete folder into another folder
 exports.moveFolderToFolder = async (req, res) => {
   try {
-    const { folderIds, destinationFolderId } = req.body; // Change to accept multiple folderIds
+    const { folderIds, destinationFolderId } = req.body;
+
+    console.log('🔍 [DEBUG] Folder import/move request:', { folderIds, destinationFolderId });
+
+    if (!destinationFolderId) {
+      return res.status(400).json({ error: "Destination folder ID is required" });
+    }
+
+    const folderIdsArray = Array.isArray(folderIds) ? folderIds : [folderIds];
+
+    if (folderIdsArray.length === 0) {
+      return res.status(400).json({ error: "No folders specified for import" });
+    }
 
     const destinationFolder = await Folder.findById(destinationFolderId);
     if (!destinationFolder) {
       return res.status(404).json({ error: "Destination folder not found" });
     }
 
-    // Prevent moving folders into themselves or their descendants
+    // Prevent importing folders into themselves or their descendants
     const isAlreadyItsOwnSubfolder = async (childIds, parentId) => {
       if (childIds.includes(parentId)) {
         return true;
@@ -787,46 +835,81 @@ exports.moveFolderToFolder = async (req, res) => {
       return false;
     };
 
-    if (await isAlreadyItsOwnSubfolder(folderIds, destinationFolderId)) {
-      return res
-        .status(400)
-        .json({ error: "Cannot move folders into their own subfolders" });
+    if (await isAlreadyItsOwnSubfolder(folderIdsArray, destinationFolderId)) {
+      return res.status(400).json({ 
+        error: "Cannot import folders into their own subfolders" 
+      });
     }
 
-    // Move each folder to the new parent
-    let movedFolders = [];
-    for (let folderId of folderIds) {
-      const folder = await Folder.findById(folderId);
-      if (!folder || !folder.parentFolderId) {
-        continue; // Skip if folder is not found or is a root folder
+    const importedFolders = [];
+    const skippedFolders = [];
+
+    // Import each folder to the new parent
+    for (let folderId of folderIdsArray) {
+      try {
+        const folder = await Folder.findById(folderId).populate('files folders');
+        if (!folder) {
+          console.warn(`⚠️ [WARN] Folder not found: ${folderId}`);
+          skippedFolders.push({ folderId, reason: 'Folder not found' });
+          continue;
+        }
+
+        // Check if folder already exists in destination to avoid duplicates
+        const existingFolder = destinationFolder.folders.find(f => 
+          f.toString() === folderId.toString()
+        );
+        
+        if (existingFolder) {
+          console.warn(`⚠️ [WARN] Folder already exists in destination: ${folderId}`);
+          skippedFolders.push({ folderId, reason: 'Folder already exists in destination' });
+          continue;
+        }
+
+        // Create a copy of the folder for import (not move)
+        const duplicateFolder = await Folder.create({
+          name: folder.name,
+          parentFolderId: destinationFolderId,
+          folders: folder.folders || [],
+          files: folder.files || [],
+          importedQuizzes: folder.importedQuizzes || [],
+          QuizFolders: folder.QuizFolders || [],
+        });
+
+        destinationFolder.folders.push(duplicateFolder._id);
+        importedFolders.push(duplicateFolder);
+
+        console.log(`✅ [DEBUG] Folder imported successfully: ${folder.name} -> ${duplicateFolder._id}`);
+      } catch (folderError) {
+        console.error(`❌ [ERROR] Failed to import folder ${folderId}:`, folderError);
+        skippedFolders.push({ folderId, reason: folderError.message });
       }
-
-      const duplicateFolder = await Folder.create({
-        name: folder.name,
-        parentFolderId: destinationFolderId,
-        folders: folder.folders,
-        files: folder.files,
-        importedQuizzes: folder.importedQuizzes,
-        QuizFolders: folder.QuizFolders,
-      });
-
-      destinationFolder.folders.push(duplicateFolder._id);
-      await destinationFolder.save();
-
-      movedFolders.push(duplicateFolder);
     }
 
-    res
-      .status(200)
-      .json({
-        message: `${movedFolders.length} folder(s) moved successfully`,
-        movedFolders,
-      });
+    // Save the destination folder with new subfolders
+    await destinationFolder.save();
+
+    const successfulImports = importedFolders.length;
+    const totalRequested = folderIdsArray.length;
+
+    console.log(`📊 [DEBUG] Folder import summary: ${successfulImports}/${totalRequested} folders imported`);
+
+    res.status(200).json({
+      message: `${successfulImports} folder(s) imported successfully${skippedFolders.length > 0 ? ` (${skippedFolders.length} skipped)` : ''}`,
+      importedFolders,
+      skippedFolders,
+      destinationFolder: {
+        _id: destinationFolder._id,
+        name: destinationFolder.name
+      },
+      totalFoldersImported: successfulImports,
+      totalFoldersSkipped: skippedFolders.length
+    });
   } catch (error) {
-    console.log("Error moving folders:", error);
-    res
-      .status(500)
-      .json({ message: "Failed to move folders", error: error.message });
+    console.error("❌ [ERROR] Folder import operation failed:", error);
+    res.status(500).json({ 
+      message: "Failed to import folders", 
+      error: error.message 
+    });
   }
 };
 
