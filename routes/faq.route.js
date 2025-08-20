@@ -2,12 +2,11 @@ const express = require('express');
 const faqController = require('../controllers/faqController');
 const authJwt = require('../middlewares/authJwt');
 
-const router = express.Router();
-
-// Define routes for FAQs
-router.post('/api/v1/admin/faqs', [authJwt.verifyToken], faqController.createFaqs); // Create multiple FAQs
-router.get('/api/v1/admin/faqs/:courseId' ,faqController.getFaqsByCourse); // Get FAQs by course
-
 module.exports = (app) => {
-  app.use(router);
+  // Define routes for FAQs
+  app.post('/api/v1/admin/faqs', [authJwt.verifyToken], faqController.createFaqs); // Create multiple FAQs
+  app.get('/api/v1/admin/faqs/:courseId', faqController.getFaqsByCourse); // Get FAQs by course (public endpoint)
+  
+  // Temporary test endpoint to add sample FAQs
+  app.post('/api/v1/admin/faqs/test/:courseId', faqController.addTestFaqs); // Add test FAQs (temporary)
 };

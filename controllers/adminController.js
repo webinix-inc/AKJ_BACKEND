@@ -20,6 +20,7 @@ const installmentService = require("../services/installmentService");
 const subscriptionService = require("../services/subscriptionService");
 const courseService = require("../services/courseService");
 const productService = require("../services/productService");
+const fileService = require("../services/fileService");
 const Product = require("../models/ProductModel");
 // const Cart = require("../models/cartModel"); // UNUSED - Removed
 // const Address = require("../models/addressModel"); // UNUSED - Removed
@@ -770,20 +771,43 @@ exports.uploadProfilePicture = async (req, res) => {
 // 🖼️ BANNER MANAGEMENT
 // ============================================================================
 
+// Helper function to extract S3 key from URL
+const extractS3KeyFromUrl = (imageUrl) => {
+  if (!imageUrl) return null;
+  
+  // If it's already a key (no domain), return as is
+  if (!imageUrl.includes('amazonaws.com/') && !imageUrl.includes('http')) {
+    return imageUrl;
+  }
+  
+  // Extract key from full S3 URL
+  if (imageUrl.includes('amazonaws.com/')) {
+    return imageUrl.split('amazonaws.com/')[1];
+  }
+  
+  return imageUrl;
+};
+
 exports.getBannerById = async (req, res) => {
   try {
-    const bannerId = req.params.bannerId;
-    const Banner = await Banner.findById(bannerId).populate(
-      "course subscription"
-    );
+    const bannerId = req.params.id;
+    const banner = await Banner.findById(bannerId).populate("course", "title _id");
 
-    if (!Banner) {
+    if (!banner) {
       return res.status(404).json({ status: 404, message: "Banner not found" });
     }
 
-    return res.status(200).json({ status: 200, data: Banner });
+    // Process banner to use streaming URL instead of direct S3 URL
+    const bannerObj = banner.toObject();
+    if (bannerObj.image) {
+      const baseURL = process.env.API_BASE_URL || `${req.protocol}://${req.get('host')}`;
+      bannerObj.image = `${baseURL}/api/v1/stream/banner-image/${banner._id}`;
+    }
+
+    console.log(`📋 Fetched banner: ${banner.name}`);
+    return res.status(200).json({ status: 200, data: bannerObj });
   } catch (error) {
-    console.error(error);
+    console.error("❌ Error fetching Banner:", error);
     return res.status(500).json({
       status: 500,
       message: "Error fetching Banner",
@@ -792,76 +816,81 @@ exports.getBannerById = async (req, res) => {
   }
 };
 
-// Add a new banner// Add a new banner
+// Add a new banner
 exports.AddBanner = async (req, res) => {
   try {
+
     if (!req.file) {
+      console.log("❌ [ERROR] No file uploaded");
       return res
         .status(400)
         .json({ status: 400, error: "Image file is required" });
     }
 
     const {
-      product,
-      title,
-      description,
-      code,
-      discountPercentage,
-      validFrom,
-      validTo,
+      name,
       course,
-      subscription,
-      link,
+      timePeriod,
+      externalLink,
     } = req.body;
 
-    if (course && subscription) {
-      const checkCategory = await Course.findById(course);
-      const checkSubCategory = await Subscription.findById(subscription);
-      // const checkProduct = await Product.findById(product);
+    // Validate required fields
+    if (!name || !name.trim()) {
+      return res.status(400).json({
+        status: 400,
+        error: "Banner name is required"
+      });
+    }
 
-      if (!checkCategory || !checkSubCategory) {
+    // Validate course if provided
+    if (course && course.trim()) {
+      const Course = require('../models/courseModel');
+      const courseExists = await Course.findById(course);
+      if (!courseExists) {
         return res.status(404).json({
           status: 404,
-          message: "course subscription or Product not found",
+          message: "Course not found"
         });
       }
     }
 
-    const checkTitle = await Banner.findOne({ title });
-    if (checkTitle) {
-      return res
-        .status(404)
-        .json({ status: 404, message: "Title exists with this name" });
+    // Check if banner with same name already exists
+    const existingBanner = await Banner.findOne({ name: name.trim() });
+    if (existingBanner) {
+      return res.status(400).json({
+        status: 400,
+        error: "Banner with this name already exists"
+      });
     }
 
-    // const checkCode = await Banner.findOne({ code });
-    // if (checkCode) {
-    //     return res.status(404).json({ status: 404, message: 'Code exists with this name' });
-    // }
+    const bannerData = {
+      name: name.trim(),
+      course: course && course.trim() ? course : null,
+      timePeriod: timePeriod ? timePeriod.trim() : "",
+      externalLink: externalLink ? externalLink.trim() : "",
+      image: req.file.location || req.file.path, // S3 uses location, fallback to path
+    };
 
-    const banner = new Banner({
-      // product,
-      title,
-      image: req.file.path,
-      description,
-      code,
-      discountPercentage,
-      validFrom,
-      validTo,
-      course,
-      subscription,
-      link,
-    });
-
+    const banner = new Banner(bannerData);
     await banner.save();
 
+    // 🔥 CACHE FIX: Invalidate banner cache after creation
+    try {
+      const { invalidateCache } = require('../middlewares/cacheMiddleware');
+      await invalidateCache("cache:/api/v1/admin/banner*");
+      console.log("✅ [CACHE] Banner cache invalidated");
+    } catch (cacheError) {
+      console.warn("⚠️ [CACHE] Failed to invalidate banner cache:", cacheError.message);
+    }
+
+    console.log("✅ Banner created successfully:", banner.name);
     return res.status(201).json({
       status: 201,
       message: "Banner created successfully",
       data: banner,
     });
   } catch (error) {
-    console.error(error);
+    console.error("❌ Error creating Banner:", error);
     return res.status(500).json({
       status: 500,
       message: "Error creating Banner",
@@ -872,24 +901,25 @@ exports.AddBanner = async (req, res) => {
 
 exports.getBanner = async (req, res) => {
   try {
-    const Banners = await Banner.find().populate("course subscription");
-    return res.status(200).json({ status: 200, data: Banners });
-  } catch (error) {
-    console.error(error);
-    return res.status(500).json({
-      status: 500,
-      message: "Error fetching Banners",
-      error: error.message,
+    const banners = await Banner.find().populate("course", "title _id");
+    
+    // Process banners to use streaming URLs instead of direct S3 URLs
+    const processedBanners = banners.map(banner => {
+      const bannerObj = banner.toObject();
+      
+      // Replace direct S3 URL with streaming endpoint URL
+      if (bannerObj.image) {
+        const baseURL = process.env.API_BASE_URL || `${req.protocol}://${req.get('host')}`;
+        bannerObj.image = `${baseURL}/api/v1/stream/banner-image/${banner._id}`;
+      }
+      
+      return bannerObj;
     });
-  }
-};
-
-exports.getBanner = async (req, res) => {
-  try {
-    const Banners = await Banner.find().populate("course subscription");
-    return res.status(200).json({ status: 200, data: Banners });
+    
+    console.log(`📋 Fetched ${banners.length} banners with streaming URLs`);
+    return res.status(200).json({ status: 200, data: processedBanners });
   } catch (error) {
-    console.error(error);
+    console.error("❌ Error fetching Banners:", error);
     return res.status(500).json({
       status: 500,
       message: "Error fetching Banners",
@@ -901,26 +931,97 @@ exports.getBanner = async (req, res) => {
 exports.updateBanner = async (req, res) => {
   try {
     const { id } = req.params;
-    const updateData = { ...req.body };
+    const { name, course, timePeriod, externalLink } = req.body;
 
+    // Validate required fields
+    if (!name || !name.trim()) {
+      return res.status(400).json({
+        status: 400,
+        error: "Banner name is required"
+      });
+    }
+
+    // Check if another banner with same name exists (excluding current banner)
+    const existingBanner = await Banner.findOne({ 
+      name: name.trim(), 
+      _id: { $ne: id } 
+    });
+    if (existingBanner) {
+      return res.status(400).json({
+        status: 400,
+        error: "Banner with this name already exists"
+      });
+    }
+
+    // Validate course if provided
+    if (course && course.trim()) {
+      const Course = require('../models/courseModel');
+      const courseExists = await Course.findById(course);
+      if (!courseExists) {
+        return res.status(404).json({
+          status: 404,
+          message: "Course not found"
+        });
+      }
+    }
+
+    const updateData = {
+      name: name.trim(),
+      course: course && course.trim() ? course : null,
+      timePeriod: timePeriod ? timePeriod.trim() : "",
+      externalLink: externalLink ? externalLink.trim() : "",
+    };
+
+    // If a new image is being uploaded, handle S3 cleanup of old image
     if (req.file) {
-      updateData.image = req.file.path;
+      // Get the current banner to access the old image
+      const currentBanner = await Banner.findById(id);
+      
+      if (currentBanner && currentBanner.image) {
+        try {
+          // Extract S3 key from old image URL
+          const oldS3Key = extractS3KeyFromUrl(currentBanner.image);
+          
+          if (oldS3Key) {
+            // Delete old image from S3
+            const fileService = require('../services/fileService');
+            await fileService.deleteFromS3Logic(oldS3Key, process.env.S3_BUCKET);
+            console.log(`✅ Old banner image deleted from S3: ${oldS3Key}`);
+          }
+        } catch (s3Error) {
+          // Log S3 deletion error but don't fail the update
+          console.error("⚠️ Failed to delete old banner image from S3:", s3Error.message);
+        }
+      }
+      
+      updateData.image = req.file.location || req.file.path; // S3 uses location, fallback to path
     }
 
     const updatedBanner = await Banner.findByIdAndUpdate(id, updateData, {
       new: true,
-    });
+    }).populate("course", "title _id");
+    
     if (!updatedBanner) {
       return res.status(404).json({ status: 404, message: "Banner not found" });
     }
 
+    // 🔥 CACHE FIX: Invalidate banner cache after update
+    try {
+      const { invalidateCache } = require('../middlewares/cacheMiddleware');
+      await invalidateCache("cache:/api/v1/admin/banner*");
+      console.log("✅ [CACHE] Banner cache invalidated after update");
+    } catch (cacheError) {
+      console.warn("⚠️ [CACHE] Failed to invalidate banner cache:", cacheError.message);
+    }
+
+    console.log(`✅ Banner updated successfully: ${updatedBanner.name}`);
     return res.status(200).json({
       status: 200,
       message: "Banner updated successfully",
       data: updatedBanner,
     });
   } catch (error) {
-    console.error("Error updating Banner:", error);
+    console.error("❌ Error updating Banner:", error);
     return res.status(500).json({
       status: 500,
       message: "Error updating Banner",
@@ -932,15 +1033,59 @@ exports.updateBanner = async (req, res) => {
 exports.removeBanner = async (req, res) => {
   const { id } = req.params;
   try {
-    const deletedBanner = await Banner.findByIdAndDelete(id);
-    if (!deletedBanner) {
-      return res.status(404).json({ error: "Banner not found" });
+    // First, get the banner to access the image before deleting
+    const bannerToDelete = await Banner.findById(id);
+    if (!bannerToDelete) {
+      return res.status(404).json({ 
+        status: 404,
+        error: "Banner not found" 
+      });
     }
 
-    res.status(200).json({ message: "Banner deleted successfully" });
+    console.log(`🗑️ Deleting banner: ${bannerToDelete.name}`);
+
+    // Delete the image from S3 if it exists
+    if (bannerToDelete.image) {
+      try {
+        // Extract S3 key from image URL
+        const s3Key = extractS3KeyFromUrl(bannerToDelete.image);
+        
+        if (s3Key) {
+          // Delete image from S3
+          const fileService = require('../services/fileService');
+          await fileService.deleteFromS3Logic(s3Key, process.env.S3_BUCKET);
+          console.log(`✅ Banner image deleted from S3: ${s3Key}`);
+        }
+      } catch (s3Error) {
+        // Log S3 deletion error but don't fail the deletion
+        console.error("⚠️ Failed to delete banner image from S3:", s3Error.message);
+      }
+    }
+
+    // Delete the banner from database
+    await Banner.findByIdAndDelete(id);
+
+    // 🔥 CACHE FIX: Invalidate banner cache after deletion
+    try {
+      const { invalidateCache } = require('../middlewares/cacheMiddleware');
+      await invalidateCache("cache:/api/v1/admin/banner*");
+      console.log("✅ [CACHE] Banner cache invalidated after deletion");
+    } catch (cacheError) {
+      console.warn("⚠️ [CACHE] Failed to invalidate banner cache:", cacheError.message);
+    }
+
+    console.log(`✅ Banner deleted successfully: ${bannerToDelete.name}`);
+    res.status(200).json({ 
+      status: 200,
+      message: "Banner deleted successfully" 
+    });
   } catch (error) {
-    console.error("Error deleting banner:", error);
-    res.status(500).json({ error: "Failed to delete banner" });
+    console.error("❌ Error deleting banner:", error);
+    res.status(500).json({ 
+      status: 500,
+      error: "Failed to delete banner",
+      message: error.message 
+    });
   }
 };
 
