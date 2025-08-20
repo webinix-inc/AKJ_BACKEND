@@ -466,7 +466,7 @@ const sendWelcomeMessageLogic = async (userId, userName = "Student", isNewUser =
     // Only send welcome message if it doesn't exist
     if (!existingWelcome) {
       const welcomeContent = isNewUser 
-        ? `🎉 Welcome to Wakad Classes, ${userName}! 
+        ? `🎉 Welcome to Wakade Classes, ${userName}! 
 
 We're excited to have you join our learning community! Here's what you can do:
 
@@ -478,10 +478,10 @@ We're excited to have you join our learning community! Here's what you can do:
 Our team is here to help you succeed. Feel free to ask anything!
 
 Best regards,
-Wakad Classes Team`
+Wakade Classes Team`
         : `👋 Welcome back, ${userName}! 
 
-Great to see you again at Wakad Classes. 
+Great to see you again at Wakade Classes. 
 
 Need any help with your courses or have questions? Just message us here!
 

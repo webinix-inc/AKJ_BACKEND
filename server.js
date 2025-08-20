@@ -26,8 +26,7 @@ const allowedOrigins = [
   "http://localhost:5174", // Vite dev server alt
   "http://127.0.0.1:3000", // IPv4 localhost
   "http://127.0.0.1:3001", // IPv4 localhost
-  "https://127.0.0.1:3000", // IPv4 localhost HTTPS
-  "https://127.0.0.1:3001", // IPv4 localhost HTTPS
+  
   
   // 🚀 PRODUCTION DOMAINS
   "http://13.233.196.145",

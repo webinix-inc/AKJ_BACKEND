@@ -62,7 +62,7 @@ const sendWelcomeMessage = async (userId, userName = "Student", isNewUser = fals
     // Only send welcome message if it doesn't exist
     if (!existingWelcome) {
       const welcomeContent = isNewUser 
-        ? `🎉 Welcome to Wakad Classes, ${userName}! 
+        ? `🎉 Welcome to Wakade Classes, ${userName}! 
 
 We're excited to have you join our learning community! Here's what you can do:
 
@@ -74,10 +74,10 @@ We're excited to have you join our learning community! Here's what you can do:
 Our team is here to help you succeed. Feel free to ask anything!
 
 Best regards,
-Wakad Classes Team`
+Wakade Classes Team`
         : `👋 Welcome back, ${userName}! 
 
-Great to see you again at Wakad Classes. 
+Great to see you again at Wakade Classes. 
 
 Need any help with your courses or have questions? Just message us here!
 
@@ -1089,7 +1089,21 @@ exports.updateLocation = async (req, res) => {
 exports.getBanner = async (req, res) => {
   try {
     const Banners = await Banner.find().populate("course subscription");
-    return res.status(200).json({ status: 200, data: Banners });
+    
+    // Process banners to use streaming URLs instead of direct S3 URLs
+    const processedBanners = Banners.map(banner => {
+      const bannerObj = banner.toObject();
+      
+      // Replace direct S3 URL with streaming endpoint URL
+      if (bannerObj.image) {
+        const baseURL = process.env.API_BASE_URL || `${req.protocol}://${req.get('host')}`;
+        bannerObj.image = `${baseURL}/api/v1/stream/banner-image/${banner._id}`;
+      }
+      
+      return bannerObj;
+    });
+    
+    return res.status(200).json({ status: 200, data: processedBanners });
   } catch (error) {
     console.error(error);
     return res.status(500).json({
@@ -1101,14 +1115,21 @@ exports.getBanner = async (req, res) => {
 };
 exports.getBannerById = async (req, res) => {
   try {
-    const bannerId = req.params.bannerId;
-    const Banner = await Banner.findById(bannerId);
+    const bannerId = req.params.id;
+    const banner = await Banner.findById(bannerId);
 
-    if (!Banner) {
+    if (!banner) {
       return res.status(404).json({ status: 404, message: "Banner not found" });
     }
 
-    return res.status(200).json({ status: 200, data: Banner });
+    // Process banner to use streaming URL instead of direct S3 URL
+    const bannerObj = banner.toObject();
+    if (bannerObj.image) {
+      const baseURL = process.env.API_BASE_URL || `${req.protocol}://${req.get('host')}`;
+      bannerObj.image = `${baseURL}/api/v1/stream/banner-image/${banner._id}`;
+    }
+
+    return res.status(200).json({ status: 200, data: bannerObj });
   } catch (error) {
     console.error(error);
     return res.status(500).json({

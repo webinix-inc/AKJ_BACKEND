@@ -861,10 +861,16 @@ const streamBannerImage = async (req, res) => {
     res.setHeader('Content-Type', contentType);
     res.setHeader('Cache-Control', 'public, max-age=3600');
     res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', '*');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
     
     s3Stream.on('error', (error) => {
       console.error('S3 stream error:', error);
       if (!res.headersSent) {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
         res.status(404).json({ message: "Image not found" });
       }
     });
@@ -873,7 +879,11 @@ const streamBannerImage = async (req, res) => {
     
   } catch (error) {
     console.error("Error streaming banner image:", error);
-    res.status(500).json({ message: "Internal server error" });
+    if (!res.headersSent) {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      res.status(500).json({ message: "Internal server error" });
+    }
   }
 };
 

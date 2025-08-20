@@ -61,9 +61,12 @@ module.exports = (app) => {
   );
 
   //Banner start from here
-  app.post("/api/v1/admin/banner", bannerImage.single("image"), auth.AddBanner);
-  app.get("/api/v1/admin/banner", [cacheConfigs.long()], auth.getBanner);
-  app.get("/api/v1/admin/banner/:id", [cacheConfigs.long()], auth.getBannerById);
+  app.post("/api/v1/admin/banner", 
+    userProfileUpload.single("image"), // Use the working profile upload middleware
+    auth.AddBanner
+  );
+  app.get("/api/v1/admin/banner", auth.getBanner);
+  app.get("/api/v1/admin/banner/:id", auth.getBannerById);
   app.put(
     "/api/v1/admin/banner/:id",
     bannerImage.single("image"),

@@ -28,7 +28,7 @@ const validateInstallmentInput = (req, res, next) => {
   }
 
   // Plan type validation
-  const validPlanTypes = ["3 months", "6 months", "12 months", "24 months"];
+  const validPlanTypes = ["3 months", "6 months", "12 months", "24 months", "36 months", "48 months", "60 months"];
   if (planType && !validPlanTypes.includes(planType)) {
     errors.push(`planType must be one of: ${validPlanTypes.join(', ')}`);
   }
@@ -101,7 +101,10 @@ exports.setCustomInstallments = async (req, res) => {
       "3 months": 3,
       "6 months": 6, 
       "12 months": 12,
-      "24 months": 24
+      "24 months": 24,
+      "36 months": 36,
+      "48 months": 48,
+      "60 months": 60
     };
 
     if (numberOfInstallments > maxInstallments[planType]) {

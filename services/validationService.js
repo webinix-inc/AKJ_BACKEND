@@ -550,7 +550,7 @@ const validateInstallmentPlan = (planData) => {
   const errors = [];
 
   // Validate plan type
-  const validPlanTypes = ["3 months", "6 months", "12 months", "24 months"];
+  const validPlanTypes = ["3 months", "6 months", "12 months", "24 months", "36 months", "48 months", "60 months"];
   if (!planType || !validPlanTypes.includes(planType)) {
     errors.push(`Plan type must be one of: ${validPlanTypes.join(', ')}`);
   }
@@ -572,7 +572,10 @@ const validateInstallmentPlan = (planData) => {
       "3 months": 3,
       "6 months": 6,
       "12 months": 12,
-      "24 months": 24
+      "24 months": 24,
+      "36 months": 36,
+      "48 months": 48,
+      "60 months": 60
     };
 
     if (numberOfInstallments > maxInstallments[planType]) {

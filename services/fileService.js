@@ -201,7 +201,8 @@ const deleteFromS3Logic = async (fileKey, bucket = process.env.AWS_BUCKET_NAME) 
       Key: fileKey
     };
 
-    await s3.deleteObject(deleteParams).promise();
+    const deleteCommand = new DeleteObjectCommand(deleteParams);
+    await s3.send(deleteCommand);
 
     console.log("✅ File deleted from S3 successfully");
     return {
