@@ -213,7 +213,7 @@ module.exports = (app) => {
     auth.togglePublishCourse
   );
   app.get("/api/v1/admin/courses", auth.getAllCourses);
-  app.get("/api/v1/user/courses", auth.getAllPublishedCourses);
+  app.get("/api/v1/user/courses", auth.getAllPublishedCoursesForUser);
   app.get(
     "/api/v1/admin/courses/:id",
     [authJwt.verifyToken],
@@ -707,7 +707,6 @@ app.put("/api/v1/admin/assignments/:submissionId/review", [authJwt.verifyToken],
   );
   app.get(
     "/api/v1/admin/installments/:courseId",
-    [authJwt.verifyToken],
     installment.getInstallments
   );
   app.get(

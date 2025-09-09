@@ -72,13 +72,10 @@ const checkInstallmentPaymentStatus = async (userId, courseId) => {
         }
       }
       
+      // 🔥 REMOVED HARDCODED RESTRICTION: No access blocking for overdue payments
       if (hasOverduePayment) {
-        return { 
-          hasAccess: false, 
-          reason: 'INSTALLMENT_OVERDUE',
-          message: 'Please pay your overdue installment to continue accessing the course',
-          planType: plan.planType
-        };
+        console.log(`⚠️ [INFO ONLY] Overdue payment detected for user ${userId}, course ${courseId} - but access is still granted`);
+        // Note: Payment tracking continues for admin purposes, but doesn't block access
       }
     }
     
@@ -166,24 +163,17 @@ const checkUserFileAccess = async (userId, fileId) => {
       return { hasAccess: false, reason: 'COURSE_NOT_PURCHASED' };
     }
     
-    // 🔥 FIXED: Check installment payment status for course access (using correct field name)
+    // 🔥 REMOVED HARDCODED RESTRICTION: Full access once course is purchased, regardless of payment method
     console.log(`💳 Payment info for user ${userId}, course ${course._id}:`, {
       paymentType: purchasedCourse.paymentType,
       totalInstallments: purchasedCourse.totalInstallments,
       amountPaid: purchasedCourse.amountPaid
     });
     
-    if (purchasedCourse.paymentType === 'installment' && purchasedCourse.totalInstallments > 0) {
-      console.log(`🔍 Checking installment payment status for user ${userId}, course ${course._id}`);
-      const paymentStatus = await checkInstallmentPaymentStatus(userId, course._id);
-      
-      if (!paymentStatus.hasAccess) {
-        console.log(`🚫 Access denied due to installment payment: ${paymentStatus.reason}`);
-        return paymentStatus;
-      }
-    } else {
-      console.log(`✅ Full payment user - skipping installment status check`);
-    }
+    console.log(`✅ [FULL ACCESS] Course access granted for user ${userId}, course ${course._id} - payment restrictions removed`);
+    
+    // NOTE: Installment payment tracking is still available for admin purposes,
+    // but does not block course access for students
 
     // 🎯 BATCH COURSE LOGIC: Check if file should be accessible
     const isBatchCourse = course.courseType === "Batch";
@@ -286,26 +276,11 @@ exports.checkCourseAccess = async (req, res) => {
       });
     }
     
-    // Check installment payment status
-    if (purchasedCourse.paymentType === 'installment' && purchasedCourse.totalInstallments > 0) {
-      const paymentStatus = await checkInstallmentPaymentStatus(userId, courseId);
-      
-      return res.status(200).json({
-        hasAccess: paymentStatus.hasAccess,
-        reason: paymentStatus.reason,
-        message: paymentStatus.message || (paymentStatus.hasAccess ? 'Course access granted' : 'Course access denied'),
-        ...(paymentStatus.planType && { planType: paymentStatus.planType }),
-        purchaseDate: purchasedCourse.purchaseDate,
-        paymentType: purchasedCourse.paymentType,
-        totalInstallments: purchasedCourse.totalInstallments
-      });
-    }
-    
-    // Full payment course - grant access
+    // 🔥 REMOVED HARDCODED RESTRICTION: Full access once course is purchased
     return res.status(200).json({ 
       hasAccess: true, 
-      reason: 'FULL_PAYMENT',
-      message: 'Course access granted - full payment completed',
+      reason: 'COURSE_PURCHASED',
+      message: 'Full course access granted - all restrictions removed',
       purchaseDate: purchasedCourse.purchaseDate,
       paymentType: purchasedCourse.paymentType || 'full'
     });
@@ -830,23 +805,34 @@ const streamUserImage = async (req, res) => {
 const streamBannerImage = async (req, res) => {
   try {
     const { bannerId } = req.params;
+    console.log(`🖼️ [STREAM] Attempting to stream banner image for ID: ${bannerId}`);
     
     const Banner = require('../models/bannerModel');
     const banner = await Banner.findById(bannerId);
     
-    if (!banner || !banner.image) {
-      return res.status(404).json({ message: "Banner image not found" });
+    if (!banner) {
+      console.log(`❌ [STREAM] Banner not found for ID: ${bannerId}`);
+      return res.status(404).json({ message: "Banner not found" });
     }
+    
+    if (!banner.image) {
+      console.log(`❌ [STREAM] Banner ${bannerId} has no image field`);
+      return res.status(404).json({ message: "Banner has no image" });
+    }
+    
+    console.log(`📋 [STREAM] Banner ${bannerId} image field: ${banner.image}`);
     
     let s3Key;
     if (banner.image.includes('amazonaws.com/')) {
       s3Key = banner.image.split('amazonaws.com/')[1];
+      console.log(`🔗 [STREAM] Extracted S3 key from URL: ${s3Key}`);
     } else {
       s3Key = banner.image;
+      console.log(`🔗 [STREAM] Using image field as S3 key: ${s3Key}`);
     }
     
     s3Key = decodeURIComponent(s3Key);
-    console.log('Streaming banner image:', s3Key);
+    console.log(`✅ [STREAM] Final S3 key: ${s3Key}`);
     
     const params = {
       Bucket: process.env.S3_BUCKET,
@@ -878,11 +864,22 @@ const streamBannerImage = async (req, res) => {
     s3Stream.pipe(res);
     
   } catch (error) {
-    console.error("Error streaming banner image:", error);
+    console.error(`❌ [STREAM] Error streaming banner image for ${req.params.bannerId}:`, error);
+    console.error(`❌ [STREAM] Error name: ${error.name}`);
+    console.error(`❌ [STREAM] Error code: ${error.code}`);
+    console.error(`❌ [STREAM] Error message: ${error.message}`);
+    
     if (!res.headersSent) {
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-      res.status(500).json({ message: "Internal server error" });
+      
+      if (error.name === 'NoSuchKey') {
+        res.status(404).json({ message: "Image file not found in S3" });
+      } else if (error.name === 'AccessDenied') {
+        res.status(403).json({ message: "Access denied to S3 image" });
+      } else {
+        res.status(500).json({ message: "Error streaming image", error: error.message });
+      }
     }
   }
 };

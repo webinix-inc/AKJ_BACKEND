@@ -12,8 +12,39 @@ const parseField = (field) => (field ? Number(field) : undefined);
 exports.getBooks = async (req, res) => {
   try {
     const books = await Book.find();
-    res.json(books);
+    
+    // Generate pre-signed URLs for book images (same as courses/banners)
+    const { generatePresignedUrl } = require('../configs/aws.config');
+    const processedBooks = await Promise.all(books.map(async (book) => {
+      const bookObj = book.toObject();
+      
+      // Process book image to use pre-signed URL
+      if (bookObj.imageUrl && bookObj.imageUrl.includes('amazonaws.com/')) {
+        try {
+          const s3Key = bookObj.imageUrl.split('amazonaws.com/')[1];
+          const bucketName = process.env.S3_BUCKET || 'wakadclass';
+          
+          console.log(`🔗 [PRESIGN] Generating pre-signed URL for book ${book._id} image`);
+          
+          // Generate pre-signed URL with longer expiration (24 hours)
+          const presignedUrl = await generatePresignedUrl(bucketName, s3Key, 86400);
+          bookObj.imageUrl = presignedUrl;
+          
+          console.log(`✅ [PRESIGN] Generated pre-signed URL for book ${book._id}`);
+          
+        } catch (error) {
+          console.error(`❌ [PRESIGN] Failed to generate pre-signed URL for book ${book._id}:`, error);
+          // Keep original URL as fallback
+        }
+      }
+      
+      return bookObj;
+    }));
+    
+    console.log(`📚 Fetched ${books.length} books with pre-signed URLs`);
+    res.json(processedBooks);
   } catch (error) {
+    console.error("❌ Error fetching books:", error);
     res.status(500).json({ message: "Error fetching books", error });
   }
 };
@@ -25,8 +56,34 @@ exports.getBookById = async (req, res) => {
     if (!book) {
       return res.status(404).json({ message: "Book not found" });
     }
-    res.json(book);
+    
+    // Generate pre-signed URL for book image (same as other endpoints)
+    const { generatePresignedUrl } = require('../configs/aws.config');
+    const bookObj = book.toObject();
+    
+    // Process book image to use pre-signed URL
+    if (bookObj.imageUrl && bookObj.imageUrl.includes('amazonaws.com/')) {
+      try {
+        const s3Key = bookObj.imageUrl.split('amazonaws.com/')[1];
+        const bucketName = process.env.S3_BUCKET || 'wakadclass';
+        
+        console.log(`🔗 [PRESIGN] Generating pre-signed URL for single book ${book._id} image`);
+        
+        // Generate pre-signed URL with longer expiration (24 hours)
+        const presignedUrl = await generatePresignedUrl(bucketName, s3Key, 86400);
+        bookObj.imageUrl = presignedUrl;
+        
+        console.log(`✅ [PRESIGN] Generated pre-signed URL for single book ${book._id}`);
+        
+      } catch (error) {
+        console.error(`❌ [PRESIGN] Failed to generate pre-signed URL for single book ${book._id}:`, error);
+        // Keep original URL as fallback
+      }
+    }
+    
+    res.json(bookObj);
   } catch (error) {
+    console.error("❌ Error fetching book:", error);
     res.status(500).json({ message: "Error fetching book", error });
   }
 };

@@ -38,13 +38,33 @@ function verifyFileAccessToken(token) {
 }
 
 const generateSignedUrl = async (bucketName, key, expiresIn = 60 * 5) => {
-  // default 5 mins
-  const command = new GetObjectCommand({
-    Bucket: bucketName,
-    Key: key,
-    ResponseContentDisposition: "inline", // show in browser, not download
-  });
-  return await getSignedUrl(s3, command, { expiresIn });
+  try {
+    console.log(`🔗 [PDF-PRESIGN] Generating signed URL for PDF/Video`);
+    console.log(`🔗 [PDF-PRESIGN] Bucket: ${bucketName}, Key: ${key}`);
+    
+    // Use same configuration as working generatePresignedUrl
+    const command = new GetObjectCommand({
+      Bucket: bucketName,
+      Key: key,
+      ResponseContentDisposition: "inline", // show in browser, not download
+      ResponseContentType: 'application/pdf', // Set appropriate content type
+    });
+    
+    const signedUrl = await getSignedUrl(s3, command, { 
+      expiresIn,
+      signableHeaders: new Set(['host']) // Same as working config
+    });
+    
+    console.log(`✅ [PDF-PRESIGN] Generated signed URL successfully`);
+    console.log(`✅ [PDF-PRESIGN] URL: ${signedUrl.substring(0, 100)}...`);
+    
+    return signedUrl;
+  } catch (error) {
+    console.error(`❌ [PDF-PRESIGN] Failed to generate signed URL:`, error);
+    console.error(`❌ [PDF-PRESIGN] Error name: ${error.name}`);
+    console.error(`❌ [PDF-PRESIGN] Error code: ${error.code}`);
+    throw error;
+  }
 };
 
 function getMimeType(filePath) {

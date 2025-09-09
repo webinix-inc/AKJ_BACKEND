@@ -18,20 +18,32 @@ const s3 = new S3Client({
 });
 
 // Function to generate pre-signed URL for object access (GET)
-const generatePresignedUrl = async (bucketName, objectKey) => {
+const generatePresignedUrl = async (bucketName, objectKey, expiresIn = 3600) => {
   const decodedKey = decodeURIComponent(objectKey);
   const command = new GetObjectCommand({
     Bucket: bucketName,
     Key: decodedKey,
-    // ACL removed as bucket has ACLs disabled
+    // Add response headers to ensure proper content type
+    ResponseContentType: 'image/*',
   });
 
   try {
-    const url = await getSignedUrl(s3, command);
-    console.log(`Generated Pre-signed GET URL: ${url}`);
+    const url = await getSignedUrl(s3, command, { 
+      expiresIn: expiresIn,
+      // Add additional options for better compatibility
+      signableHeaders: new Set(['host']),
+    });
+    console.log(`Generated Pre-signed GET URL (expires in ${expiresIn}s): ${url}`);
     return url;
   } catch (error) {
     console.error("Error generating pre-signed GET URL:", error);
+    console.error("Error details:", {
+      name: error.name,
+      code: error.code,
+      message: error.message,
+      bucket: bucketName,
+      key: decodedKey
+    });
     throw error;
   }
 };

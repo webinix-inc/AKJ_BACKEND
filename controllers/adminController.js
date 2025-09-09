@@ -203,6 +203,7 @@ exports.signin = async (req, res) => {
         phone: user.phone,
         email: user.email,
         userType: user.userType,
+        merithubUserId: user.merithubUserId, // Include MeritHub user ID for live class creation
         permissions: {
           coursesPermission: user.coursesPermission,
           bookStorePermission: user.bookStorePermission,
@@ -903,18 +904,37 @@ exports.getBanner = async (req, res) => {
   try {
     const banners = await Banner.find().populate("course", "title _id");
     
-    // Process banners to use streaming URLs instead of direct S3 URLs
-    const processedBanners = banners.map(banner => {
+    // Generate pre-signed URLs with longer expiration and better error handling
+    const { generatePresignedUrl } = require('../configs/aws.config');
+    const processedBanners = await Promise.all(banners.map(async (banner) => {
       const bannerObj = banner.toObject();
       
-      // Replace direct S3 URL with streaming endpoint URL
-      if (bannerObj.image) {
-        const baseURL = process.env.API_BASE_URL || `${req.protocol}://${req.get('host')}`;
-        bannerObj.image = `${baseURL}/api/v1/stream/banner-image/${banner._id}`;
+      if (bannerObj.image && bannerObj.image.includes('amazonaws.com/')) {
+        try {
+          const s3Key = bannerObj.image.split('amazonaws.com/')[1];
+          const bucketName = process.env.S3_BUCKET || 'wakadclass';
+          
+          console.log(`🔗 [PRESIGN] Generating pre-signed URL for banner ${banner._id}`);
+          console.log(`🔗 [PRESIGN] S3 Key: ${s3Key}`);
+          console.log(`🔗 [PRESIGN] Bucket: ${bucketName}`);
+          
+          // Generate pre-signed URL with longer expiration (24 hours)
+          const presignedUrl = await generatePresignedUrl(bucketName, s3Key, 86400);
+          bannerObj.image = presignedUrl;
+          
+          console.log(`✅ [PRESIGN] Generated pre-signed URL for banner ${banner._id}`);
+          console.log(`✅ [PRESIGN] URL: ${presignedUrl.substring(0, 100)}...`);
+          
+        } catch (error) {
+          console.error(`❌ [PRESIGN] Failed to generate pre-signed URL for banner ${banner._id}:`, error);
+          console.error(`❌ [PRESIGN] Error name: ${error.name}`);
+          console.error(`❌ [PRESIGN] Error code: ${error.code}`);
+          // Keep original URL as fallback
+        }
       }
       
       return bannerObj;
-    });
+    }));
     
     console.log(`📋 Fetched ${banners.length} banners with streaming URLs`);
     return res.status(200).json({ status: 200, data: processedBanners });
@@ -1968,9 +1988,48 @@ exports.getAllPublishedCourses = async (req, res) => {
     const courses = await Course.find({ isPublished: true }).populate(
       "subjects"
     );
-    return res.status(200).json({ status: 200, data: courses });
+    
+    // Generate pre-signed URLs for course images (same as banners)
+    const { generatePresignedUrl } = require('../configs/aws.config');
+    const processedCourses = await Promise.all(courses.map(async (course) => {
+      const courseObj = course.toObject();
+      
+      // Process course images to use pre-signed URLs
+      if (courseObj.courseImage && courseObj.courseImage.length > 0) {
+        courseObj.courseImage = await Promise.all(courseObj.courseImage.map(async (imageUrl) => {
+          if (imageUrl && imageUrl.includes('amazonaws.com/')) {
+            try {
+              const s3Key = imageUrl.split('amazonaws.com/')[1];
+              const bucketName = process.env.S3_BUCKET || 'wakadclass';
+              
+              console.log(`🔗 [PRESIGN] Generating pre-signed URL for course ${course._id} image`);
+              console.log(`🔗 [PRESIGN] S3 Key: ${s3Key}`);
+              
+              // Generate pre-signed URL with longer expiration (24 hours)
+              const presignedUrl = await generatePresignedUrl(bucketName, s3Key, 86400);
+              
+              console.log(`✅ [PRESIGN] Generated pre-signed URL for course ${course._id}`);
+              return presignedUrl;
+              
+            } catch (error) {
+              console.error(`❌ [PRESIGN] Failed to generate pre-signed URL for course ${course._id}:`, error);
+              console.error(`❌ [PRESIGN] Error name: ${error.name}`);
+              console.error(`❌ [PRESIGN] Error code: ${error.code}`);
+              // Keep original URL as fallback
+              return imageUrl;
+            }
+          }
+          return imageUrl;
+        }));
+      }
+      
+      return courseObj;
+    }));
+    
+    console.log(`📚 Fetched ${courses.length} courses with pre-signed URLs`);
+    return res.status(200).json({ status: 200, data: processedCourses });
   } catch (error) {
-    console.error(error);
+    console.error("❌ Error fetching courses:", error);
     return res
       .status(500)
       .json({ status: 500, message: "Server error", error });
@@ -5838,7 +5897,7 @@ exports.togglePublishCourse = async (req, res) => {
  * Get all published courses (for public/user access)
  * Route: GET /api/v1/user/courses
  */
-exports.getAllPublishedCourses = async (req, res) => {
+exports.getAllPublishedCoursesForUser = async (req, res) => {
   try {
     console.log("📚 Fetching all published courses");
 
@@ -5851,10 +5910,44 @@ exports.getAllPublishedCourses = async (req, res) => {
 
     console.log(`📚 Found ${courses.length} published courses`);
 
+    // Generate pre-signed URLs for course images (same as admin endpoint)
+    const { generatePresignedUrl } = require('../configs/aws.config');
+    const processedCourses = await Promise.all(courses.map(async (course) => {
+      const courseObj = course.toObject();
+      
+      // Process course images to use pre-signed URLs
+      if (courseObj.courseImage && courseObj.courseImage.length > 0) {
+        courseObj.courseImage = await Promise.all(courseObj.courseImage.map(async (imageUrl) => {
+          if (imageUrl && imageUrl.includes('amazonaws.com/')) {
+            try {
+              const s3Key = imageUrl.split('amazonaws.com/')[1];
+              const bucketName = process.env.S3_BUCKET || 'wakadclass';
+              
+              console.log(`🔗 [PRESIGN] Generating pre-signed URL for user course ${course._id} image`);
+              
+              // Generate pre-signed URL with longer expiration (24 hours)
+              const presignedUrl = await generatePresignedUrl(bucketName, s3Key, 86400);
+              
+              console.log(`✅ [PRESIGN] Generated pre-signed URL for user course ${course._id}`);
+              return presignedUrl;
+              
+            } catch (error) {
+              console.error(`❌ [PRESIGN] Failed to generate pre-signed URL for user course ${course._id}:`, error);
+              // Keep original URL as fallback
+              return imageUrl;
+            }
+          }
+          return imageUrl;
+        }));
+      }
+      
+      return courseObj;
+    }));
+
     return res.status(200).json({
       status: 200,
       message: "Published courses retrieved successfully",
-      data: courses,
+      data: processedCourses,
     });
   } catch (error) {
     console.error("❌ Error fetching published courses:", error);
