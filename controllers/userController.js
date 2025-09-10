@@ -1088,16 +1088,17 @@ exports.updateLocation = async (req, res) => {
 };
 exports.getBanner = async (req, res) => {
   try {
-    const Banners = await Banner.find().populate("course subscription");
+    const Banners = await Banner.find().populate("course");
     
-    // Process banners to use streaming URLs instead of direct S3 URLs
+    // TEMPORARY FIX: Use working streaming endpoint until AWS permissions are fixed
     const processedBanners = Banners.map(banner => {
       const bannerObj = banner.toObject();
       
-      // Replace direct S3 URL with streaming endpoint URL
-      if (bannerObj.image) {
+      // Convert S3 URLs to working streaming endpoint URLs
+      if (bannerObj.image && bannerObj.image.includes('amazonaws.com/')) {
         const baseURL = process.env.API_BASE_URL || `${req.protocol}://${req.get('host')}`;
         bannerObj.image = `${baseURL}/api/v1/stream/banner-image/${banner._id}`;
+        console.log(`Using streaming URL for banner ${banner._id}`);
       }
       
       return bannerObj;
@@ -1122,11 +1123,14 @@ exports.getBannerById = async (req, res) => {
       return res.status(404).json({ status: 404, message: "Banner not found" });
     }
 
-    // Process banner to use streaming URL instead of direct S3 URL
+    // TEMPORARY FIX: Use working streaming endpoint until AWS permissions are fixed
     const bannerObj = banner.toObject();
-    if (bannerObj.image) {
+    
+    // Convert S3 URL to working streaming endpoint URL
+    if (bannerObj.image && bannerObj.image.includes('amazonaws.com/')) {
       const baseURL = process.env.API_BASE_URL || `${req.protocol}://${req.get('host')}`;
       bannerObj.image = `${baseURL}/api/v1/stream/banner-image/${banner._id}`;
+      console.log(`Using streaming URL for single banner ${banner._id}`);
     }
 
     return res.status(200).json({ status: 200, data: bannerObj });
@@ -2132,7 +2136,7 @@ exports.paginateProductSearch = async (req, res) => {
 };
 exports.addToCart = async (req, res) => {
   try {
-    const { productId, quantity, wallet } = req.body;
+    const { productId, bookId, quantity, wallet } = req.body;
     const userId = req.user.id;
 
     const user = await User.findById(userId);
@@ -2141,54 +2145,86 @@ exports.addToCart = async (req, res) => {
       return res.status(404).json({ status: 404, message: "User not found" });
     }
 
-    const product = await Product.findById(productId);
-    if (!product) {
+    let item, itemType, itemPrice;
+
+    if (productId) {
+      const product = await Product.findById(productId);
+      if (!product) {
+        return res
+          .status(404)
+          .json({ status: 404, message: "Product not found" });
+      }
+      item = product;
+      itemType = 'product';
+      itemPrice = product.discountActive ? product.discountPrice : product.originalPrice;
+    } else if (bookId) {
+      const Book = require('../models/Book');
+      const book = await Book.findById(bookId);
+      if (!book) {
+        return res
+          .status(404)
+          .json({ status: 404, message: "Book not found" });
+      }
+      item = book;
+      itemType = 'book';
+      itemPrice = book.price;
+    } else {
       return res
-        .status(404)
-        .json({ status: 404, message: "Product not found" });
+        .status(400)
+        .json({ status: 400, message: "Either productId or bookId is required" });
     }
 
     let cart = await Cart.findOne({ user: userId });
 
     if (!cart) {
+      const cartItem = {
+        quantity,
+        price: itemPrice,
+        totalAmount: itemPrice * quantity,
+        itemType
+      };
+
+      if (itemType === 'product') {
+        cartItem.product = productId;
+        cartItem.vendorId = item.vendorId;
+      } else {
+        cartItem.book = bookId;
+      }
+
       cart = new Cart({
         user: userId,
-        products: [
-          {
-            product: productId,
-            quantity,
-            vendorId: product.vendorId,
-            price: product.discountActive
-              ? product.discountPrice
-              : product.originalPrice,
-            totalAmount: product.discountActive
-              ? product.discountPrice * quantity
-              : product.originalPrice * quantity,
-          },
-        ],
+        products: [cartItem],
         shippingPrice: 0,
       });
     } else {
-      const existingProduct = cart.products.find(
-        (item) => item.product.toString() === productId
-      );
+      const existingItemIndex = cart.products.findIndex((cartItem) => {
+        if (itemType === 'product') {
+          return cartItem.product && cartItem.product.toString() === productId;
+        } else {
+          return cartItem.book && cartItem.book.toString() === bookId;
+        }
+      });
 
-      if (existingProduct) {
-        existingProduct.quantity += quantity;
-        existingProduct.totalAmount =
-          existingProduct.price * existingProduct.quantity;
+      if (existingItemIndex !== -1) {
+        cart.products[existingItemIndex].quantity += quantity;
+        cart.products[existingItemIndex].totalAmount =
+          cart.products[existingItemIndex].price * cart.products[existingItemIndex].quantity;
       } else {
-        cart.products.push({
-          product: productId,
+        const cartItem = {
           quantity,
-          vendorId: product.vendorId,
-          price: product.discountActive
-            ? product.discountPrice
-            : product.originalPrice,
-          totalAmount: product.discountActive
-            ? product.discountPrice * quantity
-            : product.originalPrice * quantity,
-        });
+          price: itemPrice,
+          totalAmount: itemPrice * quantity,
+          itemType
+        };
+
+        if (itemType === 'product') {
+          cartItem.product = productId;
+          cartItem.vendorId = item.vendorId;
+        } else {
+          cartItem.book = bookId;
+        }
+
+        cart.products.push(cartItem);
       }
     }
 
@@ -2276,6 +2312,10 @@ exports.getCart = async (req, res) => {
       .populate({
         path: "products.product",
         select: "productName price image",
+      })
+      .populate({
+        path: "products.book",
+        select: "name author price imageUrl",
       })
       .populate("wallet", "balance");
 
@@ -2375,7 +2415,7 @@ exports.deleteCart = async (req, res) => {
 };
 exports.updateCartQuantity = async (req, res) => {
   try {
-    const { productId, quantity } = req.body;
+    const { productId, bookId, quantity } = req.body;
     const userId = req.user.id;
 
     const user = await User.findById(userId);
@@ -2384,12 +2424,33 @@ exports.updateCartQuantity = async (req, res) => {
       return res.status(404).json({ status: 404, message: "User not found" });
     }
 
-    const product = await Product.findById(productId);
+    let item, itemType, itemPrice;
 
-    if (!product) {
+    if (productId) {
+      const product = await Product.findById(productId);
+      if (!product) {
+        return res
+          .status(404)
+          .json({ status: 404, message: "Product not found" });
+      }
+      item = product;
+      itemType = 'product';
+      itemPrice = product.discountActive === "true" ? product.discountPrice : product.originalPrice;
+    } else if (bookId) {
+      const Book = require('../models/Book');
+      const book = await Book.findById(bookId);
+      if (!book) {
+        return res
+          .status(404)
+          .json({ status: 404, message: "Book not found" });
+      }
+      item = book;
+      itemType = 'book';
+      itemPrice = book.price;
+    } else {
       return res
-        .status(404)
-        .json({ status: 404, message: "Product not found" });
+        .status(400)
+        .json({ status: 400, message: "Either productId or bookId is required" });
     }
 
     const cart = await Cart.findOne({ user: userId });
@@ -2398,23 +2459,22 @@ exports.updateCartQuantity = async (req, res) => {
       return res.status(404).json({ status: 404, message: "Cart not found" });
     }
 
-    const cartProduct = cart.products.find(
-      (item) => item.product.toString() === productId
-    );
+    const cartItemIndex = cart.products.findIndex((cartItem) => {
+      if (itemType === 'product') {
+        return cartItem.product && cartItem.product.toString() === productId;
+      } else {
+        return cartItem.book && cartItem.book.toString() === bookId;
+      }
+    });
 
-    if (!cartProduct) {
+    if (cartItemIndex === -1) {
       return res
         .status(404)
-        .json({ status: 404, message: "Product not found in cart" });
+        .json({ status: 404, message: `${itemType === 'book' ? 'Book' : 'Product'} not found in cart` });
     }
 
-    const productPrice =
-      product.discountActive === "true"
-        ? product.discountPrice
-        : product.originalPrice;
-
-    cartProduct.quantity = quantity;
-    cartProduct.totalAmount = productPrice * quantity;
+    cart.products[cartItemIndex].quantity = quantity;
+    cart.products[cartItemIndex].totalAmount = itemPrice * quantity;
 
     const totalCartAmount = cart.products.reduce(
       (total, item) => total + item.totalAmount,
@@ -3086,28 +3146,61 @@ exports.getUserPurchasedCourses = async (req, res) => {
 
     console.log(`🔍 [DEBUG] Active purchased courses count after filtering: ${activePurchasedCourses.length}`);
 
-    const courses = activePurchasedCourses.map(pc => ({
-      ...pc.course.toObject(),
-      purchaseInfo: {
-        purchasedAt: pc.assignedByAdmin?.assignedAt || pc.purchasedAt,
-        expiresAt: pc.expiresAt,
-        assignedByAdmin: pc.assignedByAdmin?.isAssigned || false,
-        assignedBy: pc.assignedByAdmin?.assignedBy
+    // Generate pre-signed URLs for course images (same as getAllPublishedCoursesForUser)
+    const { generatePresignedUrl } = require('../configs/aws.config');
+    const processedCourses = await Promise.all(activePurchasedCourses.map(async (pc) => {
+      const courseObj = pc.course.toObject();
+      
+      // Process course images to use pre-signed URLs
+      if (courseObj.courseImage && courseObj.courseImage.length > 0) {
+        courseObj.courseImage = await Promise.all(courseObj.courseImage.map(async (imageUrl) => {
+          if (imageUrl && imageUrl.includes('amazonaws.com/')) {
+            try {
+              const s3Key = imageUrl.split('amazonaws.com/')[1];
+              const bucketName = process.env.S3_BUCKET || 'wakadclass';
+              
+              console.log(`🔗 [PRESIGN] Generating pre-signed URL for purchased course ${courseObj._id} image`);
+              
+              // Generate pre-signed URL with longer expiration (24 hours)
+              const presignedUrl = await generatePresignedUrl(bucketName, s3Key, 86400);
+              
+              console.log(`✅ [PRESIGN] Generated pre-signed URL for purchased course ${courseObj._id}`);
+              return presignedUrl;
+              
+            } catch (error) {
+              console.error(`❌ [PRESIGN] Failed to generate pre-signed URL for purchased course ${courseObj._id}:`, error);
+              // Keep original URL as fallback
+              return imageUrl;
+            }
+          }
+          return imageUrl;
+        }));
       }
+      
+      return {
+        ...courseObj,
+        purchaseInfo: {
+          purchasedAt: pc.assignedByAdmin?.assignedAt || pc.purchasedAt,
+          expiresAt: pc.expiresAt,
+          assignedByAdmin: pc.assignedByAdmin?.isAssigned || false,
+          assignedBy: pc.assignedByAdmin?.assignedBy
+        }
+      };
     }));
 
-    console.log(`🔍 [DEBUG] Final response - courses count: ${courses.length}`);
-    console.log(`🔍 [DEBUG] Final courses:`, courses.map(c => ({
+    console.log(`🔍 [DEBUG] Final response - courses count: ${processedCourses.length}`);
+    console.log(`🔍 [DEBUG] Final courses:`, processedCourses.map(c => ({
       id: c._id,
       title: c.title,
       courseType: c.courseType,
-      isPublished: c.isPublished
+      isPublished: c.isPublished,
+      hasImages: c.courseImage && c.courseImage.length > 0
     })));
 
     return res.status(200).json({
       status: 200,
       message: "Purchased courses retrieved successfully",
-      data: courses,
+      data: processedCourses,
     });
   } catch (error) {
     console.error(error);

@@ -13,7 +13,7 @@ const LiveClassSchema = new mongoose.Schema({
   access: { type: String, enum: ["private", "public"], default: "private" },
   login: { type: Boolean, default: false },
   layout: { type: String, default: "CR" },
-  status: { type: String, enum: ["up","lv","down"], default: "up" },
+  status: { type: String, enum: ["up","lv","down","scheduled","completed","expired"], default: "up" },
   recording: {
     record: { type: Boolean, default: true },
     autoRecord: { type: Boolean, default: false },
@@ -43,7 +43,8 @@ const LiveClassSchema = new mongoose.Schema({
   },
   
   // MeritHub specific fields
-  liveLink: { type: String },
+  liveLink: { type: String }, // Instructor link for "Go Live" button
+  instructorLink: { type: String }, // Dedicated instructor link field
   classId: { type: String },
   commonParticipantLink: { type: String },
   
@@ -52,6 +53,8 @@ const LiveClassSchema = new mongoose.Schema({
   zoomMeetingId: { type: String },
   zoomPasscode: { type: String },
   
+  actualStartTime: { type: Date }, // When class actually went live
+  actualEndTime: { type: Date }, // When class actually ended
   createdAt: { type: Date, default: Date.now },
 });
 

@@ -61,6 +61,7 @@ const userSchema = new schema(
     experience: { type: Number, default: 0 },
     college: { type: String },
     merithubUserId: { type: String },
+    merithubUserToken: { type: String }, // Token for MeritHub class operations
     userBio: { type: String },
 
     purchasedCourses: [

@@ -15,8 +15,8 @@ const socketIO = require("socket.io");
 const orderRoutes = require("./routes/bookOrder.route");
 
 const allowedOrigins = [
-  // 🔧 LOCAL DEVELOPMENT - All common ports and protocols
-  "http://localhost:3000", // User Frontend (Development)
+  //  LOCAL DEVELOPMENT - All common ports and protocols
+  "http://localhost", // User Frontend (Development)
   "http://localhost:3001", // Admin Frontend (Development)
   "https://localhost:3000", // User Frontend (Development HTTPS)
   "https://localhost:3001", // Admin Frontend (Development HTTPS)

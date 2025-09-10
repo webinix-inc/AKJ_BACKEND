@@ -5,6 +5,10 @@ const cartProductsSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: "Product"
     },
+    book: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Book"
+    },
     vendorId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User"
@@ -23,6 +27,11 @@ const cartProductsSchema = new mongoose.Schema({
     totalAmount: {
         type: Number,
         default: 0,
+    },
+    itemType: {
+        type: String,
+        enum: ['product', 'book'],
+        default: 'product'
     }
 }, { _id: true })
 

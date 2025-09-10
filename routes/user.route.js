@@ -60,6 +60,7 @@ module.exports = (app) => {
         app.get('/api/v1/user/most-demanded', [authJwt.verifyToken], auth.getMostDemandedProducts);
         app.get("/api/v1/user/product/all/paginateProductSearch", [authJwt.verifyToken], auth.paginateProductSearch);
         app.post('/api/v1/user/cart/add', [authJwt.verifyToken], auth.addToCart);
+        app.post('/api/v1/user/cart/add-book', [authJwt.verifyToken], auth.addToCart);
         app.get('/api/v1/user/cart/get', [authJwt.verifyToken], auth.getCart);
         app.put('/api/v1/user/cart/update', [authJwt.verifyToken], auth.updateCart);
         app.delete('/api/v1/user/cart/delete', [authJwt.verifyToken], auth.deleteCart);
