@@ -2932,65 +2932,59 @@ exports.UploadCourseVideo1 = async (req, res) => {
 
 exports.UploadCourseVideo = async (req, res) => {
   try {
-    kpUpload1(req, res, async (err) => {
-      if (err) {
-        return res.status(500).json({ error: "Error uploading videos" });
-      }
+    const { title, description } = req.body; // Extract title and description from request body
+    const videoFiles = req.files["courseVideo"]; // Access the uploaded courseVideo files
 
-      const { title, description } = req.body; // Extract title and description from request body
-      const videoFiles = req.files["courseVideo"]; // Access the uploaded courseVideo files
+    if (!videoFiles || videoFiles.length === 0) {
+      return res.status(400).json({ message: "No video files uploaded" });
+    }
 
-      if (!videoFiles || videoFiles.length === 0) {
-        return res.status(400).json({ message: "No video files uploaded" });
-      }
+    const { folderId } = req.params; // Extract folderId from URL params
 
-      const { folderId } = req.params; // Extract folderId from URL params
+    // Fetch the folder
+    const folder = await Folder.findById(folderId);
+    if (!folder) {
+      return res.status(404).json({ message: "Folder not found" });
+    }
 
-      // Fetch the folder
-      const folder = await Folder.findById(folderId);
-      if (!folder) {
-        return res.status(404).json({ message: "Folder not found" });
-      }
+    // Check if adding the new videos exceeds any pre-defined limit (e.g., max 100 videos per folder)
+    if (folder.files.length + videoFiles.length > 100) {
+      return res
+        .status(400)
+        .json({ message: "Exceeded maximum limit of 100 videos per folder" });
+    }
 
-      // Check if adding the new videos exceeds any pre-defined limit (e.g., max 100 videos per folder)
-      if (folder.files.length + videoFiles.length > 100) {
-        return res
-          .status(400)
-          .json({ message: "Exceeded maximum limit of 100 videos per folder" });
-      }
+    // Create `File` documents for each uploaded video
+    const createdFiles = await Promise.all(
+      videoFiles.map(async (file) => {
+        const objectKey = file.key; // S3 key (file location in the bucket)
+        const directUrl = `https://${authConfig.s3_bucket}.s3.amazonaws.com/${objectKey}`;
 
-      // Create `File` documents for each uploaded video
-      const createdFiles = await Promise.all(
-        videoFiles.map(async (file) => {
-          const objectKey = file.key; // S3 key (file location in the bucket)
-          const directUrl = `https://${authConfig.s3_bucket}.s3.amazonaws.com/${objectKey}`;
+        const newFile = await File.create({
+          name: title || file.originalname, // Default to filename if title is not provided
+          url: directUrl,
+          description: description || "", // Default to empty string if description is not provided
+          fileType: "video",
+          isDownloadable: false, // Default to not downloadable
+          isViewable: false, // Default to not viewable - admin can toggle this later
+        });
 
-          const newFile = await File.create({
-            name: title || file.originalname, // Default to filename if title is not provided
-            url: directUrl,
-            description: description || "", // Default to empty string if description is not provided
-            fileType: "video",
-            isDownloadable: false, // Default to not downloadable
-            isViewable: false, // Default to not viewable - admin can toggle this later
-          });
+        return newFile; // File is already saved by create()
+      })
+    );
 
-          return newFile; // File is already saved by create()
-        })
-      );
+    // Add the file `_id`s to the folder
+    const fileIds = createdFiles.map((file) => file._id);
+    folder.files.push(...fileIds);
+    await folder.save();
 
-      // Add the file `_id`s to the folder
-      const fileIds = createdFiles.map((file) => file._id);
-      folder.files.push(...fileIds);
-      await folder.save();
-
-      res.status(200).json({
-        message: "Videos uploaded successfully",
-        data: createdFiles.map((file) => ({
-          id: file._id,
-          url: file.url,
-          name: file.name,
-        })), // Return the details of created files
-      });
+    res.status(200).json({
+      message: "Videos uploaded successfully",
+      data: createdFiles.map((file) => ({
+        id: file._id,
+        url: file.url,
+        name: file.name,
+      })), // Return the details of created files
     });
   } catch (error) {
     console.error(error);

@@ -71,7 +71,65 @@ const subCategoryUpload = multer({
   storage: s3Storage("images/courseSubCategory"),
 });
 
-const kpUpload1 = courseImage.fields([
+// Enhanced Video Upload with larger file size limits for 1GB videos
+const videoUpload = multer({
+  storage: s3Storage("videos/course"),
+  limits: {
+    fileSize: 1024 * 1024 * 1024, // 1GB file size limit
+    files: 10, // Max 10 files per upload
+  },
+  fileFilter: (req, file, cb) => {
+    // Allow video file types
+    const allowedMimeTypes = [
+      "video/mp4",
+      "video/webm", 
+      "video/quicktime",
+      "video/x-msvideo", // .avi
+      "video/x-ms-wmv", // .wmv
+      "video/x-flv", // .flv
+      "video/3gpp", // .3gp
+      "video/x-matroska", // .mkv
+    ];
+
+    if (allowedMimeTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`Invalid video file type: ${file.mimetype}. Allowed types: ${allowedMimeTypes.join(', ')}`), false);
+    }
+  },
+});
+
+const kpUpload1 = multer({
+  storage: s3Storage("content"),
+  limits: {
+    fileSize: 1024 * 1024 * 1024, // 1GB file size limit for large videos
+    files: 100, // Max 100 files per upload
+  },
+  fileFilter: (req, file, cb) => {
+    // Allow all common file types including large videos
+    const allowedMimeTypes = [
+      // Images
+      "image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp", "image/svg+xml",
+      // Videos (with large file support)
+      "video/mp4", "video/webm", "video/quicktime", "video/x-msvideo", "video/x-ms-wmv", 
+      "video/x-flv", "video/3gpp", "video/x-matroska", "video/mpeg", "video/ogg",
+      // Documents
+      "application/pdf", "application/msword", 
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.ms-excel", 
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "text/plain", "text/csv",
+      // Audio
+      "audio/mpeg", "audio/wav", "audio/ogg", "audio/mp4"
+    ];
+
+    if (allowedMimeTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`Invalid file type: ${file.mimetype}`), false);
+    }
+  },
+}).fields([
   { name: "courseImage", maxCount: 100 },
   { name: "courseNotes", maxCount: 100 },
   { name: "courseVideo", maxCount: 100 },
@@ -149,6 +207,7 @@ module.exports = {
   productImage,
   subCategoryUpload,
   kpUpload1,
+  videoUpload, // New enhanced video upload middleware
   syllabusUpload,
   TestSeriesUpload,
   kpUpload2,

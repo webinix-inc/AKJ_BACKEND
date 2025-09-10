@@ -315,6 +315,7 @@ module.exports = (app) => {
   app.post(
     "/api/v1/admin/uploadCourseVideo/:folderId",
     [authJwt.verifyToken],
+    kpUpload1,
     auth.UploadCourseVideo
   );
   app.delete(

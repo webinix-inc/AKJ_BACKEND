@@ -17,6 +17,7 @@ const orderRoutes = require("./routes/bookOrder.route");
 const allowedOrigins = [
   //  LOCAL DEVELOPMENT - All common ports and protocols
   "http://localhost", // User Frontend (Development)
+  "http://localhost:3000", // User Frontend (Development)
   "http://localhost:3001", // Admin Frontend (Development)
   "https://localhost:3000", // User Frontend (Development HTTPS)
   "https://localhost:3001", // Admin Frontend (Development HTTPS)
@@ -167,9 +168,9 @@ app.use(apiLogger);
 // 🚀 PERFORMANCE MONITORING: Track all HTTP requests
 app.use(performanceMonitor.trackRequest());
 
-// 🚀 OPTIMIZED: Reduced body parser limits for better memory usage
-app.use(bodyParser.json({ limit: "10mb" })); // Reduced from 50mb
-app.use(bodyParser.urlencoded({ limit: "10mb", extended: true })); // Reduced from 50mb
+// 🚀 ENHANCED: Increased body parser limits for large video uploads (up to 1GB)
+app.use(bodyParser.json({ limit: "1gb" })); // Increased for large video uploads
+app.use(bodyParser.urlencoded({ limit: "1gb", extended: true })); // Increased for large video uploads
 
 // 🚀 PERFORMANCE: Keep-alive connections for better HTTP performance
 app.use((req, res, next) => {
