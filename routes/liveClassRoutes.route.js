@@ -9,6 +9,7 @@ const {
   checkClassStatus,
   getRecordedVideos,
   handleMeritHubStatusPing,
+  migrateUserLiveClassLinks,
 } = require("../controllers/liveClassController");
 const authJwt = require("../middlewares/authJwt"); // Importing auth middleware
 
@@ -20,6 +21,7 @@ module.exports = (app) => {
   app.post("/api/v1/admin/live-users", createUser);
   app.post("/api/v1/admin/webhooks/merithub-status", handleMeritHubStatusPing);
   app.get("/api/v1/admin/upcoming-live-classes", fetchAllClasses);
+  app.post("/api/v1/admin/migrate-live-class-links", migrateUserLiveClassLinks);
 
   app.get("/courses/:courseId/recorded-videos", [authJwt.verifyToken], getRecordedVideos);
 };

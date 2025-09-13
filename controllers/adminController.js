@@ -21,6 +21,7 @@ const subscriptionService = require("../services/subscriptionService");
 const courseService = require("../services/courseService");
 const productService = require("../services/productService");
 const fileService = require("../services/fileService");
+const { fixInvalidCourseType } = require("../utils/courseTypeValidator");
 const Product = require("../models/ProductModel");
 // const Cart = require("../models/cartModel"); // UNUSED - Removed
 // const Address = require("../models/addressModel"); // UNUSED - Removed
@@ -5846,6 +5847,14 @@ exports.togglePublishCourse = async (req, res) => {
       });
     }
 
+    // 🔧 FIX: Handle invalid courseType values using utility
+    try {
+      await fixInvalidCourseType(id);
+    } catch (fixError) {
+      console.warn(`⚠️ Could not fix courseType for course ${id}:`, fixError.message);
+      // Continue with the publish toggle even if courseType fix fails
+    }
+
     // Set the publish status to desired state
     console.log("🔍 Current isPublished value:", course.isPublished, typeof course.isPublished);
     
@@ -5860,21 +5869,35 @@ exports.togglePublishCourse = async (req, res) => {
       newStatus = !isCurrentlyPublished;
     }
     
-    // Explicitly set the field to ensure it's a proper boolean
-    course.set('isPublished', newStatus);
+    // Use findByIdAndUpdate to avoid full model validation
+    console.log("🔄 New isPublished value:", newStatus, typeof newStatus);
     
-    console.log("🔄 New isPublished value:", course.isPublished, typeof course.isPublished);
-    await course.save();
+    const updatedCourse = await Course.findByIdAndUpdate(
+      id,
+      { isPublished: newStatus },
+      { 
+        new: true, // Return updated document
+        runValidators: false // Skip validation to avoid courseType enum issues
+      }
+    );
 
-    console.log(`✅ Course "${course.title}" ${course.isPublished ? 'published' : 'unpublished'} successfully`);
+    if (!updatedCourse) {
+      return res.status(404).json({
+        status: 404,
+        message: "Course not found or could not be updated",
+        data: null,
+      });
+    }
+
+    console.log(`✅ Course "${updatedCourse.title}" ${updatedCourse.isPublished ? 'published' : 'unpublished'} successfully`);
 
     return res.status(200).json({
       status: 200,
-      message: `Course ${course.isPublished ? 'published' : 'unpublished'} successfully`,
+      message: `Course ${updatedCourse.isPublished ? 'published' : 'unpublished'} successfully`,
       data: {
-        courseId: course._id,
-        title: course.title,
-        isPublished: course.isPublished,
+        courseId: updatedCourse._id,
+        title: updatedCourse.title,
+        isPublished: updatedCourse.isPublished,
       },
     });
   } catch (error) {

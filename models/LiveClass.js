@@ -46,7 +46,7 @@ const LiveClassSchema = new mongoose.Schema({
   liveLink: { type: String }, // Instructor link for "Go Live" button
   instructorLink: { type: String }, // Dedicated instructor link field
   classId: { type: String },
-  commonParticipantLink: { type: String },
+  // Removed commonParticipantLink - we only use individual user links
   
   // Zoom specific fields
   zoomMeetingLink: { type: String },

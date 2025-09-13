@@ -346,7 +346,7 @@ async function scheduleLiveClass(instructorUserId, classDetails, userToken = nul
   }
 }
 
-async function addUsersToClass(classId, userIds, commonParticipantLink) {
+async function addUsersToClass(classId, userIds) {
   try {
     if (!classId) throw new Error('addUsersToClass requires classId');
     if (!Array.isArray(userIds) || userIds.length === 0) {
@@ -358,9 +358,9 @@ async function addUsersToClass(classId, userIds, commonParticipantLink) {
     // Use AccessToken for adding users to class (as per MeritHub API documentation)
     const token = await getAccessToken();
     
+    // MeritHub API will generate individual user links for each user
     const users = userIds.map(userId => ({
       userId,
-      userLink: commonParticipantLink, // Use commonParticipantLink for student role
       userType: 'su' // Service User type as per API documentation
     }));
 

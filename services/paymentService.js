@@ -292,13 +292,12 @@ const integrateLiveClassesLogic = async (userId, courseId) => {
     const classes = await LiveClass.find({ courseIds: courseId });
     
     const addUserToClasses = classes.map(async (cls) => {
-      if (!cls.classId || !cls.commonParticipantLink) return;
+      if (!cls.classId) return;
 
       try {
         const response = await addUsersToClass(
           cls.classId,
-          [user.merithubUserId],
-          cls.commonParticipantLink
+          [user.merithubUserId]
         );
         
         const userRes = response.find((r) => r.userId === user.merithubUserId);
@@ -310,8 +309,9 @@ const integrateLiveClassesLogic = async (userId, courseId) => {
           title: cls.title,
           startTime: cls.startTime,
           duration: cls.duration,
-          participantLink: link,
+          liveLink: link, // Use liveLink instead of participantLink
           courseIds: courseId,
+          classId: cls.classId, // Add classId for consistency
         };
 
         await User.findByIdAndUpdate(userId, { $push: { liveClasses: liveClassInfo } });

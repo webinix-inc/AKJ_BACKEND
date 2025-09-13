@@ -108,9 +108,9 @@ const userSchema = new schema(
         title: { type: String, required: true },
         startTime: { type: Date, required: true },
         duration: { type: Number, required: true },
-        liveLink: { type: String },
-        participantLink: { type: String, required: true },
+        liveLink: { type: String, required: true }, // Now required - individual user link
         classId: { type: String },
+        // participantLink removed - we only use individual liveLink now
       },
     ],
     coursesPermission: {

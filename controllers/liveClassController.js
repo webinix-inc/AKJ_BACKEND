@@ -236,7 +236,7 @@ const createLiveClass = async (req, res) => {
           duration: liveClassDetails.duration,
           classId: liveClass.classId, // Add classId for consistency
           platform: "zoom",
-          participantLink: zoomMeetingLink, // Use Zoom link directly
+          liveLink: zoomMeetingLink, // Use Zoom link as liveLink
         };
         
         console.log("🎥 [ZOOM] Adding live class info to users:", liveClassInfo);
@@ -254,7 +254,7 @@ const createLiveClass = async (req, res) => {
         
         // 🔥 CACHE FIX: Invalidate user profile cache for all affected users
         console.log("🗑️ [CACHE] Invalidating user profile cache for live class creation");
-        await invalidateCache("profile:cache:*");
+        await invalidateCache("profile:*");
         console.log("✅ [CACHE] User profile cache invalidated");
       } else {
         console.log("🎥 [ZOOM] No users found for the selected courses");
@@ -292,26 +292,22 @@ const createLiveClass = async (req, res) => {
 
       // Handle API response and generate links (based on actual MeritHub response format)
       const { classId, commonLinks, hostLink } = apiResponse;
-      const { commonParticipantLink, commonHostLink, commonModeratorLink } = commonLinks;
+      const { commonHostLink } = commonLinks;
       
       // Format links properly for MeritHub live classroom
       const CLIENT_ID = process.env.MERIT_HUB_CLIENT_ID;
       const formattedInstructorLink = `https://live.merithub.com/info/room/${CLIENT_ID}/${commonHostLink}`;
-      const formattedParticipantLink = `https://live.merithub.com/info/room/${CLIENT_ID}/${commonParticipantLink}`;
-      const formattedModeratorLink = `https://live.merithub.com/info/room/${CLIENT_ID}/${commonModeratorLink}`;
       
-      // Store properly formatted links
+      // Store only instructor/live link - no common participant link
       liveClass.liveLink = formattedInstructorLink; // Instructor link for "Go Live" button
       liveClass.instructorLink = formattedInstructorLink; // Dedicated instructor link field
       liveClass.classId = classId;
-      liveClass.commonParticipantLink = formattedParticipantLink;
       
       console.log('✅ [MERITHUB] Links formatted and stored successfully:');
       console.log(`   Class ID: ${classId}`);
       console.log(`   Instructor Link: ${formattedInstructorLink}`);
-      console.log(`   Participant Link: ${formattedParticipantLink}`);
-      console.log(`   Moderator Link: ${formattedModeratorLink}`);
       console.log(`   Raw Host Link: ${hostLink}`);
+      console.log('🚫 [REMOVED] Common participant link - using individual user links only');
       await liveClass.save();
 
       // Find users associated with any of the course IDs
@@ -326,14 +322,13 @@ const createLiveClass = async (req, res) => {
           console.log(`👥 [MERITHUB] Attempting to add ${merithubUserIds.length} users to class`);
           const addUsersResponse = await addUsersToClass(
             classId,
-            merithubUserIds,
-            commonParticipantLink
+            merithubUserIds
           );
           
           if (addUsersResponse) {
             console.log(`✅ [MERITHUB] Successfully added users to class`);
             
-            // Update each user with the live class info
+            // Update each user with the live class info using individual user links
             const liveClassInfo = {
               courseIds, // Notice courseIds is an array
               title,
@@ -348,8 +343,10 @@ const createLiveClass = async (req, res) => {
           const liveUserLink = `https://live.merithub.com/info/room/${process.env.MERIT_HUB_CLIENT_ID}/${userLink}?iframe=true`;
           const userLiveClassInfo = {
             ...liveClassInfo,
-            participantLink: liveUserLink,
+            liveLink: liveUserLink, // Use individual user link as liveLink
           };
+
+          console.log(`👤 [USER] Adding individual link for user ${merithubUserId}: ${liveUserLink}`);
 
           return User.findOneAndUpdate(
             { merithubUserId },
@@ -362,7 +359,7 @@ const createLiveClass = async (req, res) => {
             
             // 🔥 CACHE FIX: Invalidate user profile cache for all affected users
             console.log("🗑️ [CACHE] Invalidating user profile cache for MeritHub live class creation");
-            await invalidateCache("profile:cache:*");
+            await invalidateCache("profile:*");
             console.log("✅ [CACHE] User profile cache invalidated");
           } else {
             console.log(`⚠️ [MERITHUB] Failed to add users to class, but class was created successfully`);
@@ -371,78 +368,17 @@ const createLiveClass = async (req, res) => {
           console.error(`❌ [MERITHUB] Error adding users to class: ${userAddError.message}`);
           console.log(`✅ [MERITHUB] Class created successfully despite user addition failure`);
           
-          // Fallback: Add basic live class info to ALL enrolled users (not just those with MeritHub IDs)
-          try {
-            const fallbackLiveClassInfo = {
-              courseIds,
-              title,
-              startTime,
-              duration: liveClassDetails.duration,
-              classId: liveClass.classId,
-              platform: "merithub",
-              participantLink: formattedParticipantLink, // Use formatted participant link as fallback
-            };
-            
-            // Add to ALL enrolled users, regardless of MeritHub ID status
-            const fallbackPromises = users.map(async (user) => {
-              return User.findByIdAndUpdate(
-                user._id,
-                { $push: { liveClasses: fallbackLiveClassInfo } },
-                { new: true }
-              );
-            });
-            
-            await Promise.all(fallbackPromises);
-            console.log(`✅ [FALLBACK] Added basic live class info to ${users.length} user profiles`);
-          } catch (fallbackError) {
-            console.error(`❌ [FALLBACK] Failed to add fallback live class info: ${fallbackError.message}`);
-          }
+          // Fallback: Skip adding to users without individual MeritHub links
+          console.log(`⚠️ [FALLBACK] Skipping fallback - only users with individual MeritHub links will have access`);
+          console.log(`ℹ️ [INFO] Users without MeritHub IDs will need to be registered in MeritHub to access live classes`);
         }
       } else {
         console.log(`ℹ️ [MERITHUB] No users found to add to class`);
       }
 
-      // ALWAYS ensure users have live class info in their profiles (final fallback)
-      try {
-        const finalFallbackInfo = {
-          courseIds,
-          title,
-          startTime,
-          duration: liveClassDetails.duration,
-          classId: liveClass.classId,
-          platform: "merithub",
-          participantLink: formattedParticipantLink,
-        };
-        
-        // Check which users don't already have this class and add it
-        const usersNeedingUpdate = [];
-        for (const user of users) {
-          const hasThisClass = user.liveClasses?.some(lc => 
-            lc.classId === liveClass.classId || 
-            (lc.title === title && lc.startTime?.toString() === startTime.toString())
-          );
-          if (!hasThisClass) {
-            usersNeedingUpdate.push(user);
-          }
-        }
-        
-        if (usersNeedingUpdate.length > 0) {
-          const finalFallbackPromises = usersNeedingUpdate.map(async (user) => {
-            return User.findByIdAndUpdate(
-              user._id,
-              { $push: { liveClasses: finalFallbackInfo } },
-              { new: true }
-            );
-          });
-          
-          await Promise.all(finalFallbackPromises);
-          console.log(`✅ [FINAL FALLBACK] Ensured ${usersNeedingUpdate.length} users have live class info`);
-        } else {
-          console.log(`ℹ️ [FINAL FALLBACK] All users already have live class info`);
-        }
-      } catch (finalFallbackError) {
-        console.error(`❌ [FINAL FALLBACK] Failed: ${finalFallbackError.message}`);
-      }
+      // No final fallback - users must have individual MeritHub links to access live classes
+      console.log(`ℹ️ [POLICY] Only users with individual MeritHub links will have access to live classes`);
+      console.log(`ℹ️ [POLICY] Common participant links are no longer used for security and tracking purposes`);
 
       // Always respond with success if class was created (regardless of user addition status)
       res.status(201).json({
@@ -573,7 +509,7 @@ const editLiveClass = async (req, res) => {
           "liveClasses.$.startTime": updatedDetails.startTime,
           "liveClasses.$.duration": updatedDetails.duration,
           ...(updatedDetails.platform === "zoom" && {
-            "liveClasses.$.participantLink": updatedDetails.zoomMeetingLink,
+            "liveClasses.$.liveLink": updatedDetails.zoomMeetingLink,
           }),
         },
       }
@@ -583,7 +519,7 @@ const editLiveClass = async (req, res) => {
     
     // 🔥 CACHE FIX: Invalidate user profile cache for all affected users
     console.log("🗑️ [CACHE] Invalidating user profile cache for live class edit");
-    await invalidateCache("profile:cache:*");
+    await invalidateCache("profile:*");
     console.log("✅ [CACHE] User profile cache invalidated");
 
     if (!updatedLiveClass) {
@@ -664,6 +600,10 @@ const deleteLiveClass = async (req, res) => {
     
     // Method 1: Remove by classId (most reliable)
     if (liveClass.classId) {
+      console.log(`🔍 [DELETE] Searching for users with classId: ${liveClass.classId}`);
+      const usersWithClass = await User.find({ "liveClasses.classId": liveClass.classId });
+      console.log(`🔍 [DELETE] Found ${usersWithClass.length} users with this classId`);
+      
       const updateByClassId = await User.updateMany(
         { "liveClasses.classId": liveClass.classId },
         { $pull: { liveClasses: { classId: liveClass.classId } } }
@@ -673,6 +613,10 @@ const deleteLiveClass = async (req, res) => {
     }
     
     // Method 2: Remove by title (fallback for classes without classId)
+    console.log(`🔍 [DELETE] Searching for users with title: ${liveClass.title}`);
+    const usersWithTitle = await User.find({ "liveClasses.title": liveClass.title });
+    console.log(`🔍 [DELETE] Found ${usersWithTitle.length} users with this title`);
+    
     const updateByTitle = await User.updateMany(
       { "liveClasses.title": liveClass.title },
       { $pull: { liveClasses: { title: liveClass.title } } }
@@ -681,6 +625,10 @@ const deleteLiveClass = async (req, res) => {
     console.log(`🔍 [DELETE] Removed by title: ${updateByTitle.modifiedCount} users`);
     
     // Method 3: Remove by exact startTime match (additional cleanup)
+    console.log(`🔍 [DELETE] Searching for users with startTime: ${liveClass.startTime}`);
+    const usersWithStartTime = await User.find({ "liveClasses.startTime": liveClass.startTime });
+    console.log(`🔍 [DELETE] Found ${usersWithStartTime.length} users with this startTime`);
+    
     const updateByStartTime = await User.updateMany(
       { "liveClasses.startTime": liveClass.startTime },
       { $pull: { liveClasses: { startTime: liveClass.startTime } } }
@@ -689,12 +637,39 @@ const deleteLiveClass = async (req, res) => {
 
     console.log(`🎯 [DELETE] Total users updated: ${totalUsersUpdated}`);
     
+    // Final verification: Check if any users still have this class
+    const remainingUsers = await User.find({
+      $or: [
+        { "liveClasses.classId": liveClass.classId },
+        { "liveClasses.title": liveClass.title },
+        { "liveClasses.startTime": liveClass.startTime }
+      ]
+    });
+    
+    if (remainingUsers.length > 0) {
+      console.warn(`⚠️ [DELETE] Warning: ${remainingUsers.length} users still have references to this class`);
+      remainingUsers.forEach(user => {
+        const matchingClasses = user.liveClasses.filter(lc => 
+          lc.classId === liveClass.classId || 
+          lc.title === liveClass.title || 
+          lc.startTime.getTime() === liveClass.startTime.getTime()
+        );
+        console.warn(`⚠️ [DELETE] User ${user._id} still has ${matchingClasses.length} matching classes`);
+      });
+    } else {
+      console.log("✅ [DELETE] Verification passed: No users have references to this class");
+    }
+    
     // 🔥 CACHE FIX: Invalidate user profile cache for all affected users
     console.log("🗑️ [CACHE] Invalidating user profile cache for live class deletion");
-    await invalidateCache("profile:cache:*");
+    await invalidateCache("profile:*");
     console.log("✅ [CACHE] User profile cache invalidated");
 
-    return res.status(200).json({ message: "Live class deleted successfully" });
+    return res.status(200).json({ 
+      message: "Live class deleted successfully",
+      usersUpdated: totalUsersUpdated,
+      remainingReferences: remainingUsers.length
+    });
   } catch (error) {
     console.error("Error deleting live class:", error.message);
     return res.status(500).json({
@@ -962,6 +937,89 @@ const handleMeritHubStatusPing = async (req, res) => {
   }
 };
 
+// Migration function to clean up old participantLink fields and remove duplicates
+const migrateUserLiveClassLinks = async (req, res) => {
+  try {
+    console.log('🔄 [MIGRATION] Starting migration of user live class links...');
+    
+    // Find all users with live classes
+    const allUsers = await User.find({
+      'liveClasses': { $exists: true, $not: { $size: 0 } }
+    });
+    
+    console.log(`📊 [MIGRATION] Found ${allUsers.length} users with live classes`);
+    
+    let totalMigrated = 0;
+    let totalDuplicatesRemoved = 0;
+    
+    for (const user of allUsers) {
+      let userNeedsUpdate = false;
+      const seenClasses = new Map(); // Track unique classes by classId + title + startTime
+      
+      // Process each live class
+      const cleanedLiveClasses = [];
+      
+      for (const liveClass of user.liveClasses) {
+        // Create a unique key for this class
+        const uniqueKey = `${liveClass.classId || 'no-id'}-${liveClass.title}-${liveClass.startTime}`;
+        
+        // Check if we've already seen this class
+        if (seenClasses.has(uniqueKey)) {
+          console.log(`🗑️ [DUPLICATE] Removing duplicate class ${liveClass.title} for user ${user._id}`);
+          totalDuplicatesRemoved++;
+          userNeedsUpdate = true;
+          continue; // Skip this duplicate
+        }
+        
+        // Mark this class as seen
+        seenClasses.set(uniqueKey, true);
+        
+        // Migrate participantLink to liveLink if needed
+        let updatedClass = liveClass.toObject();
+        if (liveClass.participantLink && !liveClass.liveLink) {
+          console.log(`🔄 [MIGRATION] Migrating class ${liveClass.title} for user ${user._id}`);
+          updatedClass.liveLink = liveClass.participantLink;
+          delete updatedClass.participantLink;
+          userNeedsUpdate = true;
+        }
+        
+        cleanedLiveClasses.push(updatedClass);
+      }
+      
+      // Update user if changes were made
+      if (userNeedsUpdate) {
+        await User.findByIdAndUpdate(
+          user._id,
+          { $set: { liveClasses: cleanedLiveClasses } },
+          { new: true }
+        );
+        totalMigrated++;
+      }
+    }
+    
+    console.log(`✅ [MIGRATION] Successfully migrated ${totalMigrated} users`);
+    console.log(`🗑️ [CLEANUP] Removed ${totalDuplicatesRemoved} duplicate classes`);
+    
+    // Invalidate cache after migration
+    await invalidateCache("profile:*");
+    console.log("🗑️ [CACHE] User profile cache invalidated after migration");
+    
+    res.status(200).json({
+      message: "Migration and cleanup completed successfully",
+      usersMigrated: totalMigrated,
+      duplicatesRemoved: totalDuplicatesRemoved,
+      details: `Migrated participantLink to liveLink for ${totalMigrated} users and removed ${totalDuplicatesRemoved} duplicates`
+    });
+    
+  } catch (error) {
+    console.error('❌ [MIGRATION] Error during migration:', error);
+    res.status(500).json({
+      error: "Migration failed",
+      details: error.message
+    });
+  }
+};
+
 module.exports = {
   createLiveClass,
   createUser,
@@ -972,4 +1030,5 @@ module.exports = {
   checkClassStatus,
   getRecordedVideos,
   handleMeritHubStatusPing,
+  migrateUserLiveClassLinks,
 };
