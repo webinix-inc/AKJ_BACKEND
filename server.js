@@ -189,57 +189,15 @@ app.use((req, res, next) => {
 
 // app.use(express.raw({ type: '/', limit: '10mb' }));
 
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      // 🔧 FIX: Allow requests without origin (like Postman, direct server requests)
-      if (!origin) return callback(null, true);
-      
-      // 🔧 TEMPORARY DEBUG: Allow ALL origins for debugging
-      console.log(`🔍 CORS request from origin: ${origin}`);
-      return callback(null, true);
-      
-      // 🔧 FIX: For local development, allow localhost and 127.0.0.1 with any port
-      if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
-        console.log(`✅ CORS allowed localhost origin: ${origin}`);
-        return callback(null, true);
-      }
-      
-      // Check against allowed origins list
-      if (allowedOrigins.indexOf(origin) === -1) {
-        console.log(`❌ CORS blocked origin: ${origin}`);
-        const msg =
-          "The CORS policy for this site does not allow access from the specified origin.";
-        return callback(new Error(msg), false);
-      }
-      
-      console.log(`✅ CORS allowed origin: ${origin}`);
-      return callback(null, true);
-    },
-    credentials: true,
-    methods: ["GET", "POST", "OPTIONS", "PUT", "PATCH", "DELETE", "HEAD"],
-    allowedHeaders: ["X-Requested-With", "content-type", "Range", "Content-Range", "Content-Length", "Authorization"],
-    exposedHeaders: ["Content-Range", "Content-Length", "Accept-Ranges"]
-  })
-);
+app.use(cors({
+  origin: ["http://lms.wakadeclasses.com", "https://lms.wakadeclasses.com","http://localhost:3000","http://localhost:3001"],
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "Cache-Control", "Pragma"],
+  credentials: true,
+  optionsSuccessStatus: 204
+}));
 
-app.use(function (req, res, next) {
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-  }
-  res.setHeader(
-    "Access-Control-Allow-Headers",
-    "X-Requested-With,content-type,Range,Content-Range,Content-Length,Authorization"
-  );
-  res.setHeader(
-    "Access-Control-Allow-Methods",
-    "GET, POST, OPTIONS, PUT, PATCH, DELETE, HEAD"
-  );
-  res.setHeader("Access-Control-Expose-Headers", "Content-Range,Content-Length,Accept-Ranges");
-  res.setHeader("Access-Control-Allow-Credentials", true);
-  next();
-});
+// Redundant CORS middleware removed - using simplified CORS configuration above
 
 app.use((req, res, next) => {
   req.io = io;
