@@ -23,6 +23,10 @@ const questionSchema = new mongoose.Schema({
         optionText: String,
         isCorrect: Boolean
     }],
+    solution: {
+        type: String,
+        default: ''
+    },
     questionCorrectMarks: {
         type: Number,
         required: true

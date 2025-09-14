@@ -1,5 +1,13 @@
 require("dotenv").config();
 
+console.log("🚀 ================================");
+console.log("🚀 WAKAD BACKEND SERVER STARTING");
+console.log("🚀 ================================");
+console.log(`📅 Timestamp: ${new Date().toISOString()}`);
+console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+console.log(`📂 Working Directory: ${process.cwd()}`);
+console.log(`⚡ Node Version: ${process.version}`);
+
 const express = require("express");
 const bodyParser = require("body-parser");
 const cors = require("cors");
@@ -360,40 +368,108 @@ process.on('SIGINT', async () => {
 });
 
 // Connect to MongoDB with improved error handling and reconnection logic
+console.log("🔌 Attempting MongoDB connection...");
+console.log(`🔗 Database URL: ${process.env.DB_URL ? process.env.DB_URL.replace(/\/\/.*@/, '//***:***@') : 'NOT SET'}`);
+
 mongoose
   .connect(process.env.DB_URL, mongooseOptions)
   .then(async (data) => {
-    console.log(
-      `✅ Mongodb instance connected to server: ${data.connection.host}`
-    );
+    console.log("✅ ================================");
+    console.log("✅ MONGODB CONNECTION SUCCESSFUL");
+    console.log("✅ ================================");
+    console.log(`🏠 Host: ${data.connection.host}`);
+    console.log(`🗄️ Database: ${data.connection.name}`);
+    console.log(`🔌 Ready State: ${data.connection.readyState}`);
+    console.log(`⚡ Connection ID: ${data.connection.id}`);
+    
+    // Add request/response logging middleware before routes
+    console.log("🔧 Adding request/response logging middleware...");
+    app.use((req, res, next) => {
+      const timestamp = new Date().toISOString();
+      console.log(`📥 [${timestamp}] ${req.method} ${req.url} - IP: ${req.ip || req.connection.remoteAddress}`);
+      
+      // Override res.json to log responses
+      const originalJson = res.json;
+      res.json = function(data) {
+        const responseTime = new Date().toISOString();
+        console.log(`📤 [${responseTime}] ${req.method} ${req.url} - Status: ${res.statusCode}`);
+        return originalJson.call(this, data);
+      };
+      
+      next();
+    });
     
     // 🚀 FIX: Load routes AFTER MongoDB connection is established
-    console.log('📚 Loading API routes...');
+    console.log("📚 ================================");
+    console.log("📚 LOADING API ROUTES");
+    console.log("📚 ================================");
+    console.log("👤 Loading user routes...");
     require("./routes/user.route")(app);
+    console.log("🔧 Loading admin routes...");
     require("./routes/admin.route")(app);
+    console.log("👨‍🏫 Loading teacher routes...");
     require("./routes/teacher.route")(app);
+    console.log("📡 Loading broadcast routes...");
     require("./routes/broadcast.route")(app);
+    console.log("👥 Loading group routes...");
     require("./routes/group.route")(app);
+    console.log("💬 Loading chat routes...");
     require("./routes/chat.route")(app);
+    console.log("📚 Loading batch routes...");
     require("./routes/batch.route")(app);
+    console.log("⭐ Loading testimonial routes...");
     require("./routes/testimonialRoutes.route")(app);
+    console.log("📖 Loading book routes...");
     require("./routes/bookRoutes.route")(app);
+    console.log("💳 Loading razorpay routes...");
     require("./routes/razorpay.route")(app);
+    console.log("❓ Loading FAQ routes...");
     require("./routes/faq.route")(app);
+    console.log("🎫 Loading coupon routes...");
     require("./routes/coupon.route")(app);
+    console.log("💳 Loading razorpay routes (duplicate)...");
     require("./routes/razorpay.route")(app);
+    console.log("📞 Loading enquiry routes...");
     require("./routes/enquiry.route")(app);
+    console.log("🏆 Loading achiever routes...");
     require("./routes/achiever.route")(app);
+    console.log("🛒 Loading order routes...");
     require("./routes/order.route")(app);
+    console.log("🔔 Loading notification routes...");
     require("./routes/notification.route")(app);
+    console.log("🎥 Loading live class routes...");
     require("./routes/liveClassRoutes.route")(app);
     require("./routes/bookOrder.route")(app);
     require("./routes/course.route")(app);
     require("./routes/questionRoutes")(app);
     require("./routes/quizRoutes")(app);
+    require("./routes/sampleDocumentRoutes")(app);
     require("./routes/scorecardRoutes")(app);
     require("./routes/quizFolder.routes")(app);
     require("./routes/importantLink.route")(app);
+    
+    // 🔧 TEMPORARY FIX: Add important links route directly for debugging
+    const ImportantLink = require('./models/importantLinksModel');
+    app.get('/api/v1/admin/importantLinks', async (req, res) => {
+      try {
+        console.log('🔍 Direct route: Fetching important links...');
+        const links = await ImportantLink.find().maxTimeMS(5000);
+        console.log(`✅ Direct route: Found ${links.length} links`);
+        res.status(200).json({
+          status: 200,
+          message: "Links fetched successfully", 
+          links: links
+        });
+      } catch (error) {
+        console.error('❌ Direct route error:', error);
+        res.status(500).json({
+          status: 500,
+          message: 'Failed to fetch links', 
+          error: error.message
+        });
+      }
+    });
+    
     require("./routes/locationRoutes")(app);
     require("./routes/bookpayment.route")(app);
     require("./routes/bookorder.routes")(app);
@@ -403,6 +479,8 @@ mongoose
     require("./routes/masterFolder.route")(app);
     // Enhanced Authentication Routes with MSG91 SMS
     require("./routes/authEnhanced.route")(app);
+    // Test routes for development and debugging
+    require("./routes/testRoutes.route")(app);
     console.log('✅ All API routes loaded successfully');
 
     // 🗂️ Initialize Master Folder System AFTER MongoDB connection
@@ -500,15 +578,50 @@ socketHandler(io);
 notificationHandler(io);
 
 server.listen(PORT, () => {
-  console.log(`Listening on port ${PORT}`);
+  console.log("🚀 ================================");
+  console.log("🚀 SERVER STARTED SUCCESSFULLY");
+  console.log("🚀 ================================");
+  console.log(`🌐 Server URL: http://localhost:${PORT}`);
+  console.log(`📡 Port: ${PORT}`);
+  console.log(`🕐 Started at: ${new Date().toISOString()}`);
+  console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`💾 Memory Usage: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`);
+  console.log("🚀 ================================");
+  console.log("✅ READY TO ACCEPT CONNECTIONS");
+  console.log("🚀 ================================");
 });
 
+// Add global error handlers
+process.on('uncaughtException', (error) => {
+  console.error("💥 ================================");
+  console.error("💥 UNCAUGHT EXCEPTION");
+  console.error("💥 ================================");
+  console.error(`❌ Error: ${error.message}`);
+  console.error(`📍 Stack: ${error.stack}`);
+  console.error("💥 ================================");
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error("💥 ================================");
+  console.error("💥 UNHANDLED PROMISE REJECTION");
+  console.error("💥 ================================");
+  console.error(`❌ Reason: ${reason}`);
+  console.error(`📍 Promise: ${promise}`);
+  console.error("💥 ================================");
+});
+
+// Request/response logging middleware will be added before routes
+
+console.log("🔄 Starting background services...");
 startCourseExpiryCron();
+console.log("✅ Course expiry cron started");
 // stopCourseExpiryCron();
 
 // 🔥 NEW: Start course access control jobs
 scheduleCourseAccessCheck();
-console.log('🚀 Course access control system initialized');
+console.log('✅ Course access control system initialized');
+console.log("🔄 All background services started successfully");
 
 // 🗂️ Master Folder System initialization moved to MongoDB connection handler
 

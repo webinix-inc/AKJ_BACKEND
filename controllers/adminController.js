@@ -2597,6 +2597,54 @@ exports.createSubCategory = async (req, res) => {
 };
 
 /**
+ * Utility function to repair category-subcategory relationships
+ */
+const repairCategoryRelationships = async () => {
+  try {
+    console.log("🔧 Starting category relationship repair...");
+    
+    // Find courses with invalid category references
+    const coursesWithInvalidCategories = await Course.find({
+      category: { $exists: true, $ne: null }
+    }).populate('category');
+    
+    let repairedCount = 0;
+    
+    for (const course of coursesWithInvalidCategories) {
+      if (!course.category) {
+        console.log(`🔧 Repairing course: ${course.title} - missing category`);
+        
+        // Find or create a default category
+        let defaultCategory = await CourseCategory.findOne({ name: "General" });
+        
+        if (!defaultCategory) {
+          defaultCategory = new CourseCategory({
+            name: "General",
+            status: true,
+            subCategories: []
+          });
+          await defaultCategory.save();
+          console.log("✅ Created default 'General' category");
+        }
+        
+        // Update the course with the default category
+        await Course.findByIdAndUpdate(course._id, {
+          category: defaultCategory._id
+        });
+        
+        repairedCount++;
+      }
+    }
+    
+    console.log(`✅ Repaired ${repairedCount} course category relationships`);
+    return repairedCount;
+  } catch (error) {
+    console.error("❌ Error repairing category relationships:", error);
+    return 0;
+  }
+};
+
+/**
  * Get all sub-categories for a specific category
  * Route: GET /api/v1/admin/Category/:categoryId/subCategories
  */
@@ -2610,25 +2658,52 @@ exports.getSubCategories = async (req, res) => {
 
     // Validate if categoryId is a valid ObjectId
     if (!mongoose.Types.ObjectId.isValid(categoryId)) {
+      console.error("❌ Invalid ObjectId format:", categoryId);
       return res.status(400).json({
         status: 400,
-        message: "Invalid category ID",
-        data: null,
+        message: "Invalid category ID format",
+        data: [],
       });
     }
 
     // Fetch the category with its embedded subcategories
     const category = await CourseCategory.findById(categoryId).select('name subCategories');
     if (!category) {
+      console.warn("⚠️ Category not found, checking for orphaned subcategories...");
+      
+      // Check if there are any courses with this category that might need a default category
+      const coursesWithCategory = await Course.find({ category: categoryId }).limit(5);
+      
+      if (coursesWithCategory.length > 0) {
+        console.log(`📋 Found ${coursesWithCategory.length} courses with missing category. Creating default category...`);
+        
+        // Create a default category
+        const defaultCategory = new CourseCategory({
+          name: "Default Category",
+          status: true,
+          subCategories: []
+        });
+        
+        await defaultCategory.save();
+        console.log("✅ Created default category:", defaultCategory._id);
+        
+        return res.status(200).json({
+          status: 200,
+          message: "Category created and subcategories fetched",
+          data: [],
+        });
+      }
+      
       return res.status(404).json({
         status: 404,
         message: "Category not found",
-        data: null,
+        data: [],
       });
     }
 
     // Extract subcategories from the category document
     const subCategories = category.subCategories || [];
+    console.log(`📋 Found ${subCategories.length} subcategories for category: ${category.name}`);
 
     console.log(`📂 Found ${subCategories.length} sub-categories for category "${category.name}"`);
 
@@ -2643,6 +2718,31 @@ exports.getSubCategories = async (req, res) => {
       status: 500,
       message: "Error fetching subcategories",
       error: error.message,
+    });
+  }
+};
+
+/**
+ * Repair category relationships
+ * Route: POST /api/v1/admin/repair-categories
+ */
+exports.repairCategoryRelationships = async (req, res) => {
+  try {
+    console.log("🔧 Manual category repair triggered");
+    
+    const repairedCount = await repairCategoryRelationships();
+    
+    res.status(200).json({
+      status: 200,
+      message: `Successfully repaired ${repairedCount} category relationships`,
+      data: { repairedCount }
+    });
+  } catch (error) {
+    console.error("❌ Error in repair endpoint:", error);
+    res.status(500).json({
+      status: 500,
+      message: "Error repairing category relationships",
+      error: error.message
     });
   }
 };
@@ -5986,6 +6086,22 @@ exports.getAllPublishedCoursesForUser = async (req, res) => {
  */
 exports.createBatchCourse = async (req, res) => {
   try {
+    console.log('\n🚀 ===== BATCH COURSE CREATION STARTED =====');
+    console.log('📝 Request Body:', JSON.stringify(req.body, null, 2));
+    console.log('📁 Files Received:', req.files ? req.files.length : 0);
+    
+    if (req.files && req.files.length > 0) {
+      console.log('📸 File Details:');
+      req.files.forEach((file, index) => {
+        console.log(`   File ${index + 1}:`);
+        console.log(`   - Field Name: ${file.fieldname}`);
+        console.log(`   - Original Name: ${file.originalname}`);
+        console.log(`   - Size: ${file.size} bytes`);
+        console.log(`   - S3 Location: ${file.location || 'Not uploaded yet'}`);
+        console.log(`   - S3 Key: ${file.key || 'Not available'}`);
+      });
+    }
+
     const {
       title,
       description,
@@ -6001,12 +6117,64 @@ exports.createBatchCourse = async (req, res) => {
       weeks
     } = req.body;
 
+    console.log('🔍 Extracted Fields:');
+    console.log(`   - Title: ${title}`);
+    console.log(`   - Description: ${description}`);
+    console.log(`   - Category: ${category}`);
+    console.log(`   - Batch Name: ${batchName}`);
+    console.log(`   - Batch Size: ${batchSize}`);
+
     // Validate required fields
     if (!title || !description || !category || !batchName) {
+      console.log('❌ Validation Failed - Missing required fields');
+      console.log(`   - Title: ${title ? '✅' : '❌'}`);
+      console.log(`   - Description: ${description ? '✅' : '❌'}`);
+      console.log(`   - Category: ${category ? '✅' : '❌'}`);
+      console.log(`   - Batch Name: ${batchName ? '✅' : '❌'}`);
+      
       return res.status(400).json({
         status: 400,
         message: "Missing required fields: title, description, category, batchName",
       });
+    }
+
+    console.log('✅ All required fields validated successfully');
+
+    // Handle image uploads if present
+    let courseImageUrls = [];
+    if (req.files && req.files.length > 0) {
+      console.log(`\n📸 ===== IMAGE PROCESSING STARTED =====`);
+      console.log(`📁 Total files to process: ${req.files.length}`);
+      
+      for (const file of req.files) {
+        console.log(`\n🔍 Processing file: ${file.originalname}`);
+        console.log(`   - Field Name: ${file.fieldname}`);
+        console.log(`   - MIME Type: ${file.mimetype}`);
+        console.log(`   - File Size: ${file.size} bytes`);
+        console.log(`   - S3 Bucket: ${file.bucket || 'Not available'}`);
+        console.log(`   - S3 Key: ${file.key || 'Not available'}`);
+        console.log(`   - S3 Location: ${file.location || 'Not available'}`);
+        
+        if (file.fieldname === 'courseImage') {
+          if (file.location) {
+            courseImageUrls.push(file.location);
+            console.log(`✅ Image successfully uploaded to S3`);
+            console.log(`   📍 S3 URL: ${file.location}`);
+            console.log(`   🗂️ S3 Path: ${file.key}`);
+          } else {
+            console.log(`❌ Image upload failed - no S3 location returned`);
+          }
+        } else {
+          console.log(`⚠️ Skipping file - not a courseImage field`);
+        }
+      }
+      
+      console.log(`\n📊 Image Processing Summary:`);
+      console.log(`   - Total files processed: ${req.files.length}`);
+      console.log(`   - Course images found: ${courseImageUrls.length}`);
+      console.log(`   - S3 URLs collected: ${courseImageUrls.join(', ')}`);
+    } else {
+      console.log('📷 No image files received for upload');
     }
 
     // Create batch course with default values for batch type
@@ -6027,26 +6195,57 @@ exports.createBatchCourse = async (req, res) => {
       duration,
       lessons,
       weeks,
+      courseImage: courseImageUrls, // Add uploaded images
       manualEnrollments: []
     });
 
+    console.log(`\n💾 ===== SAVING BATCH COURSE TO DATABASE =====`);
+    console.log('📝 Course data to save:', {
+      title: newBatchCourse.title,
+      batchName: newBatchCourse.batchName,
+      courseType: newBatchCourse.courseType,
+      imageCount: newBatchCourse.courseImage.length,
+      images: newBatchCourse.courseImage
+    });
+
     const savedCourse = await newBatchCourse.save();
+    console.log(`✅ Batch course saved to database with ID: ${savedCourse._id}`);
 
     // Create folder for the batch course (same as regular courses)
+    console.log(`\n📁 ===== CREATING ROOT FOLDER =====`);
     const { createFolder } = require('./courseController');
     const folderReqBody = {
       name: savedCourse.title,
       courseId: savedCourse._id,
     };
+    console.log('📂 Folder creation request:', folderReqBody);
+    
     const folderReq = { body: folderReqBody };
     const folderResponse = await createFolder(folderReq);
     const rootFolderId = folderResponse._id;
+    console.log(`✅ Root folder created with ID: ${rootFolderId}`);
 
     // Update course with rootFolder
     savedCourse.rootFolder = rootFolderId;
     await savedCourse.save();
+    console.log(`✅ Course updated with root folder reference`);
 
-    console.log(`✅ Batch course created: ${savedCourse.title}`);
+    console.log(`\n🎉 ===== BATCH COURSE CREATION COMPLETED =====`);
+    console.log(`📋 Final Course Details:`);
+    console.log(`   - Course ID: ${savedCourse._id}`);
+    console.log(`   - Title: ${savedCourse.title}`);
+    console.log(`   - Batch Name: ${savedCourse.batchName}`);
+    console.log(`   - Course Type: ${savedCourse.courseType}`);
+    console.log(`   - Images Uploaded: ${savedCourse.courseImage.length}`);
+    console.log(`   - Root Folder: ${savedCourse.rootFolder}`);
+    console.log(`   - Published: ${savedCourse.isPublished}`);
+    
+    if (savedCourse.courseImage.length > 0) {
+      console.log(`📸 Uploaded Images:`);
+      savedCourse.courseImage.forEach((url, index) => {
+        console.log(`   ${index + 1}. ${url}`);
+      });
+    }
 
     res.status(201).json({
       status: 201,
@@ -6232,6 +6431,164 @@ exports.addUserToBatchCourse = async (req, res) => {
       status: 500,
       message: "Server error while adding user to batch course",
       data: error.message,
+    });
+  }
+};
+
+/**
+ * Update a batch course
+ * Route: PUT /api/v1/admin/batch-courses/:id
+ */
+exports.updateBatchCourse = async (req, res) => {
+  try {
+    console.log('\n🔄 ===== BATCH COURSE UPDATE STARTED =====');
+    const { id } = req.params;
+    console.log('🆔 Course ID to update:', id);
+    console.log('📝 Request Body:', JSON.stringify(req.body, null, 2));
+    console.log('📁 Files Received:', req.files ? req.files.length : 0);
+    
+    if (req.files && req.files.length > 0) {
+      console.log('📸 File Details:');
+      req.files.forEach((file, index) => {
+        console.log(`   File ${index + 1}:`);
+        console.log(`   - Field Name: ${file.fieldname}`);
+        console.log(`   - Original Name: ${file.originalname}`);
+        console.log(`   - Size: ${file.size} bytes`);
+        console.log(`   - S3 Location: ${file.location || 'Not uploaded yet'}`);
+        console.log(`   - S3 Key: ${file.key || 'Not available'}`);
+      });
+    }
+
+    const updateData = { ...req.body };
+    console.log('📦 Initial Update Data:', JSON.stringify(updateData, null, 2));
+
+    // Handle file uploads if present
+    if (req.files && req.files.length > 0) {
+      console.log(`\n📸 ===== IMAGE PROCESSING FOR UPDATE =====`);
+      console.log(`📁 Total files to process: ${req.files.length}`);
+      
+      const imageUrls = [];
+      for (const file of req.files) {
+        console.log(`\n🔍 Processing file: ${file.originalname}`);
+        console.log(`   - Field Name: ${file.fieldname}`);
+        console.log(`   - MIME Type: ${file.mimetype}`);
+        console.log(`   - File Size: ${file.size} bytes`);
+        console.log(`   - S3 Location: ${file.location || 'Not available'}`);
+        
+        if (file.fieldname === 'courseImage') {
+          if (file.location) {
+            imageUrls.push(file.location);
+            console.log(`✅ Image successfully uploaded to S3`);
+            console.log(`   📍 S3 URL: ${file.location}`);
+            console.log(`   🗂️ S3 Path: ${file.key}`);
+          } else {
+            console.log(`❌ Image upload failed - no S3 location returned`);
+          }
+        } else {
+          console.log(`⚠️ Skipping file - not a courseImage field`);
+        }
+      }
+      
+      if (imageUrls.length > 0) {
+        updateData.courseImage = imageUrls;
+        console.log(`\n📊 Image Update Summary:`);
+        console.log(`   - Images processed: ${req.files.length}`);
+        console.log(`   - Course images found: ${imageUrls.length}`);
+        console.log(`   - S3 URLs: ${imageUrls.join(', ')}`);
+      }
+    } else {
+      console.log('📷 No image files received for update');
+    }
+
+    // Handle description as array
+    if (updateData.description && typeof updateData.description === 'string') {
+      updateData.description = [updateData.description];
+      console.log('📝 Description converted to array format');
+    }
+
+    console.log('\n💾 ===== UPDATING DATABASE =====');
+    console.log('📦 Final Update Data:', JSON.stringify(updateData, null, 2));
+    console.log('🔍 Searching for course with ID:', id);
+
+    // Find and update the batch course
+    const updatedCourse = await Course.findByIdAndUpdate(
+      id,
+      updateData,
+      { new: true, runValidators: false }
+    ).populate('category teacher');
+
+    if (!updatedCourse) {
+      console.log('❌ Course not found in database');
+      return res.status(404).json({
+        status: 404,
+        message: "Batch course not found"
+      });
+    }
+
+    console.log('✅ Course updated successfully in database');
+    console.log('📋 Updated Course Details:');
+    console.log(`   - Course ID: ${updatedCourse._id}`);
+    console.log(`   - Title: ${updatedCourse.title}`);
+    console.log(`   - Batch Name: ${updatedCourse.batchName}`);
+    console.log(`   - Course Type: ${updatedCourse.courseType}`);
+    console.log(`   - Images Count: ${updatedCourse.courseImage?.length || 0}`);
+    console.log(`   - Published: ${updatedCourse.isPublished}`);
+    
+    if (updatedCourse.courseImage && updatedCourse.courseImage.length > 0) {
+      console.log('📸 Updated Images:');
+      updatedCourse.courseImage.forEach((url, index) => {
+        console.log(`   ${index + 1}. ${url}`);
+      });
+    }
+
+    console.log('\n🎉 ===== BATCH COURSE UPDATE COMPLETED =====');
+
+    res.status(200).json({
+      status: 200,
+      message: "Batch course updated successfully",
+      data: updatedCourse
+    });
+
+  } catch (error) {
+    console.error("Error updating batch course:", error);
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Delete a batch course
+ * Route: DELETE /api/v1/admin/batch-courses/:id
+ */
+exports.deleteBatchCourse = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Find and delete the batch course
+    const deletedCourse = await Course.findByIdAndDelete(id);
+
+    if (!deletedCourse) {
+      return res.status(404).json({
+        status: 404,
+        message: "Batch course not found"
+      });
+    }
+
+    res.status(200).json({
+      status: 200,
+      message: "Batch course deleted successfully",
+      data: { id }
+    });
+
+  } catch (error) {
+    console.error("Error deleting batch course:", error);
+    res.status(500).json({
+      status: 500,
+      message: "Internal server error",
+      error: error.message
     });
   }
 };

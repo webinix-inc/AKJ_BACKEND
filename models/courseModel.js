@@ -66,7 +66,8 @@ const courseSchema = new mongoose.Schema(
     },
     courseType: {
       type: String,
-      enum: ["Free", "Paid", "Batch"],
+      enum: ["Free", "Paid", "Batch", "Course"],
+      default: "Paid"
     },
      // New field to toggle publish status
      isPublished: {

@@ -45,8 +45,9 @@ const LiveClassSchema = new mongoose.Schema({
   // MeritHub specific fields
   liveLink: { type: String }, // Instructor link for "Go Live" button
   instructorLink: { type: String }, // Dedicated instructor link field
+  participantLink: { type: String }, // 🔧 FIX: Common participant link for students
+  moderatorLink: { type: String }, // Common moderator link for teachers
   classId: { type: String },
-  // Removed commonParticipantLink - we only use individual user links
   
   // Zoom specific fields
   zoomMeetingLink: { type: String },

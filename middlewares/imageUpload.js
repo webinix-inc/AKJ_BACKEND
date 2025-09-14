@@ -75,6 +75,41 @@ const kpUpload1 = courseImage.fields([
 const storage7 = createS3Storage("images/CourseCategory");
 const courseImage1 = multer({ storage: storage7 });
 
+// Batch course images with dynamic folder naming
+const createBatchCourseStorage = () => multerS3({
+  s3: s3,
+  bucket: authConfig.s3_bucket,
+  metadata: (req, file, cb) => {
+    cb(null, { fieldName: file.fieldname });
+  },
+  key: (req, file, cb) => {
+    console.log(`\n🗂️ ===== S3 UPLOAD MIDDLEWARE =====`);
+    console.log(`📁 Processing file upload for: ${file.originalname}`);
+    console.log(`📝 Request body available:`, Object.keys(req.body));
+    
+    // Use batch name from request body for folder structure
+    const batchName = req.body.batchName || req.body.title || 'default-batch';
+    const sanitizedBatchName = batchName.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const sanitizedFileName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const fileName = `${Date.now().toString()}_${sanitizedFileName}`;
+    const fullPath = `images/BatchCourses/${sanitizedBatchName}/${fileName}`;
+    
+    console.log(`🔧 S3 Upload Configuration:`);
+    console.log(`   - Original Batch Name: ${batchName}`);
+    console.log(`   - Sanitized Batch Name: ${sanitizedBatchName}`);
+    console.log(`   - Original File Name: ${file.originalname}`);
+    console.log(`   - Sanitized File Name: ${sanitizedFileName}`);
+    console.log(`   - Final File Name: ${fileName}`);
+    console.log(`   - Full S3 Path: ${fullPath}`);
+    console.log(`📤 Starting upload to S3...`);
+    
+    cb(null, fullPath);
+  },
+  contentType: multerS3.AUTO_CONTENT_TYPE,
+});
+
+const batchCourseImage = multer({ storage: createBatchCourseStorage() });
+
 // Course notes
 const storage8 = createS3Storage("documents/CourseNotes");
 const courseNotes = multer({ storage: storage8 });
@@ -112,4 +147,4 @@ const behaviourUpload = multer({ storage: storage14 });
 
 
 
-module.exports = { userProfileUpload, bannerImage, kpUpload, categoryImage, productImage, subCategoryUpload, subCategory, kpUpload1, courseImage1, courseNotes, courseVideo, documentUpload, kpUpload2, syllabusUpload, TestSeriesUpload, behaviourUpload };
+module.exports = { userProfileUpload, bannerImage, kpUpload, categoryImage, productImage, subCategoryUpload, subCategory, kpUpload1, courseImage1, batchCourseImage, courseNotes, courseVideo, documentUpload, kpUpload2, syllabusUpload, TestSeriesUpload, behaviourUpload };

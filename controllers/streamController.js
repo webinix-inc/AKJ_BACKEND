@@ -614,19 +614,52 @@ const streamQuizImage = async (req, res) => {
   try {
     const { filename } = req.params;
     
-    // Quiz images are always in the quiz-images folder
-    const s3Key = `quiz-images/${filename}`;
+    console.log(`🖼️ [QUIZ-STREAM] Attempting to stream quiz image: ${filename}`);
     
-    console.log('Streaming quiz image:', s3Key);
+    // Try multiple possible S3 key patterns for quiz images
+    const possibleKeys = [
+      `quiz-images/${filename}`,           // Standard quiz-images folder
+      `images/quiz-images/${filename}`,    // Under images/quiz-images
+      `documents/quiz-images/${filename}`, // Under documents/quiz-images
+      filename                             // Direct filename (if already full path)
+    ];
     
-    // Stream the image from S3
-    const params = {
-      Bucket: process.env.S3_BUCKET,
-      Key: decodeURIComponent(s3Key), // 🔧 FIX: Decode URI components like other streaming functions
-    };
+    let s3Key = null;
+    let response = null;
     
-    const command = new GetObjectCommand(params);
-    const response = await s3.send(command);
+    // Try each possible key until one works
+    for (const testKey of possibleKeys) {
+      try {
+        console.log(`🔍 [QUIZ-STREAM] Trying S3 key: ${testKey}`);
+        
+        const params = {
+          Bucket: process.env.S3_BUCKET,
+          Key: decodeURIComponent(testKey),
+        };
+        
+        const command = new GetObjectCommand(params);
+        response = await s3.send(command);
+        s3Key = testKey;
+        
+        console.log(`✅ [QUIZ-STREAM] Found image at: ${s3Key}`);
+        break;
+        
+      } catch (error) {
+        console.log(`❌ [QUIZ-STREAM] Key not found: ${testKey} (${error.code})`);
+        continue;
+      }
+    }
+    
+    if (!response || !s3Key) {
+      console.log(`❌ [QUIZ-STREAM] Quiz image not found in any location: ${filename}`);
+      return res.status(404).json({ 
+        message: "Quiz image not found",
+        filename: filename,
+        triedKeys: possibleKeys
+      });
+    }
+    
+    // Use the response we already got from the successful attempt
     const s3Stream = response.Body;
     
     // Set appropriate headers with CORS and embedding support

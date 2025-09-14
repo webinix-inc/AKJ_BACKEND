@@ -292,22 +292,27 @@ const createLiveClass = async (req, res) => {
 
       // Handle API response and generate links (based on actual MeritHub response format)
       const { classId, commonLinks, hostLink } = apiResponse;
-      const { commonHostLink } = commonLinks;
+      const { commonHostLink, commonParticipantLink, commonModeratorLink } = commonLinks;
       
       // Format links properly for MeritHub live classroom
       const CLIENT_ID = process.env.MERIT_HUB_CLIENT_ID;
       const formattedInstructorLink = `https://live.merithub.com/info/room/${CLIENT_ID}/${commonHostLink}`;
+      const formattedParticipantLink = commonParticipantLink ? `https://live.merithub.com/info/room/${CLIENT_ID}/${commonParticipantLink}` : null;
+      const formattedModeratorLink = commonModeratorLink ? `https://live.merithub.com/info/room/${CLIENT_ID}/${commonModeratorLink}` : null;
       
-      // Store only instructor/live link - no common participant link
+      // Store all available link types
       liveClass.liveLink = formattedInstructorLink; // Instructor link for "Go Live" button
       liveClass.instructorLink = formattedInstructorLink; // Dedicated instructor link field
+      liveClass.participantLink = formattedParticipantLink; // 🔧 FIX: Add participant link for students
+      liveClass.moderatorLink = formattedModeratorLink; // Add moderator link for teachers
       liveClass.classId = classId;
       
       console.log('✅ [MERITHUB] Links formatted and stored successfully:');
       console.log(`   Class ID: ${classId}`);
       console.log(`   Instructor Link: ${formattedInstructorLink}`);
+      console.log(`   Participant Link: ${formattedParticipantLink}`);
+      console.log(`   Moderator Link: ${formattedModeratorLink}`);
       console.log(`   Raw Host Link: ${hostLink}`);
-      console.log('🚫 [REMOVED] Common participant link - using individual user links only');
       await liveClass.save();
 
       // Find users associated with any of the course IDs
@@ -328,7 +333,7 @@ const createLiveClass = async (req, res) => {
           if (addUsersResponse) {
             console.log(`✅ [MERITHUB] Successfully added users to class`);
             
-            // Update each user with the live class info using individual user links
+            // 🔧 FIX: Update each user with common participant link instead of individual links
             const liveClassInfo = {
               courseIds, // Notice courseIds is an array
               title,
@@ -336,21 +341,19 @@ const createLiveClass = async (req, res) => {
               duration: liveClassDetails.duration,
               classId: liveClass.classId,
               platform: "merithub",
+              liveLink: formattedParticipantLink || formattedInstructorLink, // Use participant link for students
             };
 
-        const addUserPromises = addUsersResponse.map(async (userResponse) => {
-          const { userLink, userId: merithubUserId } = userResponse;
-          const liveUserLink = `https://live.merithub.com/info/room/${process.env.MERIT_HUB_CLIENT_ID}/${userLink}?iframe=true`;
-          const userLiveClassInfo = {
-            ...liveClassInfo,
-            liveLink: liveUserLink, // Use individual user link as liveLink
-          };
+            console.log(`👥 [STUDENTS] Using common participant link for all students: ${liveClassInfo.liveLink}`);
 
-          console.log(`👤 [USER] Adding individual link for user ${merithubUserId}: ${liveUserLink}`);
+        const addUserPromises = addUsersResponse.map(async (userResponse) => {
+          const { userId: merithubUserId } = userResponse;
+          
+          console.log(`👤 [USER] Adding common participant link for user ${merithubUserId}`);
 
           return User.findOneAndUpdate(
             { merithubUserId },
-            { $push: { liveClasses: userLiveClassInfo } },
+            { $push: { liveClasses: liveClassInfo } },
             { new: true }
           );
         });
@@ -416,6 +419,69 @@ const fetchAllClasses = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching live classes:", error.message);
+    res.status(500).json({
+      error:
+        error.message ||
+        "An unexpected error occurred while fetching live classes.",
+    });
+  }
+};
+
+// New function to fetch user-specific live classes
+const fetchUserLiveClasses = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    console.log(`🔍 [USER LIVE CLASSES] Fetching live classes for user: ${userId}`);
+
+    // First, get the user's purchased courses
+    const user = await User.findById(userId).select('purchasedCourses');
+    if (!user) {
+      return res.status(404).json({
+        message: "User not found",
+        classes: [],
+      });
+    }
+
+    console.log(`📚 [USER COURSES] User has ${user.purchasedCourses.length} purchased courses`);
+
+    // Extract course IDs from purchased courses
+    const userCourseIds = user.purchasedCourses.map(pc => pc.course.toString());
+    console.log(`🎯 [COURSE IDS] User course IDs:`, userCourseIds);
+
+    // Find live classes that match any of the user's purchased courses
+    const classes = await LiveClass.find({
+      courseIds: { $in: userCourseIds }
+    }).sort({ startTime: -1 });
+
+    console.log(`🎥 [LIVE CLASSES] Found ${classes.length} live classes for user's courses`);
+
+    if (!classes || classes.length === 0) {
+      return res.status(200).json({
+        message: "No live classes found for your courses.",
+        classes: [],
+      });
+    }
+
+    // Filter out past classes (older than 2 hours) unless they're currently live
+    const now = new Date();
+    const activeClasses = classes.filter(liveClass => {
+      const startTime = new Date(liveClass.startTime);
+      const timeDiff = now - startTime;
+      const twoHours = 2 * 60 * 60 * 1000;
+      
+      // Keep if: not started yet, currently live, or ended less than 2 hours ago
+      return timeDiff < twoHours || liveClass.status === "lv";
+    });
+
+    console.log(`✅ [FILTERED] ${activeClasses.length} active/upcoming classes after filtering`);
+
+    // Respond with the filtered list of classes
+    res.status(200).json({
+      message: "Live classes fetched successfully",
+      classes: activeClasses,
+    });
+  } catch (error) {
+    console.error("❌ [USER LIVE CLASSES] Error fetching user live classes:", error.message);
     res.status(500).json({
       error:
         error.message ||
@@ -1025,6 +1091,7 @@ module.exports = {
   createUser,
   updateUserDetails,
   fetchAllClasses,
+  fetchUserLiveClasses,
   editLiveClass,
   deleteLiveClass,
   checkClassStatus,

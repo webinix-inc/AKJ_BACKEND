@@ -4,6 +4,7 @@ const {
   createLiveClass,
   createUser,
   fetchAllClasses,
+  fetchUserLiveClasses,
   editLiveClass,
   deleteLiveClass,
   checkClassStatus,
@@ -14,6 +15,7 @@ const {
 const authJwt = require("../middlewares/authJwt"); // Importing auth middleware
 
 module.exports = (app) => {
+  // Admin routes
   app.post("/api/v1/admin/live-classes", createLiveClass);
   app.put("/api/v1/admin/edit-live-classes/:classId", editLiveClass);
   app.delete("/api/v1/admin/delete-live-classes/:classId", deleteLiveClass);
@@ -22,6 +24,9 @@ module.exports = (app) => {
   app.post("/api/v1/admin/webhooks/merithub-status", handleMeritHubStatusPing);
   app.get("/api/v1/admin/upcoming-live-classes", fetchAllClasses);
   app.post("/api/v1/admin/migrate-live-class-links", migrateUserLiveClassLinks);
+
+  // 🔧 FIX: Add user endpoint for live classes (user-specific filtering)
+  app.get("/api/v1/user/live-classes", [authJwt.verifyToken], fetchUserLiveClasses);
 
   app.get("/courses/:courseId/recorded-videos", [authJwt.verifyToken], getRecordedVideos);
 };

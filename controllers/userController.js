@@ -834,9 +834,58 @@ exports.getProfile = async (req, res) => {
     if (!user) {
       return sendResponse(res, 404, "No data found");
     }
-    return sendResponse(res, 200, "Profile retrieved successfully", user);
+
+    // 🔧 FIX: Fetch fresh live classes data from LiveClass collection
+    const LiveClass = require("../models/LiveClass");
+    
+    // Get user's purchased course IDs
+    const userCourseIds = user.purchasedCourses.map(pc => pc.course.toString());
+    console.log(`🔍 [PROFILE] Fetching fresh live classes for user ${user._id} with courses:`, userCourseIds);
+
+    // Find live classes that match user's purchased courses
+    const freshLiveClasses = await LiveClass.find({
+      courseIds: { $in: userCourseIds }
+    }).sort({ startTime: -1 });
+
+    // Filter out past classes (older than 2 hours) unless they're currently live
+    const now = new Date();
+    const activeLiveClasses = freshLiveClasses.filter(liveClass => {
+      const startTime = new Date(liveClass.startTime);
+      const timeDiff = now - startTime;
+      const twoHours = 2 * 60 * 60 * 1000;
+      
+      // Keep if: not started yet, currently live, or ended less than 2 hours ago
+      return timeDiff < twoHours || liveClass.status === "lv";
+    });
+
+    console.log(`✅ [PROFILE] Found ${activeLiveClasses.length} active live classes for user profile`);
+
+    // Create enhanced user object with fresh live classes
+    const userWithFreshLiveClasses = {
+      ...user.toObject(),
+      liveClasses: activeLiveClasses.map(lc => ({
+        _id: lc._id,
+        classId: lc.classId,
+        title: lc.title,
+        startTime: lc.startTime,
+        endDate: lc.endDate,
+        duration: lc.duration,
+        platform: lc.platform,
+        status: lc.status,
+        liveLink: lc.participantLink || lc.liveLink, // 🔧 FIX: Use participant link for students
+        instructorLink: lc.instructorLink,
+        participantLink: lc.participantLink,
+        moderatorLink: lc.moderatorLink,
+        courseIds: lc.courseIds,
+        description: lc.description,
+        timeZoneId: lc.timeZoneId,
+        createdAt: lc.createdAt
+      }))
+    };
+
+    return sendResponse(res, 200, "Profile retrieved successfully", userWithFreshLiveClasses);
   } catch (error) {
-    console.error(error);
+    console.error("❌ [PROFILE] Error fetching profile with live classes:", error);
     return sendResponse(res, 500, "Server error");
   }
 };

@@ -17,6 +17,7 @@ const {
   subCategoryUpload,
   subCategory,
   courseImage1,
+  batchCourseImage,
   courseNotes,
   courseVideo,
   syllabusUpload,
@@ -244,9 +245,11 @@ module.exports = (app) => {
   // ============================================================================
   // 📚 BATCH COURSE ROUTES
   // ============================================================================
-  app.post("/api/v1/admin/batch-courses/create", [authJwt.verifyToken], auth.createBatchCourse);
+  app.post("/api/v1/admin/batch-courses/create", [authJwt.verifyToken], batchCourseImage.array("courseImage", 5), auth.createBatchCourse);
   app.get("/api/v1/admin/batch-courses", [authJwt.verifyToken], auth.getAllBatchCourses);
   app.get("/api/v1/admin/batch-courses/:courseId", [authJwt.verifyToken], auth.getBatchCourseById);
+  app.put("/api/v1/admin/batch-courses/:id", [authJwt.verifyToken], batchCourseImage.array("courseImage", 5), auth.updateBatchCourse);
+  app.delete("/api/v1/admin/batch-courses/:id", [authJwt.verifyToken], auth.deleteBatchCourse);
   app.post("/api/v1/admin/batch-courses/:courseId/add-user", [authJwt.verifyToken], auth.addUserToBatchCourse);
   app.delete("/api/v1/admin/batch-courses/:courseId/remove-user/:userId", [authJwt.verifyToken], auth.removeUserFromBatchCourse);
   app.post("/api/v1/admin/batch-courses/fix-root-folders", [authJwt.verifyToken], auth.fixBatchCoursesRootFolder);
@@ -288,6 +291,11 @@ module.exports = (app) => {
     "/api/v1/admin/Category/:categoryId/subCategories",
     [authJwt.verifyToken],
     auth.getSubCategories
+  );
+  app.post(
+    "/api/v1/admin/repair-categories",
+    [authJwt.verifyToken],
+    auth.repairCategoryRelationships
   );
   app.put(
     "/api/v1/admin/SubCategory/update/:id",

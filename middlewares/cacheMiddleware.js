@@ -174,6 +174,16 @@ const cacheMiddleware = (duration = 300, options = {}) => {
         res.set('X-Cache-Key', cacheKey.substring(0, 50));
         res.set('Content-Type', 'application/json');
         
+        // 🔧 FIX: Preserve CORS headers for cached responses
+        const origin = req.headers.origin;
+        if (origin) {
+          res.set('Access-Control-Allow-Origin', origin);
+          res.set('Access-Control-Allow-Credentials', 'true');
+          res.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS,PUT,PATCH,DELETE,HEAD');
+          res.set('Access-Control-Allow-Headers', 'X-Requested-With,content-type,Range,Content-Range,Content-Length,Authorization');
+          res.set('Access-Control-Expose-Headers', 'Content-Range,Content-Length,Accept-Ranges');
+        }
+        
         return res.json(parsedData);
       }
 

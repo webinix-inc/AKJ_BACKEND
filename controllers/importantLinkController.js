@@ -25,12 +25,25 @@ exports.createImportantLink = async (req, res) => {
 
 exports.getImportantLinks = async (req, res) => {
     try {
-        const links = await ImportantLink.find();
-
-        return res.status(200).json({message: " Links fetched successfully", links: links});
+        console.log('🔍 Fetching important links from database...');
+        
+        // 🔧 FIX: Add timeout and better error handling
+        const links = await ImportantLink.find().maxTimeMS(5000);
+        
+        console.log(`✅ Found ${links.length} important links`);
+        
+        return res.status(200).json({
+            status: 200,
+            message: "Links fetched successfully", 
+            links: links
+        });
     } catch (error) {
-        console.error('Error fetching links:', error);
-        return res.status(500).json({message: 'Failed to fetch links', error: error.message});
+        console.error('❌ Error fetching links:', error);
+        return res.status(500).json({
+            status: 500,
+            message: 'Failed to fetch links', 
+            error: error.message
+        });
     }
 }
 
