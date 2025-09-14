@@ -1,0 +1,490 @@
+{
+  "summary": {
+    "totalQuestions": 10,
+    "totalMathExpressions": 20,
+    "totalRealImages": 0,
+    "questionsWithMath": 9,
+    "questionsWithImages": 0,
+    "questionsWithOptions": 10,
+    "questionsWithCorrectAnswers": 6
+  },
+  "questions": [
+    {
+      "questionIndex": 1,
+      "questionType": "multiple_choice",
+      "questionText": "The quadratic equation 2x2-5x+1=0 has ________",
+      "questionImage": [],
+      "parts": [],
+      "tables": [],
+      "options": [
+        {
+          "optionText": "Real roots",
+          "isCorrect": false,
+          "index": 0
+        },
+        {
+          "optionText": "No real roots",
+          "isCorrect": false,
+          "index": 1
+        },
+        {
+          "optionText": "Both A & B",
+          "isCorrect": false,
+          "index": 2
+        },
+        {
+          "optionText": "None of these",
+          "isCorrect": false,
+          "index": 3
+        }
+      ],
+      "questionCorrectMarks": 2,
+      "questionIncorrectMarks": 0,
+      "uploadedFromWord": true,
+      "rawQuestionText": "The quadratic equation 2x2-5x+1=0 has ________",
+      "correctAnswerLetter": "-1+x^2",
+      "mathExpressionsCount": 0,
+      "realImagesCount": 0
+    },
+    {
+      "questionIndex": 2,
+      "questionType": "multiple_choice",
+      "questionText": "Values of k for which the quadratic equation has equal roots is ______",
+      "questionImage": [],
+      "parts": [
+        {
+          "kind": "math",
+          "content": "kx² + 4x + 1 = 0"
+        }
+      ],
+      "tables": [],
+      "options": [
+        {
+          "optionText": "0 only",
+          "isCorrect": false,
+          "index": 0
+        },
+        {
+          "optionText": "4",
+          "isCorrect": false,
+          "index": 1
+        },
+        {
+          "optionText": "8",
+          "isCorrect": false,
+          "index": 2
+        },
+        {
+          "optionText": "0,8",
+          "isCorrect": false,
+          "index": 3
+        }
+      ],
+      "questionCorrectMarks": 2,
+      "questionIncorrectMarks": 0,
+      "uploadedFromWord": true,
+      "rawQuestionText": "Values of k for which the quadratic equation  has equal roots is ______",
+      "correctAnswerLetter": "शब्द \"कॉस्मोग्राफी\" ग्रीक शब्द \"कोस्मोस\" (दुनिया) और \"ग्राफीन\" (लिखना) से आया है। इसका उपयोग मूल रूप से ब्रह्मांड के वर्णन को संदर्भित करने के लिए किया गया था, जिसमें पृथ्वी और स्वर्ग दोनों शामिल थे। हम्बोल्ट ने ब्रह्मांड विज्ञान को समग्र रूप से ब्रह्मांड के अध्ययन के रूप में परिभाषित किया था। उन्होंने इसे दो शाखाओं: यूरेनोग्राफी और भूगोल (ज्‍योग्राफी) में विभाजित किया था। 1845 में कॉस्मोग्राफी पर हम्बोल्ट की प्रकाशित पुस्तक का नाम \"ब्रह्मांड: ब्रह्मांड के भौतिक विवरण का एक रेखाचित्र (कॉसमॉस: ए स्केच ऑफ ए फिजिकल डिस्क्रिप्शन ऑफ द यूनिवर्स)\" था। यूरेनोग्राफी आकाशीय पिंडों का अध्ययन है, जिसमें उनकी स्थिति, गति और भौतिक गुण शामिल हैं। इसका खगोल विज्ञान से गहरा संबंध है, लेकिन इसमें विषयों की एक विस्तृत, जैसे खगोल विज्ञान का इतिहास और आकाशीय पिंडों का सांस्कृतिक महत्व श्रृंखला भी शामिल है। भूगोल पृथ्वी का अध्ययन है, जिसमें इसकी भौतिक विशेषताएं, इसकी जलवायु, इसकी मानव आबादी और इसकी संस्कृतियां शामिल हैं।/ The term \"cosmography\" comes from the Greek words \"kosmos\" (world) and \"graphein\" (to write). Humboldt defined cosmography as the study of the universe as a whole, and he divided it into two branches: uranography and geography. Humboldt's published book on cosmography in 1845 called Cosmos: A Sketch of a Physical Description of the Universe. Uranography is the study of celestial bodies, including their positions, movements, and physical properties. Geography is the study of the Earth, including its physical features, its climate, its human population, and its cultures.",
+      "mathExpressionsCount": 1,
+      "realImagesCount": 0
+    },
+    {
+      "questionIndex": 3,
+      "questionType": "multiple_choice",
+      "questionText": "Which of the following equations has 2 as a root?",
+      "questionImage": [],
+      "parts": [
+        {
+          "kind": "math",
+          "content": "x² - 4x + 5 = 0"
+        },
+        {
+          "kind": "math",
+          "content": "x² - 3x + 2 = 0"
+        },
+        {
+          "kind": "math",
+          "content": "2x² - 7x + 6 = 0"
+        },
+        {
+          "kind": "math",
+          "content": "x² + x - 6 = 0"
+        }
+      ],
+      "tables": [],
+      "options": [
+        {
+          "optionText": "",
+          "isCorrect": false,
+          "index": 0
+        },
+        {
+          "optionText": "",
+          "isCorrect": false,
+          "index": 1
+        },
+        {
+          "optionText": "",
+          "isCorrect": false,
+          "index": 2
+        },
+        {
+          "optionText": "",
+          "isCorrect": false,
+          "index": 3
+        }
+      ],
+      "questionCorrectMarks": 2,
+      "questionIncorrectMarks": 0,
+      "uploadedFromWord": true,
+      "rawQuestionText": "Which of the following equations has 2 as a root?",
+      "correctAnswerLetter": "बर्फ क्रिस्टल सिद्धांत, जिसे बर्जरॉन-फाइंडिसन सिद्धांत के रूप में भी जाना जाता है। 1933 में टोर बर्जरॉन और वाल्थर फाइंडिसन द्वारा प्रस्तावित किया गया था। सिद्धांत में कहा गया है कि अगर बर्फ के क्रिस्टल तरल पानी की बूंदों के बादल से घिरे हों तो वे अवक्षेपित होने के लिए काफी बड़े हो सकते हैं। तरल पानी की बूंदें वाष्पित हो जाएंगी और जल वाष्प बर्फ के क्रिस्टल पर जमा हो जाएगा, जिससे वे बड़े हो जाते हैं। सिद्धांत इस तथ्य पर आधारित है कि पानी का संतृप्त वाष्प दबाव तरल पानी की तुलना में बर्फ पर अधिक होता है। इसका मतलब यह है कि बर्फ के क्रिस्टल के आसपास की हवा में तरल पानी की बूंद के आसपास की हवा की तुलना में अधिक जलवाष्प होती है। सिद्धांत यह भी बताता है कि यदि बर्फ के क्रिस्टल तापमान प्रवणता वाले बादल में होंगे तो वे बड़े हो जाते हैं। इसका मतलब यह है कि जैसे-जैसे ऊंचाई बढ़ेगी, बादल का तापमान कम होता जाता है। बर्फ क्रिस्टल सिद्धांत, वर्षा के निर्माण, विशेषकर ठंडे बादलों में एक प्रमुख कारक है।/ The Ice Crystal Theory, also known as the Bergeron-Findeisen Theory, was proposed by Tor Bergeron and  Walther Findeisen in 1933. The theory states that ice crystals can grow large enough to precipitate if they are surrounded by a cloud of liquid water droplets. The liquid water droplets will evaporate, and the water vapor will be deposited onto the ice crystals, causing them to grow larger.",
+      "mathExpressionsCount": 4,
+      "realImagesCount": 0
+    },
+    {
+      "questionIndex": 4,
+      "questionType": "multiple_choice",
+      "questionText": "If and are the roots of the equation then the equation with roots and is _______",
+      "questionImage": [],
+      "parts": [
+        {
+          "kind": "math",
+          "content": "α"
+        },
+        {
+          "kind": "math",
+          "content": "β"
+        },
+        {
+          "kind": "math",
+          "content": "x² - (α+β)x + αβ = 0"
+        },
+        {
+          "kind": "math",
+          "content": "α²"
+        },
+        {
+          "kind": "math",
+          "content": "β²"
+        },
+        {
+          "kind": "math",
+          "content": "x² - 5x + 6 = 0"
+        },
+        {
+          "kind": "math",
+          "content": "x² + x - 2 = 0"
+        },
+        {
+          "kind": "math",
+          "content": "2x² - 5x + 2 = 0"
+        },
+        {
+          "kind": "math",
+          "content": "x² - 3x + 2 = 0"
+        }
+      ],
+      "tables": [],
+      "options": [
+        {
+          "optionText": "",
+          "isCorrect": false,
+          "index": 0
+        },
+        {
+          "optionText": "",
+          "isCorrect": false,
+          "index": 1
+        },
+        {
+          "optionText": "",
+          "isCorrect": false,
+          "index": 2
+        },
+        {
+          "optionText": "",
+          "isCorrect": false,
+          "index": 3
+        }
+      ],
+      "questionCorrectMarks": 2,
+      "questionIncorrectMarks": 0,
+      "uploadedFromWord": true,
+      "rawQuestionText": "If and  are the roots of the equation then the equation with roots  and  is _______",
+      "correctAnswerLetter": "प्रवाल भित्ति के निर्माण का निम्मजन सिद्धांत चार्ल्स डार्विन द्वारा 1842 में प्रस्तावित किया गया था। सिद्धांत में कहा गया है कि प्रवाल भित्ति ज्वालामुखीय द्वीपों पर बनती हैं, जो धीरे-धीरे कम हो रही हैं। जैसे-जैसे द्वीप डूबता है, प्रवाल भित्ति पानी की सतह पर अपनी स्थिति बनाए रखने के लिए ऊपर की ओर बढ़ती हैं। समय के साथ, द्वीप पूरी तरह से ख़त्म हो सकता है, केवल प्रवाल भित्ति पीछे रह जाती है। यह सिद्धांत इस तथ्य पर आधारित है कि प्रवाल भित्ति केवल उथले पानी में ही विकसित हो सकती हैं। ऐसा इसलिए है क्योंकि प्रवाल जंतु, जो जीव प्रवाल भित्ति बनाते हैं, उन्हें जीवित रहने के लिए सूर्य के प्रकाश की आवश्यकता होती है। सिद्धांत यह भी कहता है कि द्वीप का अवतलन (धंसना) इतना धीमा होना चाहिए कि प्रवाल भित्ति ऊपर बनी रहें, यदि अवतलन बहुत तेज है, तो प्रवाल भित्ति टिक नहीं पाएंगी और वे मर सकती हैं। अवतलन सिद्धांत इस अवलोकन से समर्थित है कि प्रवाल भित्ति अक्सर उन क्षेत्रों में पाई जाती हैं, जहां हाल ही में अवतलन के प्रमाण मिले हैं।/ The subsidence theory of coral reef formation was proposed by Charles Darwin in 1842. The theory states that coral reefs form on volcanic islands that are slowly subsiding. As the island sinks, the coral reefs grow upward to maintain their position at the surface of the water. Over time, the island may completely subside, leaving only the coral reef behind. The theory is based on the fact that coral reefs can only grow in shallow water. This is because coral polyps, the organisms that form coral reefs, need sunlight to survive.",
+      "mathExpressionsCount": 9,
+      "realImagesCount": 0
+    },
+    {
+      "questionIndex": 5,
+      "questionType": "multiple_choice",
+      "questionText": "The value of discriminant for quadratic equation is ______",
+      "questionImage": [],
+      "parts": [
+        {
+          "kind": "math",
+          "content": "b² - 4ac"
+        }
+      ],
+      "tables": [],
+      "options": [
+        {
+          "optionText": "23",
+          "isCorrect": false,
+          "index": 0
+        },
+        {
+          "optionText": "-73",
+          "isCorrect": false,
+          "index": 1
+        },
+        {
+          "optionText": "73",
+          "isCorrect": false,
+          "index": 2
+        },
+        {
+          "optionText": "49",
+          "isCorrect": false,
+          "index": 3
+        }
+      ],
+      "questionCorrectMarks": 2,
+      "questionIncorrectMarks": 0,
+      "uploadedFromWord": true,
+      "rawQuestionText": "The value of discriminant for quadratic equation is  ______",
+      "correctAnswerLetter": "पृथ्वी का आंतरिक भाग कई परतों से बना है, जिनमें पपड़ी, प्रावार और क्रोड शामिल हैं। गुटेनबर्ग असंततता प्रावार और क्रोड के बीच पाई जाती है। यह एक सीमा परत है, जो ठोस प्रावार को तरल बाहरी क्रोड से अलग करती है। गुटेनबर्ग असंततता का नाम जर्मन भूकंपविज्ञानी बेनो गुटेनबर्ग के नाम पर रखा गया है, जिन्होंने 1914 में इसकी खोज की थी। गुटेनबर्ग असंततता पृथ्वी की सतह से लगभग 2,900 किलोमीटर (1,800 मील) की गहराई पर स्थित है। यह एक संकीर्ण क्षेत्र है, जो केवल 50 किलोमीटर (30 मील) मोटा है। पृथ्वी के माध्यम से यात्रा करने वाली भूकंपीय तरंगें गुटेनबर्ग असंततता पर धीमी हो जाती हैं, और S तरंगें पूरी तरह से अवशोषित हो जाती हैं। ऐसा इसलिए है, क्योंकि बाहरी तरल क्रोड, ठोस प्रावार की तुलना में बहुत कम घना होता है और यह S तरंगों को संचारित नहीं कर सकता है। पपड़ी और प्रावार को मोहोरोविक असंबद्धता द्वारा अलग किया जाता है, ऊपरी प्रावार और निचले प्रावार को रेपिटी असंबद्धता द्वारा अलग किया जाता है, और ऊपरी क्रोड और निचले क्रोड को विएचर्ट-लेहमैन असंबद्धता द्वारा अलग किया जाता है।/ The Earth's interior is composed of several layers, including the crust, mantle, and core. The Gutenberg discontinuity is found between the mantle and core. It is a boundary layer that separates the solid mantle from the liquid outer core. The Gutenberg discontinuity is named after Beno Gutenberg, the German seismologist who discovered it in 1914.",
+      "mathExpressionsCount": 1,
+      "realImagesCount": 0
+    },
+    {
+      "questionIndex": 6,
+      "questionType": "multiple_choice",
+      "questionText": "What is the value of k, if one root of the quation is 2?",
+      "questionImage": [],
+      "parts": [
+        {
+          "kind": "math",
+          "content": "kx² + 4x + 1 = 0"
+        }
+      ],
+      "tables": [],
+      "options": [
+        {
+          "optionText": "7",
+          "isCorrect": false,
+          "index": 0
+        },
+        {
+          "optionText": "14",
+          "isCorrect": false,
+          "index": 1
+        },
+        {
+          "optionText": "-7",
+          "isCorrect": false,
+          "index": 2
+        },
+        {
+          "optionText": "-14",
+          "isCorrect": false,
+          "index": 3
+        }
+      ],
+      "questionCorrectMarks": 2,
+      "questionIncorrectMarks": 0,
+      "uploadedFromWord": true,
+      "rawQuestionText": "What is the value of k, if one root of the quation  is 2?",
+      "correctAnswerLetter": "समप्राय मैदान की अवधारणा को 1933 में क्रिकमे द्वारा प्रस्तावित किया गया था। उन्होंने समप्राय मैदान को नदियों के अपरदन द्वारा और निक्षेपण द्वारा निर्मित एक विस्तृत और समतल सतह के रूप में परिभाषित किया था, जिससे आसन्न बाढ़ के मैदानों का संलयन होता है। समप्राय मैदान का निर्माण नदियों के पार्श्विक नियोजन से होता है। इसका मतलब यह है कि नदियाँ अपने किनारों पर भूमि को अपरदित कर देती हैं, जिससे एक चौड़ी और समतल सतह बन जाती है। समप्राय मैदान, प्रायः उन क्षेत्रों में पाए जाते हैं, जो लंबे समय तक विवर्तनिक रूप से स्थिर रहे हैं। ऐसा इसलिए है क्योंकि विवर्तनिक गतिविधि नदियों के पार्श्विक नियोजन को बाधित कर सकती है, जिससे समप्राय मैदान का निर्माण रुक सकता है। समप्राय मैदान के अच्छे उदाहरण ऑस्ट्रेलिया के कारपेंटारिया प्रदेश और दक्षिण अमेरिका में अमेज़ॅन बेसिन में पाए जा सकते हैं।/ The concept of panplain was propagated by Crickmay in 1933. He defined panplain as a broad and level surface created by lateral corrasion of rivers leading to the coalescence of adjacent floodplains. Panplains are formed by the lateral planation of rivers. This means that the rivers erode the land on their sides, creating a broad and level surface. Panplains are often found in areas that have been tectonically stable for a long period of time. This is because tectonic activity can disrupt the lateral planation of rivers, preventing the formation of panplains. Good examples of panplains can be found in the Carpentaria region of Australia and the Amazon Basin in South America.",
+      "mathExpressionsCount": 1,
+      "realImagesCount": 0
+    },
+    {
+      "questionIndex": 7,
+      "questionType": "multiple_choice",
+      "questionText": "which of the following statement is true for this given equation?",
+      "questionImage": [],
+      "parts": [
+        {
+          "kind": "math",
+          "content": "Mathematical Expression 1"
+        }
+      ],
+      "tables": [],
+      "options": [
+        {
+          "optionText": "Real and unequal roots",
+          "isCorrect": false,
+          "index": 0
+        },
+        {
+          "optionText": "Real and equal roots",
+          "isCorrect": false,
+          "index": 1
+        },
+        {
+          "optionText": "Roots are not real",
+          "isCorrect": false,
+          "index": 2
+        },
+        {
+          "optionText": "Three roots",
+          "isCorrect": false,
+          "index": 3
+        }
+      ],
+      "questionCorrectMarks": 2,
+      "questionIncorrectMarks": 0,
+      "uploadedFromWord": true,
+      "rawQuestionText": "which of the following statement is true for this given equation?",
+      "correctAnswerLetter": "",
+      "mathExpressionsCount": 1,
+      "realImagesCount": 0
+    },
+    {
+      "questionIndex": 8,
+      "questionType": "multiple_choice",
+      "questionText": "The roots of are real and equal, find k.",
+      "questionImage": [],
+      "parts": [
+        {
+          "kind": "math",
+          "content": "Mathematical Expression 1"
+        }
+      ],
+      "tables": [],
+      "options": [
+        {
+          "optionText": "0",
+          "isCorrect": false,
+          "index": 0
+        },
+        {
+          "optionText": "4",
+          "isCorrect": false,
+          "index": 1
+        },
+        {
+          "optionText": "0 or 4",
+          "isCorrect": false,
+          "index": 2
+        },
+        {
+          "optionText": "2",
+          "isCorrect": false,
+          "index": 3
+        }
+      ],
+      "questionCorrectMarks": 2,
+      "questionIncorrectMarks": 0,
+      "uploadedFromWord": true,
+      "rawQuestionText": "The roots of  are real and equal, find k.",
+      "correctAnswerLetter": "",
+      "mathExpressionsCount": 1,
+      "realImagesCount": 0
+    },
+    {
+      "questionIndex": 9,
+      "questionType": "multiple_choice",
+      "questionText": "What is nature of the roots of the quadratic equation Type multiple_choice Option Real and equal Correct Option Not real Incorrect Option Real and unequal Incorrect Option None of these Incorrect Solution Marks 2 0",
+      "questionImage": [],
+      "parts": [
+        {
+          "kind": "math",
+          "content": "ax² + bx + c = 0"
+        }
+      ],
+      "tables": [],
+      "options": [
+        {
+          "optionText": "Real and equal",
+          "isCorrect": false,
+          "index": 0
+        },
+        {
+          "optionText": "Not real",
+          "isCorrect": false,
+          "index": 1
+        },
+        {
+          "optionText": "Real and unequal",
+          "isCorrect": false,
+          "index": 2
+        },
+        {
+          "optionText": "None of these",
+          "isCorrect": false,
+          "index": 3
+        }
+      ],
+      "questionCorrectMarks": 2,
+      "questionIncorrectMarks": 0,
+      "uploadedFromWord": true,
+      "rawQuestionText": "What is nature of the roots of the quadratic equation  \t\nType \tmultiple_choice  \t\nOption\tReal and equal \tCorrect\t\nOption\tNot real \tIncorrect   \t\nOption\tReal and unequal\tIncorrect   \t\nOption\tNone of these  \tIncorrect  \t\nSolution\t\t\nMarks\t2        \t0",
+      "correctAnswerLetter": "",
+      "mathExpressionsCount": 1,
+      "realImagesCount": 0
+    },
+    {
+      "questionIndex": 10,
+      "questionType": "multiple_choice",
+      "questionText": "Which of the following is one root of the quadratic equation",
+      "questionImage": [],
+      "parts": [
+        {
+          "kind": "math",
+          "content": "ax² + bx + c = 0"
+        }
+      ],
+      "tables": [],
+      "options": [
+        {
+          "optionText": "7",
+          "isCorrect": false,
+          "index": 0
+        },
+        {
+          "optionText": "5",
+          "isCorrect": false,
+          "index": 1
+        },
+        {
+          "optionText": "-7",
+          "isCorrect": false,
+          "index": 2
+        },
+        {
+          "optionText": "-1",
+          "isCorrect": false,
+          "index": 3
+        }
+      ],
+      "questionCorrectMarks": 2,
+      "questionIncorrectMarks": 0,
+      "uploadedFromWord": true,
+      "rawQuestionText": "Which of the following is one root of the quadratic equation",
+      "correctAnswerLetter": "",
+      "mathExpressionsCount": 1,
+      "realImagesCount": 0
+    }
+  ],
+  "uniqueMathExpressions": [
+    "kx² + 4x + 1 = 0",
+    "x² - 4x + 5 = 0",
+    "x² - 3x + 2 = 0",
+    "2x² - 7x + 6 = 0",
+    "x² + x - 6 = 0",
+    "α",
+    "β",
+    "x² - (α+β)x + αβ = 0",
+    "α²",
+    "β²",
+    "x² - 5x + 6 = 0",
+    "x² + x - 2 = 0",
+    "2x² - 5x + 2 = 0",
+    "b² - 4ac",
+    "Mathematical Expression 1",
+    "ax² + bx + c = 0"
+  ]
+}
