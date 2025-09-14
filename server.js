@@ -197,7 +197,7 @@ app.use(cors({
     "http://13.232.208.235", // User Frontend (Production)
     "http://13.127.56.109", // Admin Frontend (Production)
     "https://13.232.208.235", // User Frontend (Production HTTPS)
-    "https://13.127.56.109", // Admin Frontend (Production HTTPS)],
+    "https://13.127.56.109"],// Admin Frontend (Production HTTPS)],
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "Cache-Control", "Pragma"],
   credentials: true,
