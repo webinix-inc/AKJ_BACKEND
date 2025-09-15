@@ -5762,6 +5762,80 @@ exports.deleteFollowUs = async (req, res) => {
 // 📊 UTILITY FUNCTIONS
 // ============================================================================
 
+/**
+ * Register admin in MeritHub
+ * Route: POST /api/v1/admin/register-merithub
+ */
+exports.registerAdminInMeritHub = async (req, res) => {
+  try {
+    const { adminId, name, email } = req.body;
+    const { addUser } = require('../configs/merithub.config');
+    const User = require('../models/userModel');
+
+    if (!adminId || !name || !email) {
+      return res.status(400).json({
+        error: "Admin ID, name, and email are required"
+      });
+    }
+
+    // Find the admin user
+    const admin = await User.findById(adminId);
+    if (!admin || admin.userType !== 'ADMIN') {
+      return res.status(404).json({
+        error: "Admin user not found"
+      });
+    }
+
+    // Check if already registered in MeritHub
+    if (admin.merithubUserId) {
+      return res.status(200).json({
+        message: "Admin already registered in MeritHub",
+        merithubUserId: admin.merithubUserId
+      });
+    }
+
+    // Prepare user details for MeritHub with correct permissions
+    const userDetailsForMeritHub = {
+      name: name,
+      title: "LMS Admin User",
+      img: "https://hst.meritgraph.com/theme/img/png/avtr.png",
+      desc: "LMS Admin User with full permissions",
+      lang: "en",
+      clientUserId: admin._id.toString(),
+      email: email,
+      role: "C", // 🔧 FIX: 'C' for Creator/Teacher (not 'M' for Students)
+      timeZone: "Asia/Kolkata",
+      permission: "CC", // 'CC' for Course and Classes Creation/Edit Permissions
+    };
+
+    // Add user to MeritHub
+    const meritHubResponse = await addUser(userDetailsForMeritHub);
+
+    if (!meritHubResponse || !meritHubResponse.userId) {
+      return res.status(500).json({
+        error: "Failed to register admin in MeritHub"
+      });
+    }
+
+    // Update admin with MeritHub User ID
+    admin.merithubUserId = meritHubResponse.userId;
+    await admin.save();
+
+    console.log(`✅ Admin ${admin.email} registered in MeritHub with ID: ${meritHubResponse.userId}`);
+
+    res.status(200).json({
+      message: "Admin successfully registered in MeritHub",
+      merithubUserId: meritHubResponse.userId
+    });
+
+  } catch (error) {
+    console.error("Error registering admin in MeritHub:", error.message);
+    res.status(500).json({
+      error: error.message || "Failed to register admin in MeritHub"
+    });
+  }
+};
+
 // Added by Himanshu
 exports.updateDownloads = async (req, res) => {
   console.log("updateDownloads function hit");

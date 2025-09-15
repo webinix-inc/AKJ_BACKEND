@@ -30,6 +30,7 @@ module.exports = (app) => {
   app.post("/api/v1/admin/forgetPassword", auth.forgetPassword);
   app.post("/api/v1/admin/forgotVerifyotp", auth.forgotVerifyotp);
   app.post("/api/v1/admin/changePassword/:id", auth.changePassword);
+  app.post("/api/v1/admin/register-merithub", [authJwt.verifyToken], auth.registerAdminInMeritHub);
 
   app.post(
     "/api/v1/admin/logout-user",

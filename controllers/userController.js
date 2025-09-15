@@ -835,21 +835,13 @@ exports.getProfile = async (req, res) => {
       return sendResponse(res, 404, "No data found");
     }
 
-    // 🔧 FIX: Fetch fresh live classes data from LiveClass collection
-    const LiveClass = require("../models/LiveClass");
-    
-    // Get user's purchased course IDs
-    const userCourseIds = user.purchasedCourses.map(pc => pc.course.toString());
-    console.log(`🔍 [PROFILE] Fetching fresh live classes for user ${user._id} with courses:`, userCourseIds);
-
-    // Find live classes that match user's purchased courses
-    const freshLiveClasses = await LiveClass.find({
-      courseIds: { $in: userCourseIds }
-    }).sort({ startTime: -1 });
+    // 🔧 FIX: Use individual user links from User.liveClasses array (NOT LiveClass collection)
+    console.log(`🔍 [PROFILE] Fetching individual live classes for user ${user._id}`);
+    console.log(`✅ [PROFILE] Using User.liveClasses array with individual user links`);
 
     // Filter out past classes (older than 2 hours) unless they're currently live
     const now = new Date();
-    const activeLiveClasses = freshLiveClasses.filter(liveClass => {
+    const activeLiveClasses = (user.liveClasses || []).filter(liveClass => {
       const startTime = new Date(liveClass.startTime);
       const timeDiff = now - startTime;
       const twoHours = 2 * 60 * 60 * 1000;
@@ -858,23 +850,38 @@ exports.getProfile = async (req, res) => {
       return timeDiff < twoHours || liveClass.status === "lv";
     });
 
-    console.log(`✅ [PROFILE] Found ${activeLiveClasses.length} active live classes for user profile`);
+    console.log(`✅ [PROFILE] Found ${activeLiveClasses.length} active individual live classes for user profile`);
 
-    // Create enhanced user object with fresh live classes
-    const userWithFreshLiveClasses = {
-      ...user.toObject(),
-      liveClasses: activeLiveClasses.map(lc => ({
+      // 🔍 DEBUG: Log what's in the database for live classes
+      console.log(`🔍 [PROFILE_DEBUG] Active live classes from DB:`, activeLiveClasses.length);
+      activeLiveClasses.forEach((lc, index) => {
+        console.log(`🔍 [PROFILE_DEBUG] Live Class ${index + 1}:`);
+        console.log(`   Title: ${lc.title}`);
+        console.log(`   lc.participantLink: ${lc.participantLink ? 'Available' : 'Missing'}`);
+        console.log(`   lc.liveLink: ${lc.liveLink ? 'Available' : 'Missing'}`);
+        if (lc.participantLink) {
+          console.log(`   participantLink preview: ${lc.participantLink.substring(0, 50)}...`);
+        }
+        if (lc.liveLink) {
+          console.log(`   liveLink preview: ${lc.liveLink.substring(0, 50)}...`);
+        }
+      });
+
+      // Create enhanced user object with individual live classes
+      const userWithIndividualLiveClasses = {
+        ...user.toObject(),
+        liveClasses: activeLiveClasses.map(lc => ({
         _id: lc._id,
         classId: lc.classId,
         title: lc.title,
         startTime: lc.startTime,
         endDate: lc.endDate,
         duration: lc.duration,
-        platform: lc.platform,
+        platform: lc.platform || 'merithub',
         status: lc.status,
-        liveLink: lc.participantLink || lc.liveLink, // 🔧 FIX: Use participant link for students
+        liveLink: lc.participantLink || lc.liveLink, // ✅ Individual user link
         instructorLink: lc.instructorLink,
-        participantLink: lc.participantLink,
+        participantLink: lc.participantLink || lc.liveLink, // 🔧 FIX: Add fallback to liveLink
         moderatorLink: lc.moderatorLink,
         courseIds: lc.courseIds,
         description: lc.description,
@@ -883,9 +890,11 @@ exports.getProfile = async (req, res) => {
       }))
     };
 
-    return sendResponse(res, 200, "Profile retrieved successfully", userWithFreshLiveClasses);
+    console.log(`🎯 [PROFILE] Returning ${userWithIndividualLiveClasses.liveClasses.length} live classes with individual user links`);
+    
+    return sendResponse(res, 200, "Profile retrieved successfully", userWithIndividualLiveClasses);
   } catch (error) {
-    console.error("❌ [PROFILE] Error fetching profile with live classes:", error);
+    console.error("❌ [PROFILE] Error fetching profile with individual live classes:", error);
     return sendResponse(res, 500, "Server error");
   }
 };

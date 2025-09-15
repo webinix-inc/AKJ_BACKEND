@@ -287,6 +287,9 @@ async function scheduleLiveClass(instructorUserId, classDetails, userToken = nul
     // Use Access Token for class scheduling (as per MeritHub documentation)
     const accessToken = await getAccessToken();
     console.log(`🎫 [SCHEDULE] Using Access Token for authentication`);
+    console.log(`📤 [SCHEDULE] Sending class details to Merithub:`, JSON.stringify(classDetails, null, 2));
+    console.log(`🔍 [SCHEDULE] Access field value:`, classDetails.access);
+    console.log(`🔍 [SCHEDULE] Access field type:`, typeof classDetails.access);
     
     const response = await axios.post(
       `${CLASS_BASE_URL}/${CLIENT_ID}/${encodeURIComponent(instructorUserId)}`,
@@ -346,7 +349,7 @@ async function scheduleLiveClass(instructorUserId, classDetails, userToken = nul
   }
 }
 
-async function addUsersToClass(classId, userIds) {
+async function addUsersToClass(classId, userIds, commonParticipantLink = null) {
   try {
     if (!classId) throw new Error('addUsersToClass requires classId');
     if (!Array.isArray(userIds) || userIds.length === 0) {
@@ -354,22 +357,54 @@ async function addUsersToClass(classId, userIds) {
     }
 
     console.log(`👥 [ADD_USERS] Adding ${userIds.length} users to class: ${classId}`);
+    console.log(`🔗 [ADD_USERS] Raw common participant link provided: ${commonParticipantLink ? 'YES' : 'NO'}`);
+    if (commonParticipantLink) {
+      console.log(`🔗 [ADD_USERS] Raw common participant link: ${commonParticipantLink}`);
+      console.log(`🔗 [ADD_USERS] Link type: ${commonParticipantLink.includes('http') ? 'FORMATTED URL (WRONG)' : 'RAW LINK (CORRECT)'}`);
+    }
     
     // Use AccessToken for adding users to class (as per MeritHub API documentation)
     const token = await getAccessToken();
     
     // MeritHub API will generate individual user links for each user
-    const users = userIds.map(userId => ({
+    // 🔧 FIX: According to Merithub docs, each user should have userLink = commonParticipantLink
+    let users = userIds.map(userId => ({
       userId,
       userType: 'su' // Service User type as per API documentation
     }));
 
-    console.log(`👥 [ADD_USERS] Users to add:`, users);
+    console.log(`👥 [ADD_USERS] Initial users to add:`, users);
     console.log(`👥 [ADD_USERS] Using AccessToken for user management API`);
+    
+    if (commonParticipantLink) {
+      console.log(`🔧 [FIX] Adding commonParticipantLink as userLink for each user`);
+      console.log(`🔗 [ADD_USERS] Using commonParticipantLink as userLink: ${commonParticipantLink}`);
+      
+      // Add userLink to each user object
+      users = users.map(user => ({
+        ...user,
+        userLink: commonParticipantLink
+      }));
+      
+      console.log(`✅ [ADD_USERS] Updated users with userLink:`, users);
+    } else {
+      console.log(`⚠️ [ADD_USERS] No commonParticipantLink provided - users will not have userLink`);
+    }
+    
+    const requestBody = { users };
+    
+    const requestUrl = `${CLASS_BASE_URL}/${CLIENT_ID}/${encodeURIComponent(classId)}/users`;
+    
+    console.log(`📤 [ADD_USERS] Full request details:`);
+    console.log(`   URL: ${requestUrl}`);
+    console.log(`   Method: POST`);
+    console.log(`   Headers: Authorization: ${token.substring(0, 20)}..., Content-Type: application/json`);
+    console.log(`   Body: ${JSON.stringify(requestBody, null, 2)}`);
+    console.log(`   Expected Response: Array of {userId, userLink} objects`);
 
     const response = await axios.post(
-      `${CLASS_BASE_URL}/${CLIENT_ID}/${encodeURIComponent(classId)}/users`,
-      { users }, // Exact format as per API documentation
+      requestUrl,
+      requestBody,
       {
         headers: {
           Authorization: token, // Access token already includes "Bearer "
@@ -379,7 +414,23 @@ async function addUsersToClass(classId, userIds) {
       }
     );
 
-    console.log('✅ Users added to class successfully:', response.data);
+    console.log('✅ Users added to class successfully!');
+    console.log(`📥 [ADD_USERS] Response details:`);
+    console.log(`   Status: ${response.status}`);
+    console.log(`   Response Type: ${typeof response.data}`);
+    console.log(`   Is Array: ${Array.isArray(response.data)}`);
+    console.log(`   Length: ${response.data ? response.data.length : 'N/A'}`);
+    console.log(`   Full Response: ${JSON.stringify(response.data, null, 2)}`);
+    
+    if (Array.isArray(response.data)) {
+      response.data.forEach((userResponse, index) => {
+        console.log(`   User ${index + 1}:`);
+        console.log(`     userId: ${userResponse.userId}`);
+        console.log(`     userLink: ${userResponse.userLink || 'MISSING'}`);
+        console.log(`     Other fields: ${Object.keys(userResponse).filter(k => k !== 'userId' && k !== 'userLink').join(', ')}`);
+      });
+    }
+    
     return response.data;
   } catch (error) {
     if (error.response) {
