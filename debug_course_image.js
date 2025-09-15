@@ -52,7 +52,7 @@ async function debugCourseImage() {
     console.log('- Thumbnail field:', course.thumbnail || 'Not set');
     
     console.log('\n🔧 Streaming URL that should work:');
-    console.log(`http://localhost:8890/api/v1/stream/course-image/${courseId}`);
+    console.log(`https://lms-backend-724799456037.europe-west1.run.app/api/v1/stream/course-image/${courseId}`);
     
   } catch (error) {
     console.error('❌ Error:', error);

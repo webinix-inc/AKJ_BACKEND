@@ -5,7 +5,7 @@ async function testStreamingEndpoint() {
     console.log('🔧 Testing Course Image Streaming Endpoint...');
     
     const courseId = '6895a124640829b294034fa0';
-    const streamingUrl = `http://localhost:8890/api/v1/stream/course-image/${courseId}`;
+    const streamingUrl = `https://lms-backend-724799456037.europe-west1.run.app/api/v1/stream/course-image/${courseId}`;
     
     console.log(`🔍 Testing URL: ${streamingUrl}`);
     

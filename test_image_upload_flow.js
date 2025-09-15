@@ -5,7 +5,7 @@ const axios = require('axios');
 const mongoose = require('mongoose');
 
 // Test configuration
-const API_BASE_URL = 'http://localhost:8890';
+const API_BASE_URL = 'https://lms-backend-724799456037.europe-west1.run.app';
 const TEST_IMAGE_PATH = './test_image.jpg'; // Make sure this file exists
 
 console.log('🧪 COMPLETE IMAGE UPLOAD & RENDERING TEST');

@@ -4,7 +4,7 @@
 "Updated banner image content" | Out-File -FilePath "updated_banner_image.jpg" -Encoding ASCII
 
 # Test updating banner with image
-$uri = "http://localhost:8890/api/v1/admin/banner/68a4d97759b41da1acc993b9"
+$uri = "https://lms-backend-724799456037.europe-west1.run.app/api/v1/admin/banner/68a4d97759b41da1acc993b9"
 $filePath = "updated_banner_image.jpg"
 
 # Create multipart form data for update

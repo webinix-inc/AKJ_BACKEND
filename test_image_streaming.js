@@ -2,7 +2,7 @@ const http = require('http');
 const https = require('https');
 
 // Test configuration
-const API_BASE_URL = 'http://localhost:8890';
+const API_BASE_URL = 'https://lms-backend-724799456037.europe-west1.run.app';
 const TEST_COURSE_ID = '6751b5b4b5a6b8b5a6b8b5a6'; // Replace with actual course ID
 const TEST_BANNER_ID = '6751b5b4b5a6b8b5a6b8b5a7'; // Replace with actual banner ID
 

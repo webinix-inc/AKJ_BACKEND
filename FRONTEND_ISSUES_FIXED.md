@@ -3,8 +3,8 @@
 ## 🚨 **Original Issues from Browser Console:**
 
 1. **404 Not Found Errors:**
-   - `GET http://localhost:8890/user/courses` - **404 (Not Found)**
-   - `GET http://localhost:8890/api/v1/stream/banner-image/68c0c01` - **404 (Not Found)**
+   - `GET https://lms-backend-724799456037.europe-west1.run.app/user/courses` - **404 (Not Found)**
+   - `GET https://lms-backend-724799456037.europe-west1.run.app/api/v1/stream/banner-image/68c0c01` - **404 (Not Found)**
 
 2. **JWT Authentication Errors:**
    - `JsonWebTokenError: jwt malformed` causing 401 errors
@@ -84,12 +84,12 @@ export const getBannerImageUrl = (bannerImageUrl) => {
 **Problem:** Inconsistent WebSocket URLs and trailing slashes
 ```javascript
 // BEFORE
-PROD_URL: 'http://localhost:8890/',  // trailing slash
-const SOCKET_URL = "http://localhost:8890/";  // trailing slash
+PROD_URL: 'https://lms-backend-724799456037.europe-west1.run.app/',  // trailing slash
+const SOCKET_URL = "https://lms-backend-724799456037.europe-west1.run.app/";  // trailing slash
 
 // AFTER (consistent, no trailing slash)
-PROD_URL: 'http://localhost:8890',
-const SOCKET_URL = "http://localhost:8890";
+PROD_URL: 'https://lms-backend-724799456037.europe-west1.run.app',
+const SOCKET_URL = "https://lms-backend-724799456037.europe-west1.run.app";
 ```
 
 ---

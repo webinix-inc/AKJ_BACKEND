@@ -4,7 +4,7 @@ const Course = require('./models/courseModel');
 const Banner = require('./models/bannerModel');
 require('dotenv').config();
 
-const BASE_URL = 'http://localhost:8890';
+const BASE_URL = 'https://lms-backend-724799456037.europe-west1.run.app';
 
 async function testAdminImageRoutes() {
   console.log('🔧 COMPREHENSIVE ADMIN IMAGE ROUTES TESTING');
@@ -147,14 +147,14 @@ async function testAdminImageRoutes() {
     console.log('-'.repeat(40));
     
     console.log('🔗 Admin Frontend should use:');
-    console.log('- API Base:', 'http://localhost:8890/api/v1');
-    console.log('- Image Base:', 'http://localhost:8890');
-    console.log('- Socket Base:', 'http://localhost:8890');
+    console.log('- API Base:', 'https://lms-backend-724799456037.europe-west1.run.app/api/v1');
+    console.log('- Image Base:', 'https://lms-backend-724799456037.europe-west1.run.app');
+    console.log('- Socket Base:', 'https://lms-backend-724799456037.europe-west1.run.app');
     
     console.log('\n🔗 User Frontend should use:');
-    console.log('- API Base:', 'http://localhost:8890/api/v1');
-    console.log('- Image Base:', 'http://localhost:8890');
-    console.log('- Socket Base:', 'http://localhost:8890');
+    console.log('- API Base:', 'https://lms-backend-724799456037.europe-west1.run.app/api/v1');
+    console.log('- Image Base:', 'https://lms-backend-724799456037.europe-west1.run.app');
+    console.log('- Socket Base:', 'https://lms-backend-724799456037.europe-west1.run.app');
 
     // Test 6: Check if server has all streaming routes
     console.log('\n📋 6. TESTING ALL STREAMING ENDPOINTS');
