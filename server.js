@@ -24,48 +24,15 @@ const orderRoutes = require("./routes/bookOrder.route");
 
 const allowedOrigins = [
   //  LOCAL DEVELOPMENT - All common ports and protocols
-  "http://localhost", // User Frontend (Development)
-  "http://localhost:3000", // User Frontend (Development)
+   "http://localhost:3000", // User Frontend (Development)
   "http://localhost:3001", // Admin Frontend (Development)
-  "https://localhost:3000", // User Frontend (Development HTTPS)
-  "https://localhost:3001", // Admin Frontend (Development HTTPS)
-  "http://localhost:3002", // Alternative port
-  "http://localhost:3003", // Alternative port
-  "http://localhost:5173", // Vite dev server
-  "http://localhost:5174", // Vite dev server alt
-  "http://127.0.0.1:3000", // IPv4 localhost
-  "http://127.0.0.1:3001", // IPv4 localhost
-  
-  
+
   // 🚀 PRODUCTION DOMAINS
   "http://13.233.196.145",
   "http://65.0.103.50",
   "https://adminlms.freelancersgpt.com",
   "https://edtechuser.freelancersgpt.com",
-  "http://52.66.125.129",
-  "https://13.233.196.145",
-  "https://65.0.103.50",
-  "https://13.233.215.250",
-  "https://43.205.125.7",
-  "https://52.66.125.129",
-  
-  // added by Himanshu
-  "http://172.31.44.181", // New Users Frontend
-  "http://172.31.35.192", // New Admin Frontend
-  "http://172.31.11.118", // Backend itself
-  "https://172.31.44.181", // New Users Frontend HTTPS
-  "https://172.31.35.192", // New Admin Frontend HTTPS
-  "http://3.111.34.85",
-  "http://13.201.132.140",
-  "https://3.111.34.85",
-  "https://13.201.132.140",
-  
-  // 🚀 FIX: Add production frontend URLs
-  "http://13.232.208.235", // User Frontend (Production)
-  "http://13.127.56.109", // Admin Frontend (Production)
-  "https://13.232.208.235", // User Frontend (Production HTTPS)
-  "https://13.127.56.109", // Admin Frontend (Production HTTPS)
-];
+ ];
 
 const app = express();
 const server = http.createServer(app); // Create HTTP server
