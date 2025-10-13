@@ -40,8 +40,8 @@ const allowedOrigins = [
   // 🚀 PRODUCTION DOMAINS
   "http://13.233.196.145",
   "http://65.0.103.50",
-  "http://13.233.215.250",
-  "http://43.205.125.7",
+  "https://adminlms.freelancersgpt.com",
+  "https://edtechuser.freelancersgpt.com",
   "http://52.66.125.129",
   "https://13.233.196.145",
   "https://65.0.103.50",
