@@ -161,9 +161,8 @@ app.use(cors({
     "https://lms.wakadeclasses.com",
     "http://localhost:3000",
     "http://localhost:3001",// 🚀 FIX: Add production frontend URLs
-    "http://13.232.208.235", // User Frontend (Production)
-    "http://13.127.56.109", // Admin Frontend (Production)
-    "https://13.232.208.235", // User Frontend (Production HTTPS)
+    "https://adminlms.freelancersgpt.com",
+   "https://edtechuser.freelancersgpt.com", // User Frontend (Production HTTPS)
     "https://13.127.56.109"],// Admin Frontend (Production HTTPS)],
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "Cache-Control", "Pragma"],
