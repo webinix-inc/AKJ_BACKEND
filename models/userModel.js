@@ -86,6 +86,16 @@ const userSchema = new schema(
           type: Number,
           default: -1,
         },
+        installments: [
+          {
+            installmentNumber: { type: Number, required: true }, // 1, 2, 3, etc.
+            amount: { type: Number, required: true },
+            paidDate: { type: Date },
+            paymentId: { type: String },
+            orderId: { type: String },
+            isPaid: { type: Boolean, default: false },
+          },
+        ],
         assignedByAdmin: {
           isAssigned: { type: Boolean, default: false },
           assignedAt: { type: Date },
@@ -108,8 +118,10 @@ const userSchema = new schema(
         title: { type: String, required: true },
         startTime: { type: Date, required: true },
         duration: { type: Number, required: true },
-        liveLink: { type: String, required: true }, // Now required - individual user link
+        liveLink: { type: String, required: true }, // Individual user link (formatted for frontend)
+        userLink: { type: String }, // Raw userLink from MeritHub API (for reference)
         classId: { type: String },
+        platform: { type: String, enum: ["zoom", "merithub"], default: "merithub" },
         // participantLink removed - we only use individual liveLink now
       },
     ],
@@ -182,6 +194,6 @@ userSchema.index({ phone: 1, userType: 1 }); // Phone login queries
 userSchema.index({ "purchasedCourses.course": 1 }); // Course access checks
 userSchema.index({ "purchasedCourses.course": 1, isActive: 1 }); // Active course users
 
-const User = mongoose.model("User", userSchema);
-
+// Export the model
+const User = mongoose.models.User || mongoose.model("User", userSchema);
 module.exports = User;

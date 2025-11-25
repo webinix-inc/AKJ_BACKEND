@@ -8,6 +8,6 @@ const testimonialSchema = new mongoose.Schema({
   isVisible: { type: Boolean, default: true },
 }, { timestamps: true });
 
-const Testimonial = mongoose.model('Testimonial', testimonialSchema);
-
+// Export the model
+const Testimonial = mongoose.models.Testimonial || mongoose.model("Testimonial", testimonialSchema);
 module.exports = Testimonial;

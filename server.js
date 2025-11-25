@@ -190,8 +190,15 @@ app.use((req, res, next) => {
 // app.use(express.raw({ type: '/', limit: '10mb' }));
 
 app.use(cors({
-  origin: ["http://lms.wakadeclasses.com", "https://lms.wakadeclasses.com","http://localhost:3000","http://localhost:3001"],
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  origin: ["http://lms.wakadeclasses.com",
+    "https://lms.wakadeclasses.com",
+    "http://localhost:3000",
+    "http://localhost:3001",// 🚀 FIX: Add production frontend URLs
+    "http://13.232.208.235", // User Frontend (Production)
+    "http://13.127.56.109", // Admin Frontend (Production)
+    "https://13.232.208.235", // User Frontend (Production HTTPS)
+    "https://13.127.56.109"],// Admin Frontend (Production HTTPS)],
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "Cache-Control", "Pragma"],
   credentials: true,
   optionsSuccessStatus: 204
@@ -362,7 +369,13 @@ mongoose
     console.log("📚 LOADING API ROUTES");
     console.log("📚 ================================");
     console.log("👤 Loading user routes...");
-    require("./routes/user.route")(app);
+    try {
+      require("./routes/user.route")(app);
+      console.log("✅ User routes loaded successfully");
+    } catch (error) {
+      console.error("❌ Error loading user routes:", error.message);
+      console.error(error.stack);
+    }
     console.log("🔧 Loading admin routes...");
     require("./routes/admin.route")(app);
     console.log("👨‍🏫 Loading teacher routes...");

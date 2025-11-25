@@ -43,10 +43,12 @@ const LiveClassSchema = new mongoose.Schema({
   },
   
   // MeritHub specific fields
-  liveLink: { type: String }, // Instructor link for "Go Live" button
-  instructorLink: { type: String }, // Dedicated instructor link field
-  participantLink: { type: String }, // 🔧 FIX: Common participant link for students
-  moderatorLink: { type: String }, // Common moderator link for teachers
+  liveLink: { type: String }, // Primary instructor link (hostLink)
+  instructorLink: { type: String }, // Instructor link (hostLink - full control)
+  participantLink: { type: String }, // Participant link (commonParticipantLink - student permissions)
+  moderatorLink: { type: String }, // Moderator link (commonModeratorLink - moderator permissions)
+  deviceTestLink: { type: String }, // Device test link for participants
+  instructorDeviceTestLink: { type: String }, // Device test link for instructor
   classId: { type: String },
   
   // Zoom specific fields
@@ -56,7 +58,15 @@ const LiveClassSchema = new mongoose.Schema({
   
   actualStartTime: { type: Date }, // When class actually went live
   actualEndTime: { type: Date }, // When class actually ended
+  
+  // Recording fields
+  recordingUrl: { type: String }, // URL to the recording player
+  recordingStatus: { type: String, enum: ["pending", "recording", "recorded", "failed"], default: "pending" },
+  recordingStartTime: { type: Date }, // When recording started
+  recordingDuration: { type: String }, // Recording duration (format: "HH:MM:SS")
+  
   createdAt: { type: Date, default: Date.now },
 });
 
-module.exports = mongoose.model("LiveClass", LiveClassSchema);
+// Export the model
+module.exports = mongoose.models.LiveClass || mongoose.model("LiveClass", LiveClassSchema);

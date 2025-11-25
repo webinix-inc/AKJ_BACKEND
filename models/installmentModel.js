@@ -54,4 +54,5 @@ installmentSchema.index({ courseId: 1, planType: 1 }); // Course plans
 installmentSchema.index({ status: 1, courseId: 1 }); // Status by course
 installmentSchema.index({ "userPayments.userId": 1, "userPayments.isPaid": 1 }); // User payment status
 
-module.exports = mongoose.model("Installment", installmentSchema);
+// Export the model
+module.exports = mongoose.models.Installment || mongoose.model("Installment", installmentSchema);

@@ -33,4 +33,5 @@ const staticContent = mongoose.Schema({
 
 }, { timestamps: true });
 
-module.exports = mongoose.model('AboutUs', staticContent);
+// Export the model
+module.exports = mongoose.models.AboutUs || mongoose.model('AboutUs', staticContent);

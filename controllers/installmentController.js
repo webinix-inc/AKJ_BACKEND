@@ -242,8 +242,116 @@ exports.getInstallments = async (req, res) => {
       });
     }
 
+    // Fetch all paid orders for this course to sync payment status
+    let paidOrders = await Order.find({ 
+      courseId: courseId,
+      status: "paid",
+      paymentMode: "installment"
+    });
+
+    // Auto-fix: If status is "paid" but installmentDetails.isPaid is false, update it to true
+    let ordersFixed = 0;
+    for (const order of paidOrders) {
+      if (order.installmentDetails && 
+          order.status === "paid" && 
+          order.installmentDetails.isPaid === false) {
+        console.log(`🔧 Auto-fixing order ${order.orderId}: Setting installmentDetails.isPaid to true`);
+        order.installmentDetails.isPaid = true;
+        await order.save();
+        ordersFixed++;
+      }
+    }
+    
+    if (ordersFixed > 0) {
+      console.log(`✅ Auto-fixed ${ordersFixed} order(s) in getInstallments`);
+      // Re-fetch orders to get updated data
+      paidOrders = await Order.find({ 
+        courseId: courseId,
+        status: "paid",
+        paymentMode: "installment"
+      });
+    }
+
+    // Sync userPayments and installments with Order status
+    let totalFixed = 0;
+    for (const plan of installments) {
+      let planUpdated = false;
+      
+      // Process each paid order
+      for (const order of paidOrders) {
+        // Check if order belongs to this plan (by matching installmentIndex and courseId)
+        if (order.installmentDetails && 
+            order.installmentDetails.installmentIndex !== undefined &&
+            order.installmentDetails.installmentIndex < plan.installments.length) {
+          
+          const installmentIdx = order.installmentDetails.installmentIndex;
+          const userId = order.userId?.toString?.() || order.userId;
+          
+          // Check BOTH conditions: status === "paid" AND installmentDetails.isPaid === true
+          const isFullyPaid = order.status === "paid" && 
+                             order.installmentDetails.isPaid === true;
+          
+          if (isFullyPaid) {
+            // Update installments array
+            if (plan.installments[installmentIdx] && !plan.installments[installmentIdx].isPaid) {
+              plan.installments[installmentIdx].isPaid = true;
+              plan.installments[installmentIdx].paidOn = order.updatedAt || order.createdAt || new Date();
+              planUpdated = true;
+              totalFixed++;
+            }
+            
+            // Update userPayments array
+            const userPaymentIndex = plan.userPayments.findIndex(
+              up => up.userId?.toString?.() === userId && 
+                    up.installmentIndex === installmentIdx
+            );
+            
+            if (userPaymentIndex !== -1) {
+              // Update existing userPayment
+              if (!plan.userPayments[userPaymentIndex].isPaid) {
+                plan.userPayments[userPaymentIndex].isPaid = true;
+                plan.userPayments[userPaymentIndex].paymentDate = order.updatedAt || order.createdAt || new Date();
+                planUpdated = true;
+              }
+            } else {
+              // Add new userPayment entry if it doesn't exist
+              plan.userPayments.push({
+                userId: userId,
+                installmentIndex: installmentIdx,
+                isPaid: true,
+                paidAmount: order.amount,
+                paymentDate: order.updatedAt || order.createdAt || new Date()
+              });
+              planUpdated = true;
+            }
+          }
+        }
+      }
+      
+      // Update remainingAmount and status if plan was updated
+      if (planUpdated) {
+        const paidAmount = plan.installments
+          .filter(inst => inst.isPaid)
+          .reduce((sum, inst) => sum + inst.amount, 0);
+        plan.remainingAmount = plan.totalAmount - paidAmount;
+        
+        if (plan.installments.every(inst => inst.isPaid)) {
+          plan.status = "completed";
+        }
+        
+        await plan.save();
+      }
+    }
+
+    if (totalFixed > 0) {
+      console.log(`✅ Synced ${totalFixed} installment payment(s) with Order status for course ${courseId}`);
+    }
+
+    // Re-fetch installments to get updated data
+    const updatedInstallments = await Installment.find({ courseId }).sort({ createdAt: -1 });
+
     // Enhance response with additional metadata
-    const enhancedInstallments = installments.map(plan => ({
+    const enhancedInstallments = updatedInstallments.map(plan => ({
       ...plan.toObject(),
       courseName: course.title || course.name,
       totalInstallments: plan.installments.length,
@@ -254,7 +362,7 @@ exports.getInstallments = async (req, res) => {
     res.status(200).json({ 
       message: "Installment plans retrieved successfully", 
       data: enhancedInstallments,
-      count: installments.length,
+      count: updatedInstallments.length,
       courseInfo: {
         id: course._id,
         name: course.title || course.name
@@ -446,6 +554,12 @@ exports.confirmInstallmentPayment = async (req, res) => {
     }
 
     order.status = "paid";
+    
+    // Update order's installmentDetails if it exists
+    if (order.installmentDetails) {
+      order.installmentDetails.isPaid = true;
+    }
+    
     await order.save();
 
     const installmentPlan = await Installment.findById(order.installmentPlanId);

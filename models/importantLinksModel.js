@@ -6,4 +6,5 @@ const importantLinkSchema = new Schema({
   url: { type: String, required: true },
 },{timestamps: true});
 
-module.exports = mongoose.model('ImportantLink', importantLinkSchema);
+// Export the model
+module.exports = mongoose.models.ImportantLink || mongoose.model("ImportantLink", importantLinkSchema);

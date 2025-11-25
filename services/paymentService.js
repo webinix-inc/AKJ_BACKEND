@@ -231,45 +231,111 @@ const addCourseToUserLogic = async (userId, courseId, paymentMode, installmentDe
     }
 
     const amountPaid = paymentDetails.amount / 100; // Convert from paise
-    const alreadyEnrolled = user.purchasedCourses.some(
+    const paymentId = paymentDetails.id || paymentDetails.payment_id || null;
+    const orderId = paymentDetails.order_id || null;
+    
+    // Find if user already has this course
+    const courseIndex = user.purchasedCourses.findIndex(
       (c) => c.course.toString() === courseId.toString()
     );
 
-    // Add course to user if not already enrolled
-    if (!alreadyEnrolled) {
+    const isInstallment = paymentMode === "installment";
+    const installmentIndex = installmentDetails?.installmentIndex ?? 0;
+    const installmentNumber = installmentIndex + 1; // 1-based for display
+    const totalInstallments = installmentDetails?.totalInstallments ?? 1;
+
+    // If course not found, create new entry (first installment or full payment)
+    if (courseIndex === -1) {
       const newCourse = {
         course: courseId,
         purchaseDate: new Date(),
         amountPaid,
-        paymentType: paymentMode, // 🔥 FIXED: Use correct field name from user model
+        paymentType: paymentMode,
+        installments: [],
       };
       
-      if (paymentMode === "installment") {
-        newCourse.totalInstallments = installmentDetails.totalInstallments;
+      if (isInstallment) {
+        newCourse.totalInstallments = totalInstallments;
+        // Add first installment record
+        newCourse.installments.push({
+          installmentNumber,
+          amount: amountPaid,
+          paidDate: new Date(),
+          paymentId,
+          orderId,
+          isPaid: true,
+        });
       }
 
       console.log(`💳 Adding course to user with payment details:`, {
         courseId,
-        paymentType: paymentMode, // 🔥 FIXED: Log correct field name
+        paymentType: paymentMode,
         amountPaid,
-        totalInstallments: newCourse.totalInstallments || 'undefined (full payment)'
+        totalInstallments: isInstallment ? totalInstallments : 'N/A (full payment)',
+        installmentNumber: isInstallment ? installmentNumber : 'N/A'
       });
 
       user.purchasedCourses.push(newCourse);
       await user.save();
     } else {
-      console.log(`💳 User already enrolled in course ${courseId}`);
+      // Course already exists - update for subsequent installment payments
+      const purchasedCourse = user.purchasedCourses[courseIndex];
+      
+      if (isInstallment) {
+        // Update total amount paid
+        purchasedCourse.amountPaid = (purchasedCourse.amountPaid || 0) + amountPaid;
+        
+        // Check if this installment already exists
+        const existingInstallment = purchasedCourse.installments.find(
+          (inst) => inst.installmentNumber === installmentNumber
+        );
+
+        if (existingInstallment) {
+          // Update existing installment
+          existingInstallment.isPaid = true;
+          existingInstallment.paidDate = new Date();
+          existingInstallment.paymentId = paymentId;
+          existingInstallment.orderId = orderId;
+          console.log(`💳 Updated existing installment ${installmentNumber} for course ${courseId}`);
+        } else {
+          // Add new installment record
+          purchasedCourse.installments.push({
+            installmentNumber,
+            amount: amountPaid,
+            paidDate: new Date(),
+            paymentId,
+            orderId,
+            isPaid: true,
+          });
+          console.log(`💳 Added installment ${installmentNumber} for course ${courseId}`);
+        }
+
+        // Ensure totalInstallments is set
+        if (!purchasedCourse.totalInstallments || purchasedCourse.totalInstallments === -1) {
+          purchasedCourse.totalInstallments = totalInstallments;
+        }
+      } else {
+        // Full payment - update amount paid
+        purchasedCourse.amountPaid = (purchasedCourse.amountPaid || 0) + amountPaid;
+      }
+
+      await user.save();
+      console.log(`💳 Updated course payment for user ${userId}, course ${courseId}, new total: ₹${purchasedCourse.amountPaid}`);
     }
 
-    // Handle live class integration
-    await integrateLiveClassesLogic(userId, courseId);
+    // Handle live class integration (only on first enrollment)
+    if (courseIndex === -1) {
+      await integrateLiveClassesLogic(userId, courseId);
+    }
 
-    console.log("✅ Course enrollment completed");
+    console.log("✅ Course enrollment/payment update completed");
     return {
       enrolled: true,
       courseId,
       userId,
-      amountPaid
+      amountPaid,
+      isNewEnrollment: courseIndex === -1,
+      installmentNumber: isInstallment ? installmentNumber : null
     };
   } catch (error) {
     console.error("❌ Error in addCourseToUserLogic:", error);
@@ -289,19 +355,41 @@ const integrateLiveClassesLogic = async (userId, courseId) => {
       throw new Error("User not found for live class integration");
     }
 
-    const classes = await LiveClass.find({ courseIds: courseId });
+    // Find live classes where the courseId is in the courseIds array (supports multiple courses per class)
+    const classes = await LiveClass.find({ courseIds: { $in: [courseId] } });
     
     const addUserToClasses = classes.map(async (cls) => {
       if (!cls.classId) return;
 
       try {
+        // Extract commonParticipantLink from the stored participantLink URL
+        let commonParticipantLink = null;
+        if (cls.participantLink) {
+          const urlParts = cls.participantLink.split('/');
+          const linkPart = urlParts[urlParts.length - 1];
+          commonParticipantLink = linkPart?.split('?')[0];
+        } else if (cls.liveLink) {
+          const urlParts = cls.liveLink.split('/');
+          const linkPart = urlParts[urlParts.length - 1];
+          commonParticipantLink = linkPart?.split('?')[0];
+        }
+
+        if (!commonParticipantLink) {
+          console.error(`❌ [INTEGRATE] No participant link found for class ${cls.title}`);
+          return;
+        }
+
         const response = await addUsersToClass(
           cls.classId,
-          [user.merithubUserId]
+          [user.merithubUserId],
+          commonParticipantLink
         );
         
         const userRes = response.find((r) => r.userId === user.merithubUserId);
-        if (!userRes?.userLink) return;
+        if (!userRes?.userLink) {
+          console.error(`❌ [INTEGRATE] No individual link returned for user ${user.merithubUserId}`);
+          return;
+        }
 
         const link = `https://live.merithub.com/info/room/${process.env.MERIT_HUB_CLIENT_ID}/${userRes.userLink}?iframe=true`;
 
@@ -309,9 +397,10 @@ const integrateLiveClassesLogic = async (userId, courseId) => {
           title: cls.title,
           startTime: cls.startTime,
           duration: cls.duration,
-          liveLink: link, // Use liveLink instead of participantLink
+          liveLink: link, // 🔧 FIXED: Individual user link for student joining classes
           courseIds: courseId,
           classId: cls.classId, // Add classId for consistency
+          platform: "merithub", // Add platform for consistency
         };
 
         await User.findByIdAndUpdate(userId, { $push: { liveClasses: liveClassInfo } });

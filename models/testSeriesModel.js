@@ -31,6 +31,6 @@ testSeriesSchema.pre('save', function (next) {
     next();
 });
 
-const TestSeries = mongoose.model('TestSeries', testSeriesSchema);
-
+// Export the model
+const TestSeries = mongoose.models.TestSeries || mongoose.model("TestSeries", testSeriesSchema);
 module.exports = TestSeries;

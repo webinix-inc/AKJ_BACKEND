@@ -42,6 +42,6 @@ const scheduleSchema = new mongoose.Schema({
     },
 }, { timestamps: true });
 
-const Schedule = mongoose.model('Schedule', scheduleSchema);
-
+// Export the model
+const Schedule = mongoose.models.Schedule || mongoose.model("Schedule", scheduleSchema);
 module.exports = Schedule;

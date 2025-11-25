@@ -13,6 +13,6 @@ const syllabusSchema = new mongoose.Schema({
     }
 }, { timestamps: true });
 
-const Syllabus = mongoose.model('Syllabus', syllabusSchema);
-
+// Export the model
+const Syllabus = mongoose.models.Syllabus || mongoose.model("Syllabus", syllabusSchema);
 module.exports = Syllabus;

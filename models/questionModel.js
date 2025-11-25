@@ -62,6 +62,6 @@ questionSchema.index({ questionType: 1 });
 
 questionSchema.index({ quizId: 1, _id: 1 });
 
-const Question = mongoose.model('Question', questionSchema);
-
+// Export the model
+const Question = mongoose.models.Question || mongoose.model("Question", questionSchema);
 module.exports = Question;

@@ -25,6 +25,6 @@ const videoLectureSchema = new Schema({
     }],
 }, { timestamps: true });
 
-const VideoLecture = mongoose.model('VideoLecture', videoLectureSchema);
-
+// Export the model
+const VideoLecture = mongoose.models.VideoLecture || mongoose.model("VideoLecture", videoLectureSchema);
 module.exports = VideoLecture;

@@ -6,6 +6,6 @@ const achieverSchema = new mongoose.Schema({
   id: String,
 });
 
-const Achiever = mongoose.model("Achiever", achieverSchema);
-
+// Export the model
+const Achiever = mongoose.models.Achiever || mongoose.model("Achiever", achieverSchema);
 module.exports = Achiever;

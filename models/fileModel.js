@@ -16,4 +16,5 @@ const fileSchema = new Schema({
   isViewable: { type: Boolean, default: false },    // true = unlocked (visible to all), false = locked (only for purchased)
 });
 
-module.exports = mongoose.model('File', fileSchema);
+// Export the model
+module.exports = mongoose.models.File || mongoose.model("File", fileSchema);

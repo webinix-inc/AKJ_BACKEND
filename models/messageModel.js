@@ -76,7 +76,6 @@ messageSchema.index({ sender: 1, receiver: 1, timestamp: -1 });
 messageSchema.index({ groupId: 1 });
 messageSchema.index({ isBroadcast: 1 });
 
-const Message =
-  mongoose.models.Message || mongoose.model("Message", messageSchema);
-
+// Export the model
+const Message = mongoose.models.Message || mongoose.model("Message", messageSchema);
 module.exports = Message;

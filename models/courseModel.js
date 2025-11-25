@@ -183,4 +183,5 @@ courseSchema.index({ category: 1, subCategory: 1 }); // Category navigation
 courseSchema.index({ teacher: 1, isPublished: 1 }); // Teacher's published courses
 courseSchema.index({ isPublished: 1, createdAt: -1 }); // Latest published courses
 
-module.exports = mongoose.model("Course", courseSchema);
+// Export the model
+module.exports = mongoose.models.Course || mongoose.model("Course", courseSchema);

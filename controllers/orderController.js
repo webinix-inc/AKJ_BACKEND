@@ -17,10 +17,36 @@ exports.getAllPaidOrders = async (req, res) => {
       });
     }
 
+    // Auto-fix: If status is "paid" but installmentDetails.isPaid is false, update it to true
+    let fixedCount = 0;
+    const updatePromises = paidOrders.map(async (order) => {
+      // Check if it's an installment payment and needs fixing
+      if (order.paymentMode === "installment" && 
+          order.installmentDetails && 
+          order.status === "paid" && 
+          order.installmentDetails.isPaid === false) {
+        
+        console.log(`🔧 Auto-fixing order ${order.orderId}: Setting installmentDetails.isPaid to true`);
+        order.installmentDetails.isPaid = true;
+        await order.save();
+        fixedCount++;
+        return order;
+      }
+      return order;
+    });
+
+    // Wait for all updates to complete
+    await Promise.all(updatePromises);
+
+    if (fixedCount > 0) {
+      console.log(`✅ Auto-fixed ${fixedCount} order(s) with inconsistent installment payment status`);
+    }
+
     return res.status(200).json({
       status: 200,
       message: "Paid orders retrieved successfully",
       data: paidOrders,
+      fixedCount: fixedCount > 0 ? fixedCount : undefined, // Include fixed count if any were fixed
     });
   } catch (error) {
     console.error(error);

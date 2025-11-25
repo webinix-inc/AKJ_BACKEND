@@ -97,4 +97,5 @@ assignmentSubmissionSchema.index({ courseRootFolder: 1, createdAt: -1 });
 assignmentSubmissionSchema.index({ submissionStatus: 1 });
 assignmentSubmissionSchema.index({ createdAt: -1 });
 
-module.exports = mongoose.model('AssignmentSubmission', assignmentSubmissionSchema);
+// Export the model
+module.exports = mongoose.models.AssignmentSubmission || mongoose.model("AssignmentSubmission", assignmentSubmissionSchema);

@@ -6,4 +6,5 @@ const batchSchema = new mongoose.Schema({
   videoSrc: { type: String, required: true },
 });
 
-module.exports = mongoose.model('Batch', batchSchema);
+// Export the model
+module.exports = mongoose.models.Batch || mongoose.model("Batch", batchSchema);

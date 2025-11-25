@@ -58,4 +58,5 @@ const categorySchema = schema(
   { timestamps: true }
 );
 
-module.exports = mongoose.model("subCategory", categorySchema);
+// Export the model
+module.exports = mongoose.models.subCategory || mongoose.model("subCategory", categorySchema);

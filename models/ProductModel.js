@@ -88,6 +88,6 @@ const productSchema = new mongoose.Schema({
 productSchema.plugin(mongoosePaginate);
 productSchema.plugin(mongooseAggregatePaginate);
 
-const Product = mongoose.model('Product', productSchema);
-
+// Export the model
+const Product = mongoose.models.Product || mongoose.model('Product', productSchema);
 module.exports = Product;

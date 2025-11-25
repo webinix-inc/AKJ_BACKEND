@@ -11,6 +11,7 @@ const {
   getRecordedVideos,
   handleMeritHubStatusPing,
   migrateUserLiveClassLinks,
+  addUserToLiveClass,
 } = require("../controllers/liveClassController");
 const authJwt = require("../middlewares/authJwt"); // Importing auth middleware
 
@@ -27,6 +28,9 @@ module.exports = (app) => {
 
   // 🔧 FIX: Add user endpoint for live classes (user-specific filtering)
   app.get("/api/v1/user/live-classes", [authJwt.verifyToken], fetchUserLiveClasses);
+  
+  // Add user to live class on-demand (when they try to join)
+  app.post("/api/v1/user/live-classes/:classId/add-user", [authJwt.verifyToken], addUserToLiveClass);
 
   app.get("/courses/:courseId/recorded-videos", [authJwt.verifyToken], getRecordedVideos);
 };

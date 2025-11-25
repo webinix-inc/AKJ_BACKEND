@@ -25,6 +25,6 @@ const recordingSchema = new Schema({
     }]
 }, { timestamps: true });
 
-const Recording = mongoose.model('Recording', recordingSchema);
-
+// Export the model
+const Recording = mongoose.models.Recording || mongoose.model("Recording", recordingSchema);
 module.exports = Recording;

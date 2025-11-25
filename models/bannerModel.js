@@ -38,4 +38,5 @@ const bannerSchema = new mongoose.Schema({
     timestamps: true // Automatically add createdAt and updatedAt
 });
 
-module.exports = mongoose.model("Banner", bannerSchema);
+// Export the model
+module.exports = mongoose.models.Banner || mongoose.model("Banner", bannerSchema);

@@ -32,6 +32,6 @@ const faqSchema = new mongoose.Schema({
   },
 });
 
-const Faq = mongoose.model('Faq', faqSchema);
-
+// Export the model
+const Faq = mongoose.models.Faq || mongoose.model("Faq", faqSchema);
 module.exports = Faq;

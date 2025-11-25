@@ -95,6 +95,6 @@ quizSchema.index({ isActive: 1 });
 quizSchema.index({ _id: 1, availabilityType: 1 });
 quizSchema.index({ scheduledStart: 1, scheduledEnd: 1 });
 
-const Quiz = mongoose.model("Quiz", quizSchema);
-
+// Export the model
+const Quiz = mongoose.models.Quiz || mongoose.model("Quiz", quizSchema);
 module.exports = Quiz;

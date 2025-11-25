@@ -65,4 +65,5 @@ folderSchema.index({ isMasterFolder: 1, isSystemFolder: 1 });
 // fileSchema.set('toObject', { virtuals: true });
 // fileSchema.set('toJSON', { virtuals: true });
 
-module.exports = mongoose.model('Folder', folderSchema);
+// Export the model
+module.exports = mongoose.models.Folder || mongoose.model("Folder", folderSchema);

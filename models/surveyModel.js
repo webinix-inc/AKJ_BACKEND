@@ -36,6 +36,6 @@ const surveyFormSchema = new Schema({
     }
 }, { timestamps: true });
 
-const SurveyForm = mongoose.model('SurveyForm', surveyFormSchema);
-
+// Export the model
+const SurveyForm = mongoose.models.SurveyForm || mongoose.model("SurveyForm", surveyFormSchema);
 module.exports = SurveyForm;

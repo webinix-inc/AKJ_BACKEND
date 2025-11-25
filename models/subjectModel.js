@@ -70,4 +70,5 @@ subjectSchema.pre('findOneAndDelete', async function (next) {
     next();
 });
 
-module.exports = mongoose.model('Subject', subjectSchema);
+// Export the model
+module.exports = mongoose.models.Subject || mongoose.model("Subject", subjectSchema);

@@ -14,6 +14,6 @@ const followUsSchema = new Schema({
     }
 }, { timestamps: true });
 
-const FollowUs = mongoose.model('FollowUs', followUsSchema);
-
+// Export the model
+const FollowUs = mongoose.models.FollowUs || mongoose.model("FollowUs", followUsSchema);
 module.exports = FollowUs;

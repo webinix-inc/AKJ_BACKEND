@@ -86,6 +86,6 @@ scorecardSchema.methods.calculateScore = function() {
     this.incorrectQuestions = this.answers.length - this.correctQuestions;
 };
 
-const Scorecard = mongoose.model('Scorecard', scorecardSchema);
-
+// Export the model
+const Scorecard = mongoose.models.Scorecard || mongoose.model("Scorecard", scorecardSchema);
 module.exports = Scorecard;

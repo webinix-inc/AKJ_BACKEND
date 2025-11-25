@@ -86,4 +86,5 @@ const subscriptionSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-module.exports = mongoose.model("Subscription", subscriptionSchema);
+// Export the model
+module.exports = mongoose.models.Subscription || mongoose.model("Subscription", subscriptionSchema);

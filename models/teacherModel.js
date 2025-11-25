@@ -16,6 +16,7 @@ const teacherSchema = new mongoose.Schema(
     { timestamps: true },
    
 );
-const Teacher = mongoose.model("Teacher", teacherSchema);
 
-module.exports =Teacher;
+// Export the model
+const Teacher = mongoose.models.Teacher || mongoose.model("Teacher", teacherSchema);
+module.exports = Teacher;

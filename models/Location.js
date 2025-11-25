@@ -15,5 +15,6 @@ const locationSchema = new Schema({
     postCode: { type: String, required: true },
 }, { timestamps: true });
 
-const Location = mongoose.model("Location", locationSchema);
+// Export the model
+const Location = mongoose.models.Location || mongoose.model("Location", locationSchema);
 module.exports = Location;

@@ -566,17 +566,19 @@ exports.signupWithPhone = async (req, res) => {
     await redisClient.setEx(redisKey, expirationTime, otp);
 
     // Prepare user details for MeritHub
+    // Prepare user details for MeritHub API (following MeritHub specification)
+    const userFullName = `${newUser.firstName || 'Student'} ${newUser.lastName || ''}`.trim();
     const userDetailsForMeritHub = {
-      name: `User_${newUser._id}`, // Use a default name; can be updated later
-      title: "Demo User", // Default title
-      img: "https://hst.meritgraph.com/theme/img/png/avtr.png", // Default avatar
-      desc: "This is a demo user",
-      lang: "en", // Default language
-      clientUserId: newUser._id.toString(), // Unique identifier for MeritHub
-      email: newUser.email || `${newUser._id}@example.com`, // Temporary email
-      role: "M", // Default role
-      timeZone: "Asia/Kolkata", // Default time zone
-      permission: "CJ", // Default permission
+      name: userFullName || `Student_${newUser._id}`, // Use actual user name
+      title: "Student", // Meaningful title for students
+      img: "https://hst.meritgraph.com/theme/img/png/avtr.png", // MeritHub default avatar
+      desc: `Student at Wakade Classes - ${userFullName}`, // Descriptive description
+      lang: "en", // Language preference
+      clientUserId: newUser._id.toString(), // Unique identifier (MongoDB _id)
+      email: newUser.email || `student_${newUser._id}@wakadeclasses.com`, // Unique email (real or dummy)
+      role: "M", // Role: "M" for Students, "C" for Creator/Teacher
+      timeZone: "Asia/Kolkata", // Time zone
+      permission: "CJ", // Permission: "CJ" for Course and Class Joining
     };
 
     try {
@@ -872,9 +874,11 @@ exports.getProfile = async (req, res) => {
         duration: lc.duration,
         platform: lc.platform,
         status: lc.status,
-        liveLink: lc.participantLink || lc.liveLink, // 🔧 FIX: Use participant link for students
+        // 🔧 FIXED: For students, use participantLink from LiveClass collection
+        // This ensures students get participant access, not instructor access
+        liveLink: lc.liveLink, // Keep original instructor link for reference
+        participantLink: lc.participantLink, // Participant link for students
         instructorLink: lc.instructorLink,
-        participantLink: lc.participantLink,
         moderatorLink: lc.moderatorLink,
         courseIds: lc.courseIds,
         description: lc.description,

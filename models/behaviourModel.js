@@ -32,6 +32,6 @@ const behaviorNoteSchema = new Schema({
     }
 }, { timestamps: true });
 
-const BehaviorNote = mongoose.model('BehaviorNote', behaviorNoteSchema);
-
+// Export the model
+const BehaviorNote = mongoose.models.BehaviorNote || mongoose.model("BehaviorNote", behaviorNoteSchema);
 module.exports = BehaviorNote;

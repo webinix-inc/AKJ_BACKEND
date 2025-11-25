@@ -28,6 +28,6 @@ const noticeBoardSchema = new mongoose.Schema({
     },
 }, { timestamps: true });
 
-const NoticeBoard = mongoose.model('NoticeBoard', noticeBoardSchema);
-
+// Export the model
+const NoticeBoard = mongoose.models.NoticeBoard || mongoose.model("NoticeBoard", noticeBoardSchema);
 module.exports = NoticeBoard;

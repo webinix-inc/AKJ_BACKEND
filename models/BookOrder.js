@@ -36,4 +36,5 @@ const bookOrderSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-module.exports = mongoose.model("BookOrder", bookOrderSchema);
+// Export the model
+module.exports = mongoose.models.BookOrder || mongoose.model("BookOrder", bookOrderSchema);

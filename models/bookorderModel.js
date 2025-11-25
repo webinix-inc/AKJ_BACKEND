@@ -25,4 +25,5 @@ const orderSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
 });
 
-module.exports = mongoose.model("BookPaymentOrder", orderSchema);
+// Export the model
+module.exports = mongoose.models.BookPaymentOrder || mongoose.model("BookPaymentOrder", orderSchema);

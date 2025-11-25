@@ -28,6 +28,6 @@ const examScheduleSchema = new Schema({
     }
 }, { timestamps: true });
 
-const ExamSchedule = mongoose.model('ExamSchedule', examScheduleSchema);
-
+// Export the model
+const ExamSchedule = mongoose.models.ExamSchedule || mongoose.model("ExamSchedule", examScheduleSchema);
 module.exports = ExamSchedule;

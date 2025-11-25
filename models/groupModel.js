@@ -23,4 +23,5 @@ groupSchema.index({ members: 1 });
 groupSchema.index({ admin: 1 });
 
 
-module.exports = mongoose.model("Group", groupSchema);
+// Export the model
+module.exports = mongoose.models.Group || mongoose.model("Group", groupSchema);

@@ -39,5 +39,6 @@ orderSchema.index({ courseId: 1, status: 1 }); // Course orders by status
 orderSchema.index({ status: 1, paymentMode: 1 }); // Orders by status and payment mode
 orderSchema.index({ userId: 1, courseId: 1 }); // User-course combinations
 
-module.exports = mongoose.model("Order", orderSchema);
+// Export the model
+module.exports = mongoose.models.Order || mongoose.model("Order", orderSchema);
 

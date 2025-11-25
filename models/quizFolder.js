@@ -26,4 +26,5 @@ quizFolderSchema.index({ courses: 1 });
 quizFolderSchema.index({ createdAt: -1 });
 quizFolderSchema.index({ parentFolderId: 1, isVisible: 1 }); // Visible subfolders
 
-module.exports = mongoose.model("QuizFolder", quizFolderSchema);
+// Export the model
+module.exports = mongoose.models.QuizFolder || mongoose.model("QuizFolder", quizFolderSchema);

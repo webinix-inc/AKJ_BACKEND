@@ -28,4 +28,5 @@ const LiveUserSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
 });
 
-module.exports = mongoose.model("LiveUser", LiveUserSchema);
+// Export the model
+module.exports = mongoose.models.LiveUser || mongoose.model("LiveUser", LiveUserSchema);

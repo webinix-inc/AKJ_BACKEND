@@ -288,12 +288,20 @@ async function scheduleLiveClass(instructorUserId, classDetails, userToken = nul
     const accessToken = await getAccessToken();
     console.log(`🎫 [SCHEDULE] Using Access Token for authentication`);
     
+    // 🔧 FIX: Add required MeritHub fields to classDetails
+    const meritHubClassDetails = {
+      ...classDetails,
+      access: 'private' // Required by MeritHub API
+    };
+
+    console.log(`📋 [SCHEDULE] Request body:`, JSON.stringify(meritHubClassDetails, null, 2));
+
     const response = await axios.post(
       `${CLASS_BASE_URL}/${CLIENT_ID}/${encodeURIComponent(instructorUserId)}`,
-      classDetails,
+      meritHubClassDetails,
       {
         headers: {
-          Authorization: accessToken, // Access token already includes "Bearer "
+          Authorization: `${accessToken}`, // Direct token usage like working code
           'Content-Type': 'application/json',
         },
         timeout: 20000,
@@ -346,7 +354,7 @@ async function scheduleLiveClass(instructorUserId, classDetails, userToken = nul
   }
 }
 
-async function addUsersToClass(classId, userIds) {
+async function addUsersToClass(classId, userIds, commonParticipantLink) {
   try {
     if (!classId) throw new Error('addUsersToClass requires classId');
     if (!Array.isArray(userIds) || userIds.length === 0) {
@@ -354,45 +362,70 @@ async function addUsersToClass(classId, userIds) {
     }
 
     console.log(`👥 [ADD_USERS] Adding ${userIds.length} users to class: ${classId}`);
+    console.log(`👥 [ADD_USERS] Using commonParticipantLink: ${commonParticipantLink}`);
+    console.log(`👥 [ADD_USERS] Endpoint: ${CLASS_BASE_URL}/${CLIENT_ID}/${encodeURIComponent(classId)}/users`);
     
     // Use AccessToken for adding users to class (as per MeritHub API documentation)
     const token = await getAccessToken();
     
-    // MeritHub API will generate individual user links for each user
+    // 🔧 FIX: MeritHub API format - users array with userId, userLink (commonParticipantLink), and userType
+    // Use commonParticipantLink from scheduleLiveClass response as per API documentation
     const users = userIds.map(userId => ({
-      userId,
+      userId: userId,
+      userLink: commonParticipantLink, // Use commonParticipantLink for student role
       userType: 'su' // Service User type as per API documentation
     }));
 
-    console.log(`👥 [ADD_USERS] Users to add:`, users);
-    console.log(`👥 [ADD_USERS] Using AccessToken for user management API`);
+    const requestBody = { users };
+
+    console.log(`👥 [ADD_USERS] Request body:`, JSON.stringify(requestBody, null, 2));
+    console.log(`👥 [ADD_USERS] Using Bearer token for authentication`);
 
     const response = await axios.post(
       `${CLASS_BASE_URL}/${CLIENT_ID}/${encodeURIComponent(classId)}/users`,
-      { users }, // Exact format as per API documentation
+      requestBody, // Exact format as per your API specification
       {
         headers: {
-          Authorization: token, // Access token already includes "Bearer "
+          Authorization: `Bearer ${token.replace('Bearer ', '')}`, // Ensure proper Bearer format
           'Content-Type': 'application/json',
         },
         timeout: 20000,
       }
     );
 
-    console.log('✅ Users added to class successfully:', response.data);
+    console.log('✅ Users added to class successfully!');
+    console.log('📊 Response status:', response.status);
+    console.log('📊 Response data:', JSON.stringify(response.data, null, 2));
+    
+    // Validate response format - should be array of users with individual userLinks
+    if (!Array.isArray(response.data)) {
+      console.warn('⚠️ [ADD_USERS] Expected array response, got:', typeof response.data);
+      console.warn('⚠️ [ADD_USERS] Response data:', response.data);
+    } else {
+      console.log(`✅ [ADD_USERS] Received individual links for ${response.data.length} users`);
+      response.data.forEach((user, index) => {
+        console.log(`   User ${index + 1}: ${user.userId} -> ${user.userLink ? 'Link Generated' : 'No Link'}`);
+      });
+    }
+    
     return response.data;
   } catch (error) {
+    console.error('❌ [ADD_USERS] Error adding users to class:', error.message);
     if (error.response) {
-      console.error('API Error:', error.response.data);
-      console.error('Status Code:', error.response.status);
+      console.error('❌ [ADD_USERS] API Error Response:', error.response.data);
+      console.error('❌ [ADD_USERS] Status Code:', error.response.status);
+      console.error('❌ [ADD_USERS] Request URL:', error.config?.url);
+      console.error('❌ [ADD_USERS] Request Headers:', error.config?.headers);
+      console.error('❌ [ADD_USERS] Request Body:', error.config?.data);
+      
       throw new Error(
         `Failed to add users to class. API responded with status ${error.response.status}: ${error.response.data.message || JSON.stringify(error.response.data)}`
       );
     } else if (error.request) {
-      console.error('No response received from API:', error.request);
+      console.error('❌ [ADD_USERS] No response received from API:', error.request);
       throw new Error('Failed to add users to class. No response from the server.');
     } else {
-      console.error('Unexpected error:', error.message);
+      console.error('❌ [ADD_USERS] Unexpected error:', error.message);
       throw new Error(`Failed to add users to class: ${error.message}`);
     }
   }
