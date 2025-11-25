@@ -359,7 +359,7 @@ const integrateLiveClassesLogic = async (userId, courseId) => {
     const classes = await LiveClass.find({ courseIds: { $in: [courseId] } });
     
     const addUserToClasses = classes.map(async (cls) => {
-      if (!cls.classId) return;
+      if (!cls.classId || !cls.commonParticipantLink) return;
 
       try {
         // Extract commonParticipantLink from the stored participantLink URL
@@ -403,8 +403,9 @@ const integrateLiveClassesLogic = async (userId, courseId) => {
           platform: "merithub", // Add platform for consistency
         };
 
-        await User.findByIdAndUpdate(userId, { $push: { liveClasses: liveClassInfo } });
-        console.log(`✅ Added user to live class: ${cls.title}`);
+          await User.findByIdAndUpdate(userId, { $push: { liveClasses: liveClassInfo } });
+          console.log(`✅ Added user to live class: ${cls.title}`);
+        }
       } catch (classError) {
         console.error(`❌ Error adding user to class ${cls.title}:`, classError);
       }

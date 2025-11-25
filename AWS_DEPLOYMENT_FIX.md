@@ -29,21 +29,21 @@
 #### **A. Update `User/Wakad/src/api/axios.js`:**
 ```javascript
 // BEFORE (hardcoded)
-const baseURL = "http://localhost:8890/api/v1"
+const baseURL = "https://lms-backend-724799456037.europe-west1.run.app/api/v1"
 
 // AFTER (environment-based)
-const baseURL = process.env.REACT_APP_API_URL || "http://localhost:8890/api/v1"
+const baseURL = process.env.REACT_APP_API_URL || "https://lms-backend-724799456037.europe-west1.run.app/api/v1"
 ```
 
 #### **B. Update `User/Wakad/src/utils/imageUtils.js`:**
 ```javascript
 // BEFORE
 const API_BASE_URL = process.env.REACT_APP_IMAGE_URL || 
-  (isLocalhost ? 'http://localhost:8890' : 'http://localhost');
+  (isLocalhost ? 'https://lms-backend-724799456037.europe-west1.run.app' : 'http://localhost');
 
 // AFTER (ensure port is included for production)
 const API_BASE_URL = process.env.REACT_APP_IMAGE_URL || 
-  (isLocalhost ? 'http://localhost:8890' : 'http://localhost:8890');
+  (isLocalhost ? 'https://lms-backend-724799456037.europe-west1.run.app' : 'https://lms-backend-724799456037.europe-west1.run.app');
 ```
 
 ### **Step 2: Create Environment Files**
@@ -51,15 +51,15 @@ const API_BASE_URL = process.env.REACT_APP_IMAGE_URL ||
 #### **A. Create `User/Wakad/.env.production`:**
 ```bash
 # Production Environment Variables
-REACT_APP_API_URL=http://localhost:8890/api/v1
-REACT_APP_IMAGE_URL=http://localhost:8890
+REACT_APP_API_URL=https://lms-backend-724799456037.europe-west1.run.app/api/v1
+REACT_APP_IMAGE_URL=https://lms-backend-724799456037.europe-west1.run.app
 ```
 
 #### **B. Create `User/Wakad/.env.local` (for local development):**
 ```bash
 # Local Development Environment Variables
-REACT_APP_API_URL=http://localhost:8890/api/v1
-REACT_APP_IMAGE_URL=http://localhost:8890
+REACT_APP_API_URL=https://lms-backend-724799456037.europe-west1.run.app/api/v1
+REACT_APP_IMAGE_URL=https://lms-backend-724799456037.europe-west1.run.app
 ```
 
 ### **Step 3: AWS EC2 Security Group Configuration**
@@ -168,7 +168,7 @@ AWS_REGION=ap-south-1
 S3_BUCKET=wakadclass
 
 # API Configuration
-API_BASE_URL=http://localhost:8890
+API_BASE_URL=https://lms-backend-724799456037.europe-west1.run.app
 PORT=8890
 
 # Database
@@ -182,7 +182,7 @@ MONGO_URI=your_mongodb_connection_string
 ### **1. Test Backend Accessibility:**
 ```bash
 # Test if backend is accessible
-curl -I http://localhost:8890/api/v1/admin/banner
+curl -I https://lms-backend-724799456037.europe-west1.run.app/api/v1/admin/banner
 
 # Expected: HTTP/200 OK
 ```
@@ -190,10 +190,10 @@ curl -I http://localhost:8890/api/v1/admin/banner
 ### **2. Test Image Streaming:**
 ```bash
 # Get a banner first
-curl http://localhost:8890/api/v1/admin/banner
+curl https://lms-backend-724799456037.europe-west1.run.app/api/v1/admin/banner
 
 # Test image streaming with banner ID
-curl -I http://localhost:8890/api/v1/stream/banner-image/BANNER_ID_HERE
+curl -I https://lms-backend-724799456037.europe-west1.run.app/api/v1/stream/banner-image/BANNER_ID_HERE
 
 # Expected: HTTP/200 OK with image content-type
 ```
@@ -215,7 +215,7 @@ curl -X OPTIONS \
   -H "Origin: http://your-frontend-domain.com" \
   -H "Access-Control-Request-Method: GET" \
   -H "Access-Control-Request-Headers: Content-Type" \
-  http://localhost:8890/api/v1/admin/banner
+  https://lms-backend-724799456037.europe-west1.run.app/api/v1/admin/banner
 
 # Expected: CORS headers in response
 ```
@@ -264,17 +264,17 @@ curl -X OPTIONS \
 
 ```bash
 # 1. Fix frontend URLs (run in User/Wakad/)
-echo "REACT_APP_API_URL=http://localhost:8890/api/v1" > .env.production
-echo "REACT_APP_IMAGE_URL=http://localhost:8890" >> .env.production
+echo "REACT_APP_API_URL=https://lms-backend-724799456037.europe-west1.run.app/api/v1" > .env.production
+echo "REACT_APP_IMAGE_URL=https://lms-backend-724799456037.europe-west1.run.app" >> .env.production
 
 # 2. Rebuild frontend
 npm run build
 
 # 3. Test backend
-curl http://localhost:8890/api/v1/admin/banner
+curl https://lms-backend-724799456037.europe-west1.run.app/api/v1/admin/banner
 
 # 4. Test image streaming
-curl -I http://localhost:8890/api/v1/stream/banner-image/BANNER_ID
+curl -I https://lms-backend-724799456037.europe-west1.run.app/api/v1/stream/banner-image/BANNER_ID
 ```
 
 ---

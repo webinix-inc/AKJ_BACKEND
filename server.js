@@ -27,16 +27,7 @@ const allowedOrigins = [
   "http://localhost", // User Frontend (Development)
   "http://localhost:3000", // User Frontend (Development)
   "http://localhost:3001", // Admin Frontend (Development)
-  "https://localhost:3000", // User Frontend (Development HTTPS)
-  "https://localhost:3001", // Admin Frontend (Development HTTPS)
-  "http://localhost:3002", // Alternative port
-  "http://localhost:3003", // Alternative port
-  "http://localhost:5173", // Vite dev server
-  "http://localhost:5174", // Vite dev server alt
-  "http://127.0.0.1:3000", // IPv4 localhost
-  "http://127.0.0.1:3001", // IPv4 localhost
-  
-  
+
   // 🚀 PRODUCTION DOMAINS
   "http://13.233.196.145",
   "http://65.0.103.50",
@@ -132,7 +123,7 @@ app.get('/health', (req, res) => {
       total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024) + ' MB'
     }
   };
-  
+
   try {
     res.status(200).json(healthCheck);
   } catch (error) {
@@ -154,14 +145,14 @@ const limiter = rateLimit({
     const isDevelopment = process.env.NODE_ENV !== 'production';
     const isHealthCheck = req.path === '/health' || req.path === '/';
     const isLocalhost = req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1';
-    
+
     return isHealthCheck || (isDevelopment && isLocalhost);
   }
 });
 app.use('/api/', limiter);
 
 // 🚀 OPTIMIZED COMPRESSION: Better balance between compression and CPU
-app.use(compression({ 
+app.use(compression({
   level: 6,           // Balance between compression ratio and CPU usage
   threshold: 1000,    // Only compress files larger than 1KB
   filter: (req, res) => {
@@ -258,7 +249,7 @@ app.get("/api/v1/health", (req, res) => {
     },
     connectedUsers: connectedUsers || 0
   };
-  
+
   res.json(health);
 });
 
@@ -346,24 +337,24 @@ mongoose
     console.log(`🗄️ Database: ${data.connection.name}`);
     console.log(`🔌 Ready State: ${data.connection.readyState}`);
     console.log(`⚡ Connection ID: ${data.connection.id}`);
-    
+
     // Add request/response logging middleware before routes
     console.log("🔧 Adding request/response logging middleware...");
     app.use((req, res, next) => {
       const timestamp = new Date().toISOString();
       console.log(`📥 [${timestamp}] ${req.method} ${req.url} - IP: ${req.ip || req.connection.remoteAddress}`);
-      
+
       // Override res.json to log responses
       const originalJson = res.json;
-      res.json = function(data) {
+      res.json = function (data) {
         const responseTime = new Date().toISOString();
         console.log(`📤 [${responseTime}] ${req.method} ${req.url} - Status: ${res.statusCode}`);
         return originalJson.call(this, data);
       };
-      
+
       next();
     });
-    
+
     // 🚀 FIX: Load routes AFTER MongoDB connection is established
     console.log("📚 ================================");
     console.log("📚 LOADING API ROUTES");
@@ -418,7 +409,7 @@ mongoose
     require("./routes/scorecardRoutes")(app);
     require("./routes/quizFolder.routes")(app);
     require("./routes/importantLink.route")(app);
-    
+
     // 🔧 TEMPORARY FIX: Add important links route directly for debugging
     const ImportantLink = require('./models/importantLinksModel');
     app.get('/api/v1/admin/importantLinks', async (req, res) => {
@@ -428,19 +419,19 @@ mongoose
         console.log(`✅ Direct route: Found ${links.length} links`);
         res.status(200).json({
           status: 200,
-          message: "Links fetched successfully", 
+          message: "Links fetched successfully",
           links: links
         });
       } catch (error) {
         console.error('❌ Direct route error:', error);
         res.status(500).json({
           status: 500,
-          message: 'Failed to fetch links', 
+          message: 'Failed to fetch links',
           error: error.message
         });
       }
     });
-    
+
     require("./routes/locationRoutes")(app);
     require("./routes/bookpayment.route")(app);
     require("./routes/bookorder.routes")(app);
@@ -457,7 +448,7 @@ mongoose
     // 🗂️ Initialize Master Folder System AFTER MongoDB connection
     // Wait a bit more to ensure connection is fully ready
     await new Promise(resolve => setTimeout(resolve, 1000));
-    
+
     // Verify connection is ready
     if (mongoose.connection.readyState === 1) {
       try {
@@ -479,7 +470,7 @@ mongoose
       code: error.code,
       codeName: error.codeName
     });
-    
+
     // 🔧 FIX: Attempt to reconnect after a delay
     console.log("🔄 Attempting to reconnect to MongoDB in 10 seconds...");
     setTimeout(() => {
@@ -505,25 +496,25 @@ let maxConcurrentUsers = 0;
 io.on('connection', (socket) => {
   connectedUsers++;
   maxConcurrentUsers = Math.max(maxConcurrentUsers, connectedUsers);
-  
+
   // 🚀 UPDATE PERFORMANCE MONITOR
   performanceMonitor.updateSocketMetrics(connectedUsers);
-  
+
   console.log(`👤 User connected. Current: ${connectedUsers}, Peak: ${maxConcurrentUsers}`);
-  
+
   // Monitor memory usage when user count is high
   if (connectedUsers > 1000) {
     const memUsage = process.memoryUsage();
     console.log(`⚠️ HIGH LOAD: ${connectedUsers} users, Memory: ${(memUsage.heapUsed / 1024 / 1024).toFixed(2)}MB`);
   }
-  
+
   socket.on('disconnect', () => {
     connectedUsers--;
     // 🚀 UPDATE PERFORMANCE MONITOR
     performanceMonitor.updateSocketMetrics(connectedUsers);
     console.log(`👤 User disconnected. Current: ${connectedUsers}`);
   });
-  
+
   // Add error handling
   socket.on('error', (error) => {
     console.error('Socket error:', error);
@@ -534,9 +525,9 @@ io.on('connection', (socket) => {
 setInterval(() => {
   const activeSockets = io.sockets.sockets.size;
   const memUsage = process.memoryUsage();
-  
+
   console.log(`📊 Socket Stats: Active: ${activeSockets}, Connected: ${connectedUsers}, Memory: ${(memUsage.heapUsed / 1024 / 1024).toFixed(2)}MB`);
-  
+
   // Alert if memory usage is high
   if (memUsage.heapUsed > 500 * 1024 * 1024) { // 500MB
     console.warn(`🚨 HIGH MEMORY USAGE: ${(memUsage.heapUsed / 1024 / 1024).toFixed(2)}MB`);

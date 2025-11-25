@@ -453,6 +453,14 @@ const updateUserDetails = async (req, res) => {
  * Schedule a new live class
  */
 const createLiveClass = async (req, res) => {
+  console.log('\n🚨🚨🚨 [CONTROLLER_DEBUG] createLiveClass function called! 🚨🚨🚨');
+  console.log('🚨 [CONTROLLER_DEBUG] This log should appear if our controller is being used!');
+  console.log('\n🎬 ============================================');
+  console.log('🎬 LIVE CLASS CREATION STARTED');
+  console.log('🎬 ============================================');
+  console.log('📅 Timestamp:', new Date().toISOString());
+  console.log('📤 Request Body:', JSON.stringify(req.body, null, 2));
+  
   try {
     const {
       userId,
@@ -478,43 +486,64 @@ const createLiveClass = async (req, res) => {
     } = req.body;
 
     // Validate required fields
+    console.log('✅ [VALIDATION] Starting field validation...');
+    
     if (!title || title.trim() === "") {
+      console.log('❌ [VALIDATION] Title validation failed');
       return res.status(400).json({
         error: "Title is required to create a live class.",
       });
     }
+    console.log('✅ [VALIDATION] Title is valid:', title);
 
     if (!courseIds || courseIds.length === 0) {
+      console.log('❌ [VALIDATION] CourseIds validation failed');
       return res.status(400).json({
         error: "At least one course ID is required to create a live class.",
       });
     }
+    console.log('✅ [VALIDATION] CourseIds are valid:', courseIds.length, 'courses');
 
     if (!startTime) {
+      console.log('❌ [VALIDATION] StartTime validation failed');
       return res.status(400).json({
         error: "Start time is required to create a live class.",
       });
     }
+    console.log('✅ [VALIDATION] StartTime is valid:', startTime);
 
     // Validate platform-specific requirements
+    console.log('🔍 [PLATFORM] Validating platform-specific requirements...');
+    console.log('   Platform:', platform);
+    
     if (platform === "zoom") {
+      console.log('🔍 [ZOOM] Validating Zoom requirements...');
       if (!zoomMeetingLink || zoomMeetingLink.trim() === "") {
+        console.log('❌ [ZOOM] Zoom meeting link validation failed');
         return res.status(400).json({
           error: "Zoom meeting link is required when using Zoom platform.",
         });
       }
+      console.log('✅ [ZOOM] Zoom meeting link is valid');
     } else if (platform === "merithub") {
+      console.log('🔍 [MERITHUB] Validating MeritHub requirements...');
       // MeritHub validation (existing logic)
       if (!userId) {
+        console.log('❌ [MERITHUB] UserId (merithubUserId) validation failed');
         return res.status(400).json({
           error: "User ID is required for MeritHub integration.",
         });
       }
+      console.log('✅ [MERITHUB] UserId (merithubUserId) is valid:', userId);
     }
 
     // Validate that startTime is a valid date and not in the past (for scheduled classes)
+    console.log('🕐 [TIME] Validating start time...');
     const classStartTime = new Date(startTime);
+    console.log('   Parsed start time:', classStartTime);
+    
     if (isNaN(classStartTime.getTime())) {
+      console.log('❌ [TIME] Invalid start time format');
       return res.status(400).json({
         error: "Invalid start time format.",
       });
@@ -522,12 +551,18 @@ const createLiveClass = async (req, res) => {
 
     const now = new Date();
     const timeDifference = classStartTime.getTime() - now.getTime();
+    console.log('   Current time:', now);
+    console.log('   Time difference (ms):', timeDifference);
+    console.log('   Time difference (minutes):', Math.round(timeDifference / 60000));
+    
     // Allow immediate classes (within 1 minute) or future scheduled classes
     if (timeDifference < -60000) { // More than 1 minute in the past
+      console.log('❌ [TIME] Start time is too far in the past');
       return res.status(400).json({
         error: "Start time cannot be in the past.",
       });
     }
+    console.log('✅ [TIME] Start time validation passed');
 
     // Validate class type specific requirements
     if (type === "perma") {
@@ -596,12 +631,27 @@ const createLiveClass = async (req, res) => {
       }),
     };
 
+    console.log('✅ [PREPARATION] Live class details prepared successfully');
+    console.log('📊 [PREPARATION] Details summary:');
+    console.log('   - Title:', liveClassDetails.title);
+    console.log('   - Platform:', liveClassDetails.platform);
+    console.log('   - Duration:', liveClassDetails.duration, 'minutes');
+    console.log('   - Access:', liveClassDetails.access);
+    console.log('   - Course IDs:', liveClassDetails.courseIds.length, 'courses');
+
     // Create and save the live class
+    console.log('\n💾 [DATABASE] Creating live class in database...');
     const liveClass = new LiveClass(liveClassDetails);
+    console.log('📋 [DATABASE] Live class object created');
+    
+    console.log('💾 [DATABASE] Saving live class to database...');
     await liveClass.save();
+    console.log('✅ [DATABASE] Live class saved successfully with ID:', liveClass._id);
 
     // Handle platform-specific logic
+    console.log('\n🔀 [PLATFORM] Processing platform-specific logic...');
     if (platform === "zoom") {
+      console.log('🔍 [ZOOM] Processing Zoom platform...');
       // For Zoom, we generate a classId using the MongoDB _id
       // This ensures Zoom classes have a classId for delete/edit operations
       liveClass.classId = liveClass._id.toString();
@@ -660,23 +710,44 @@ const createLiveClass = async (req, res) => {
       });
 
     } else {
+      console.log('🔍 [MERITHUB] Processing MeritHub platform...');
+      
       // MeritHub logic - get user's MeritHub token for class creation
+      console.log('👤 [MERITHUB] Looking up instructor in database...');
+      console.log('   Searching for merithubUserId:', userId);
+      
       const instructor = await User.findOne({ merithubUserId: userId });
       if (!instructor) {
+        console.log('❌ [MERITHUB] Instructor not found in database');
+        console.log('   Searched merithubUserId:', userId);
         return res.status(400).json({
           error: "Instructor not found in database. Please ensure the user is properly registered.",
         });
       }
 
       if (!instructor.merithubUserToken) {
+        console.log('❌ [MERITHUB] Instructor missing MeritHub token');
         return res.status(400).json({
           error: "Instructor's MeritHub token not found. Please re-register the instructor in MeritHub.",
         });
       }
 
       console.log(`🎥 [MERITHUB] Creating class for instructor: ${instructor.firstName} ${instructor.lastName}`);
+      console.log('🚨🚨🚨 [DEBUG] OUR CONTROLLER IS BEING USED! 🚨🚨🚨');
+      console.log('📤 [MERITHUB] Calling scheduleLiveClass API...');
+      console.log('   Instructor merithubUserId:', userId);
+      console.log('   Has instructor token:', !!instructor.merithubUserToken);
+      
       const apiResponse = await scheduleLiveClass(userId, liveClassDetails, instructor.merithubUserToken);
+      
+      console.log('📥 [MERITHUB] Received API response');
+      console.log('   Response type:', typeof apiResponse);
+      console.log('   Has classId:', !!(apiResponse && apiResponse.classId));
+      console.log('   Has commonLinks:', !!(apiResponse && apiResponse.commonLinks));
+      
       if (!apiResponse || !apiResponse.classId || !apiResponse.commonLinks) {
+        console.log('❌ [MERITHUB] Invalid API response structure');
+        console.log('   Full response:', apiResponse);
         return res
           .status(400)
           .json({ error: "Failed to schedule the class on MeritHub." });
@@ -767,12 +838,39 @@ const createLiveClass = async (req, res) => {
       console.log('💡 [MERITHUB DOCS] All users should use the hostLink to open the classroom');
       console.log('💡 [MERITHUB DOCS] Do not use commonLinks to open the classroom');
       await liveClass.save();
+      
+      console.log('🚨 [DEBUG] CHECKPOINT: liveClass.save() completed successfully!');
 
       // Find users associated with any of the course IDs
+      console.log('\n👥 [USER_SEARCH] Finding users for live class...');
+      console.log('🔍 [USER_SEARCH] Searching for users with purchased courses:', courseIds);
+      
       const users = await User.find({
         "purchasedCourses.course": { $in: courseIds },
       });
-      const merithubUserIds = users.map((user) => user.merithubUserId);
+      
+      console.log(`📊 [USER_SEARCH] Database query completed`);
+      console.log(`   Total users found: ${users.length}`);
+      
+      // 🔧 FIX: Filter out users without merithubUserId and log details
+      console.log('🔍 [USER_FILTER] Filtering users with merithubUserId...');
+      const usersWithMerithubId = users.filter(user => user.merithubUserId);
+      const merithubUserIds = usersWithMerithubId.map((user) => user.merithubUserId);
+      
+      console.log(`📊 [USER_FILTER] Filtering results:`);
+      console.log(`   Total users found: ${users.length}`);
+      console.log(`   Users with merithubUserId: ${usersWithMerithubId.length}`);
+      console.log(`   Users missing merithubUserId: ${users.length - usersWithMerithubId.length}`);
+      
+      if (usersWithMerithubId.length > 0) {
+        console.log(`👥 [USER_LIST] Users eligible for live class:`);
+        usersWithMerithubId.forEach((user, index) => {
+          console.log(`   ${index + 1}. ${user.firstName} ${user.lastName} (${user.merithubUserId}) - ${user.email || 'No email'}`);
+        });
+        console.log(`📋 [USER_LIST] MerithubUserIds to send to API:`, merithubUserIds);
+      } else {
+        console.log('⚠️ [USER_LIST] No users with merithubUserId found for this course');
+      }
 
       // Add users to the live class (REQUIRED when commonParticipantLink is available)
       if (merithubUserIds.length > 0) {
@@ -884,6 +982,15 @@ const createLiveClass = async (req, res) => {
       console.log(`ℹ️ [POLICY] Common participant links are no longer used for security and tracking purposes`);
 
       // Always respond with success if class was created (regardless of user addition status)
+      console.log('\n🎉 [SUCCESS] Live class creation completed successfully!');
+      console.log('📊 [SUMMARY] Final summary:');
+      console.log(`   Class ID: ${liveClass.classId}`);
+      console.log(`   Database ID: ${liveClass._id}`);
+      console.log(`   Title: ${liveClass.title}`);
+      console.log(`   Platform: ${liveClass.platform}`);
+      console.log(`   Users processed: ${merithubUserIds ? merithubUserIds.length : 0}`);
+      console.log(`   Response sent to client: SUCCESS`);
+      
       res.status(201).json({
         message: "Live class scheduled successfully",
         liveClass,
@@ -891,13 +998,19 @@ const createLiveClass = async (req, res) => {
       });
     }
   } catch (error) {
-    console.error("Error scheduling live class:", error.message);
+    console.error('\n❌ [ERROR] Live class creation failed!');
+    console.error("Error details:", error.message);
+    console.error("Stack trace:", error.stack);
     res.status(500).json({
       error:
         error.message ||
         "An unexpected error occurred while scheduling the live class.",
     });
   }
+  
+  console.log('\n🎬 ============================================');
+  console.log('🎬 LIVE CLASS CREATION ENDED');
+  console.log('🎬 ============================================');
 };
 
 const fetchAllClasses = async (req, res) => {
