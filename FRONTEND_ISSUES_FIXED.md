@@ -10,7 +10,7 @@
    - `JsonWebTokenError: jwt malformed` causing 401 errors
 
 3. **WebSocket Connection Failures:**
-   - Multiple failed connections to `ws://lms.wakadeclasses.com:8890/socket.io/`
+   - Multiple failed connections to `ws://lms.AKJAcademyclasses.com:8890/socket.io/`
 
 ---
 

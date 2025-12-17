@@ -8,7 +8,6 @@ const installmentSchema = new mongoose.Schema({
   },
   planType: {
     type: String,
-    enum: ["3 months", "6 months", "12 months", "24 months", "custom"],
     required: true,
   },
   numberOfInstallments: {

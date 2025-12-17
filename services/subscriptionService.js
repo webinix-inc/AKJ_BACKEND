@@ -156,13 +156,28 @@ const updateSubscriptionLogic = async (subscriptionId, updateData) => {
       throw new Error("Subscription not found");
     }
 
+    // Determine the course to use for downstream operations (installments, etc.)
+    let resolvedCourseId = null;
+    if (currentSubscription.course) {
+      resolvedCourseId = currentSubscription.course._id || currentSubscription.course;
+    }
+
     // Validate the provided course ID, if it's being updated
-    if (updateData.course && updateData.course.toString() !== currentSubscription.course._id.toString()) {
-      const courseData = await Course.findById(updateData.course);
-      if (!courseData) {
-        throw new Error("Course not found");
+    if (updateData.course) {
+      const incomingCourseId = updateData.course.toString();
+      const currentCourseId = resolvedCourseId ? resolvedCourseId.toString() : null;
+
+      if (!currentCourseId || incomingCourseId !== currentCourseId) {
+        const courseData = await Course.findById(updateData.course);
+        if (!courseData) {
+          throw new Error("Course not found");
+        }
+        resolvedCourseId = courseData._id;
+        updateData.course = courseData._id; // Ensure only the course ID is stored
+      } else {
+        // Ensure the stored value is the actual ObjectId instance
+        updateData.course = resolvedCourseId;
       }
-      updateData.course = courseData._id; // Ensure only the course ID is stored
     }
 
     // Validate the type of subscription, if it's being updated
@@ -177,13 +192,15 @@ const updateSubscriptionLogic = async (subscriptionId, updateData) => {
         (v) => !updateData.validities.some((uv) => uv.validity === v.validity)
       );
 
-      for (const validity of removedValidities) {
-        const associatedInstallments = await Installment.find({
-          courseId: currentSubscription.course,
-          planType: `${validity.validity} months`,
-        });
-        if (associatedInstallments.length > 0) {
-          throw new Error(`Cannot remove validity of ${validity.validity} months as there are existing installments linked to it.`);
+      if (resolvedCourseId) {
+        for (const validity of removedValidities) {
+          const associatedInstallments = await Installment.find({
+            courseId: resolvedCourseId,
+            planType: `${validity.validity} months`,
+          });
+          if (associatedInstallments.length > 0) {
+            throw new Error(`Cannot remove validity of ${validity.validity} months as there are existing installments linked to it.`);
+          }
         }
       }
     }
@@ -228,12 +245,16 @@ const updateSubscriptionLogic = async (subscriptionId, updateData) => {
           internetHandling: updateData.internetHandling !== undefined ? updateData.internetHandling : currentSubscription.internetHandling
         };
         
-        await installmentService.updateExistingInstallmentPlans(
-          currentSubscription.course._id,
-          subscriptionForUpdate,
-          updateData.validities
-        );
-        console.log("✅ Installment plans updated successfully");
+        if (resolvedCourseId) {
+          await installmentService.updateExistingInstallmentPlans(
+            resolvedCourseId,
+            subscriptionForUpdate,
+            updateData.validities
+          );
+          console.log("✅ Installment plans updated successfully");
+        } else {
+          console.warn("⚠️ Skipping installment plan update because subscription is not linked to any course");
+        }
       } catch (installmentUpdateError) {
         console.error("❌ Error updating installment plans:", installmentUpdateError);
         // Log error but don't fail the subscription update

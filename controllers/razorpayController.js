@@ -16,9 +16,10 @@ const { logger } = require("../utils/logger");
 
 // 🔹 Razorpay Order Creation API
 exports.createOrder = async (req, res) => {
+  // Define orderData outside try block so it's accessible in catch block
+  const orderData = req.body || {};
+  
   try {
-    const orderData = req.body;
-
     // Call payment service to handle business logic
     const result = await paymentService.createRazorpayOrderLogic(orderData);
 
@@ -38,21 +39,29 @@ exports.createOrder = async (req, res) => {
     });
   } catch (error) {
     // 🚀 LOG PAYMENT ORDER CREATION ERROR
-    logger.error(error, 'PAYMENT_ORDER_CREATE', `UserID: ${orderData?.userId}, Amount: ${orderData?.amount}, Course: ${orderData?.courseId}`);
+    // Use orderData from outer scope or req.body as fallback
+    const errorContext = {
+      userId: orderData?.userId || req.body?.userId || 'Unknown',
+      amount: orderData?.amount || req.body?.amount || 'N/A',
+      courseId: orderData?.courseId || req.body?.courseId || 'N/A',
+      paymentMode: orderData?.paymentMode || req.body?.paymentMode || 'N/A'
+    };
+    
+    logger.error(error, 'PAYMENT_ORDER_CREATE', `UserID: ${errorContext.userId}, Amount: ${errorContext.amount}, Course: ${errorContext.courseId}, Mode: ${errorContext.paymentMode}`);
     
     // Handle specific business logic errors
     if (error.message.includes("required") || 
         error.message.includes("not found") ||
         error.message.includes("already exists")) {
       return res.status(400).json({
-          success: false,
+        success: false,
         message: error.message,
       });
     }
 
     if (error.message.includes("Installment plan not found")) {
       return res.status(404).json({
-            success: false,
+        success: false,
         message: error.message,
       });
     }
@@ -60,6 +69,7 @@ exports.createOrder = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Error creating order",
+      error: process.env.NODE_ENV !== 'production' ? error.message : undefined
     });
   }
 };
@@ -134,6 +144,16 @@ exports.verifySignature = async (req, res) => {
     // 🚀 LOG PAYMENT VERIFICATION ERROR
     logger.error(error, 'PAYMENT_VERIFICATION', `PaymentID: ${signatureData?.razorpayPaymentId}, OrderID: ${signatureData?.razorpayOrderId}, IP: ${req.ip}`);
     
+    // 🔥 CRITICAL: Check if enrollment failed
+    if (error.message.includes("Course enrollment failed") || error.message.includes("Enrollment verification failed")) {
+      console.error("❌ CRITICAL: Payment verified but course enrollment failed!");
+      return res.status(500).json({ 
+        success: false, 
+        message: "Payment verified but course enrollment failed. Please contact support.",
+        error: process.env.NODE_ENV !== 'production' ? error.message : undefined
+      });
+    }
+    
     if (error.message.includes("Invalid payment signature")) {
       return res.status(400).json({ 
         success: false, 
@@ -151,6 +171,7 @@ exports.verifySignature = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Verification error",
+      error: process.env.NODE_ENV !== 'production' ? error.message : undefined
     });
   }
 };

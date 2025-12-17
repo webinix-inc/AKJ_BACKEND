@@ -31,6 +31,22 @@ const s3Storage = (folderName = "images") =>
     contentType: multerS3.AUTO_CONTENT_TYPE, // Auto-detect content type
   });
 
+const allowedImageMimeTypes = [
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "image/bmp",
+  "image/svg+xml",
+];
+
+const allowedDocumentMimeTypes = [
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+];
+
 // Profile Image Upload
 const userProfileUpload = multer({
   storage: s3Storage("images/profile"),
@@ -44,6 +60,33 @@ const bannerImage = multer({
 // Course Image and Notes Upload
 const courseImage = multer({
   storage: s3Storage("images/course"),
+  fileFilter: (req, file, cb) => {
+    if (file.fieldname === "courseImage") {
+      if (allowedImageMimeTypes.includes(file.mimetype)) {
+        return cb(null, true);
+      }
+      return cb(
+        new Error(
+          `Invalid file type: ${file.mimetype}. Only image formats are allowed for course images.`
+        ),
+        false
+      );
+    }
+
+    if (file.fieldname === "courseNotes") {
+      if (allowedDocumentMimeTypes.includes(file.mimetype)) {
+        return cb(null, true);
+      }
+      return cb(
+        new Error(
+          `Invalid file type: ${file.mimetype}. Course notes must be PDF or Word documents.`
+        ),
+        false
+      );
+    }
+
+    return cb(null, true);
+  },
 });
 
 const bookImage = multer({
@@ -51,8 +94,8 @@ const bookImage = multer({
 });
 
 const kpUpload = courseImage.fields([
-  { name: "courseImage", maxCount: 100 },
-  { name: "courseNotes", maxCount: 100 },
+  { name: "courseImage", maxCount: 1 }, // Only allow one image
+  { name: "courseNotes", maxCount: 100 }, // Keep notes as multiple
   { name: "courseVideo", maxCount: 100 },
 ]);
 

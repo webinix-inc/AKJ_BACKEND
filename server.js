@@ -1,12 +1,14 @@
 require("dotenv").config();
 
-console.log("🚀 ================================");
-console.log("🚀 WAKAD BACKEND SERVER STARTING");
-console.log("🚀 ================================");
-console.log(`📅 Timestamp: ${new Date().toISOString()}`);
-console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-console.log(`📂 Working Directory: ${process.cwd()}`);
-console.log(`⚡ Node Version: ${process.version}`);
+if (process.env.NODE_ENV !== "production") {
+  console.log("🚀 ================================");
+  console.log("🚀 AKJ BACKEND SERVER STARTING");
+  console.log("🚀 ================================");
+  console.log(`📅 Timestamp: ${new Date().toISOString()}`);
+  console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);
+  console.log(`📂 Working Directory: ${process.cwd()}`);
+  console.log(`⚡ Node Version: ${process.version}`);
+}
 
 const express = require("express");
 const bodyParser = require("body-parser");
@@ -15,7 +17,6 @@ const mongoose = require("mongoose");
 const compression = require("compression");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
-const { S3Client, ListBucketsCommand } = require("@aws-sdk/client-s3");
 // const serverless = require("serverless-http");
 const path = require("path");
 const http = require("http");
@@ -52,8 +53,8 @@ const allowedOrigins = [
   "https://13.201.132.140",
   
   // 🚀 FIX: Add production frontend URLs
-  "http://13.232.208.235", // User Frontend (Production)
-  "http://13.127.56.109", // Admin Frontend (Production)
+  "http://3.110.88.52", // User Frontend (Production)
+  "http://13.203.104.199", // Admin Frontend (Production)
   "https://13.232.208.235", // User Frontend (Production HTTPS)
   "https://13.127.56.109", // Admin Frontend (Production HTTPS)
 ];
@@ -181,14 +182,12 @@ app.use((req, res, next) => {
 // app.use(express.raw({ type: '/', limit: '10mb' }));
 
 app.use(cors({
-  origin: ["http://lms.wakadeclasses.com",
-    "https://lms.wakadeclasses.com",
+  origin: ["http://lms.AKJAcademyclasses.com",
+    "https://lms.AKJAcademyclasses.com",
     "http://localhost:3000",
     "http://localhost:3001",// 🚀 FIX: Add production frontend URLs
-    "http://13.232.208.235", // User Frontend (Production)
-    "http://13.127.56.109", // Admin Frontend (Production)
-    "https://13.232.208.235", // User Frontend (Production HTTPS)
-    "https://13.127.56.109"],// Admin Frontend (Production HTTPS)],
+    "http://13.203.104.199", // Admin Frontend (Production HTTP)],
+  "http://3.110.88.52"], // User Frontend (Production HTTP)],
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "Cache-Control", "Pragma"],
   credentials: true,
@@ -252,25 +251,6 @@ app.get("/api/v1/health", (req, res) => {
 
   res.json(health);
 });
-
-const s3Client = new S3Client({
-  region: process.env.AWS_REGION,
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  },
-});
-
-const checkS3Connection = async () => {
-  try {
-    const data = await s3Client.send(new ListBucketsCommand({}));
-    console.log("Connected to S3, buckets:", data.Buckets);
-  } catch (error) {
-    console.error("Error connecting to S3:", error.message);
-  }
-};
-
-checkS3Connection();
 
 // 🚀 FIX: Routes will be loaded AFTER MongoDB connection is established
 // This prevents "Cannot call users.findOne() before initial connection is complete" error
@@ -339,21 +319,32 @@ mongoose
     console.log(`⚡ Connection ID: ${data.connection.id}`);
 
     // Add request/response logging middleware before routes
-    console.log("🔧 Adding request/response logging middleware...");
-    app.use((req, res, next) => {
-      const timestamp = new Date().toISOString();
-      console.log(`📥 [${timestamp}] ${req.method} ${req.url} - IP: ${req.ip || req.connection.remoteAddress}`);
+    if (
+      process.env.ENABLE_HTTP_DEBUG === "true" ||
+      process.env.NODE_ENV !== "production"
+    ) {
+      console.log("🔧 Adding request/response logging middleware...");
+      app.use((req, res, next) => {
+        const timestamp = new Date().toISOString();
+        console.log(
+          `📥 [${timestamp}] ${req.method} ${req.url} - IP: ${
+            req.ip || req.connection.remoteAddress
+          }`
+        );
 
-      // Override res.json to log responses
-      const originalJson = res.json;
-      res.json = function (data) {
-        const responseTime = new Date().toISOString();
-        console.log(`📤 [${responseTime}] ${req.method} ${req.url} - Status: ${res.statusCode}`);
-        return originalJson.call(this, data);
-      };
+        // Override res.json to log responses
+        const originalJson = res.json;
+        res.json = function (data) {
+          const responseTime = new Date().toISOString();
+          console.log(
+            `📤 [${responseTime}] ${req.method} ${req.url} - Status: ${res.statusCode}`
+          );
+          return originalJson.call(this, data);
+        };
 
-      next();
-    });
+        next();
+      });
+    }
 
     // 🚀 FIX: Load routes AFTER MongoDB connection is established
     console.log("📚 ================================");
@@ -389,8 +380,7 @@ mongoose
     require("./routes/faq.route")(app);
     console.log("🎫 Loading coupon routes...");
     require("./routes/coupon.route")(app);
-    console.log("💳 Loading razorpay routes (duplicate)...");
-    require("./routes/razorpay.route")(app);
+    
     console.log("📞 Loading enquiry routes...");
     require("./routes/enquiry.route")(app);
     console.log("🏆 Loading achiever routes...");

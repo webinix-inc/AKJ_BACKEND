@@ -99,7 +99,7 @@ const allowedOrigins = [
   
   // If serving from same domain
   "http://localhost",
-  "https://lms.wakadeclasses.com",
+  "https://lms.AKJAcademyclasses.com",
   
   // Add any CDN or static hosting domains
 ];
@@ -115,7 +115,7 @@ const allowedOrigins = [
     "AllowedMethods": ["GET", "HEAD"],
     "AllowedOrigins": [
       "http://localhost",
-      "https://lms.wakadeclasses.com",
+      "https://lms.AKJAcademyclasses.com",
       "http://localhost:3000",
       "http://127.0.0.1:3000"
     ],
@@ -140,7 +140,7 @@ npm run build
 
 # Verify environment variables are included
 echo "Checking build for environment variables..."
-grep -r "lms.wakadeclasses.com" build/ || echo "Environment variables not found in build!"
+grep -r "lms.AKJAcademyclasses.com" build/ || echo "Environment variables not found in build!"
 ```
 
 #### **B. Deploy Build Files:**

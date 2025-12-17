@@ -57,7 +57,7 @@ async function testMerithubApiFlow() {
     
     // Get admin user for class creation
     const admin = await User.findOne({ 
-      email: 'wakade@lms.com',
+      email: 'AKJAcademy@lms.com',
       userType: 'ADMIN' 
     });
     

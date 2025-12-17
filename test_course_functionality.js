@@ -8,7 +8,7 @@
 const axios = require('axios');
 
 const BASE_URL = 'https://lms-backend-724799456037.europe-west1.run.app/api/v1';
-const ADMIN_EMAIL = 'wakade@lms.com';
+const ADMIN_EMAIL = 'AKJAcademy@lms.com';
 const ADMIN_PASSWORD = 'wakad@123456';
 
 let authToken = '';

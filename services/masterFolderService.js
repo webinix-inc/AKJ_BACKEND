@@ -16,6 +16,7 @@
 
 const mongoose = require('mongoose');
 const Folder = require('../models/folderModel');
+const { initializeLiveVideosFolder } = require('../utils/folderUtils');
 
 // Safe logger import with fallback
 let logger;
@@ -107,12 +108,20 @@ const createMasterFolderSystem = async () => {
     
     logger.system(`✅ Created Master Folder: ${masterFolder[0].name}`);
     
+    // Auto-initialize Live Videos folder for Master Folder
+    const liveVideosFolder = await initializeLiveVideosFolder(
+      masterFolder[0]._id,
+      {},
+      session
+    );
+    logger.system(`✅ Created Live Videos folder: ${liveVideosFolder.name}`);
+    
     await session.commitTransaction();
     
     return {
       success: true,
       masterFolder: masterFolder[0],
-      subfolders: [],
+      subfolders: [liveVideosFolder],
       message: 'Master Folder created successfully - ready for custom content'
     };
     
@@ -180,21 +189,68 @@ const validateFolderDeletion = async (folderId) => {
 };
 
 /**
- * Get master folder with its complete hierarchy
+ * Build populate configuration for nested folders
+ * @param {number} currentDepth 
+ * @param {number} maxDepth 
+ * @returns {object|null}
  */
-const getMasterFolderHierarchy = async () => {
+const buildFolderPopulate = (currentDepth, maxDepth) => {
+  if (currentDepth > maxDepth) {
+    return null;
+  }
+
+  const populateConfig = {
+    path: 'folders',
+    select: 'name folderType isSystemFolder isDeletable isMasterFolder systemDescription createdAt updatedAt isDownloadable downloadType parentFolderId',
+    options: { lean: true, sort: { createdAt: 1 } }
+  };
+
+  const nextLevel = buildFolderPopulate(currentDepth + 1, maxDepth);
+  if (nextLevel) {
+    populateConfig.populate = nextLevel;
+  }
+
+  return populateConfig;
+};
+
+/**
+ * Get master folder with its complete hierarchy or a specific branch
+ */
+const getMasterFolderHierarchy = async (options = {}) => {
   try {
-    const masterFolder = await Folder.findOne({ 
-      isMasterFolder: true 
-    }).populate({
-      path: 'folders',
-      populate: {
-        path: 'folders',
-        populate: {
-          path: 'folders' // Support 3 levels deep
-        }
-      }
-    }).populate('files');
+    const {
+      depth = 2,
+      includeFiles = true,
+      folderId = null,
+      lean = true
+    } = options;
+
+    const maxDepth = Math.min(Math.max(depth, 1), 5);
+    const filter = folderId ? { _id: folderId } : { isMasterFolder: true };
+
+    let query = Folder.findOne(filter).select(
+      'name folderType isSystemFolder isMasterFolder isDeletable systemDescription folders files parentFolderId createdAt updatedAt isDownloadable downloadType'
+    );
+
+    const folderPopulate = buildFolderPopulate(1, maxDepth);
+    if (folderPopulate) {
+      query = query.populate(folderPopulate);
+    }
+
+    if (includeFiles) {
+      query = query.populate({
+        path: 'files',
+        select: 'name fileType url createdAt updatedAt description isDownloadable isViewable'
+      });
+    } else {
+      query = query.select('-files');
+    }
+
+    if (lean) {
+      query = query.lean();
+    }
+
+    const masterFolder = await query;
     
     if (!masterFolder) {
       throw new Error('Master Folder not found. Please initialize the system.');
@@ -202,7 +258,7 @@ const getMasterFolderHierarchy = async () => {
     
     return {
       success: true,
-      masterFolder: masterFolder,
+      masterFolder,
       message: 'Master Folder hierarchy retrieved successfully'
     };
     

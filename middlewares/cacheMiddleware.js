@@ -19,44 +19,83 @@ let redisClient;
 let isRedisConnected = false;
 
 const initializeRedisClient = async () => {
-  try {
-    redisClient = redis.createClient({
-      url: process.env.REDIS_URL || 'redis://localhost:6379',
-      socket: {
-        connectTimeout: 10000,
-        readTimeout: 10000,
-        keepAlive: 30000,
-        reconnectStrategy: (retries) => Math.min(retries * 50, 500)
-      },
-      maxRetriesPerRequest: 3,
-      lazyConnect: true
-    });
+  const MAX_RETRIES = 5;
+  let retryCount = 0;
 
-    redisClient.on('error', (err) => {
-      console.error('🚨 Cache Redis Error:', err);
-      isRedisConnected = false;
-    });
+  const attemptConnection = async () => {
+    try {
+      redisClient = redis.createClient({
+        url: process.env.REDIS_URL || 'redis://localhost:6379',
+        socket: {
+          connectTimeout: 15000, // Increased timeout
+          readTimeout: 15000,
+          keepAlive: 30000,
+          reconnectStrategy: (retries) => {
+            if (retries > 10) {
+              console.error('❌ Cache Redis: Max reconnection attempts reached');
+              return new Error('Max reconnection attempts reached');
+            }
+            const delay = Math.min(retries * 100, 3000);
+            console.log(`🔄 Cache Redis: Reconnecting in ${delay}ms (attempt ${retries})...`);
+            return delay;
+          }
+        },
+        maxRetriesPerRequest: 3,
+        lazyConnect: true
+      });
 
-    redisClient.on('connect', () => {
-      console.log('✅ Cache Redis Connected');
-      isRedisConnected = true;
-    });
+      redisClient.on('error', (err) => {
+        const isDnsError = err.code === 'EAI_AGAIN' || err.syscall === 'getaddrinfo';
+        if (isDnsError) {
+          console.warn('⚠️ Cache Redis DNS error (non-fatal):', err.hostname || 'unknown host');
+        } else {
+          console.error('🚨 Cache Redis Error:', err.message || err);
+        }
+        isRedisConnected = false;
+      });
 
-    redisClient.on('ready', () => {
-      console.log('🚀 Cache Redis Ready');
-      isRedisConnected = true;
-    });
+      redisClient.on('connect', () => {
+        console.log('✅ Cache Redis Connected');
+        isRedisConnected = true;
+        retryCount = 0; // Reset on success
+      });
 
-    redisClient.on('reconnecting', () => {
-      console.log('🔄 Cache Redis Reconnecting...');
-      isRedisConnected = false;
-    });
+      redisClient.on('ready', () => {
+        console.log('🚀 Cache Redis Ready');
+        isRedisConnected = true;
+      });
 
-    await redisClient.connect();
-  } catch (error) {
-    console.error('❌ Failed to initialize Redis cache:', error);
-    isRedisConnected = false;
-  }
+      redisClient.on('reconnecting', () => {
+        console.log('🔄 Cache Redis Reconnecting...');
+        isRedisConnected = false;
+      });
+
+      await redisClient.connect();
+      return true;
+    } catch (error) {
+      const isDnsError = error.code === 'EAI_AGAIN' || error.syscall === 'getaddrinfo';
+      
+      if (isDnsError) {
+        console.warn(`⚠️ Cache Redis DNS resolution failed (attempt ${retryCount + 1}/${MAX_RETRIES}):`, error.hostname || 'unknown host');
+      } else {
+        console.warn(`⚠️ Cache Redis connection failed (attempt ${retryCount + 1}/${MAX_RETRIES}):`, error.message);
+      }
+      
+      if (retryCount < MAX_RETRIES - 1) {
+        retryCount++;
+        const delay = 5000 * Math.pow(2, retryCount - 1); // Exponential backoff
+        console.log(`🔄 Retrying Cache Redis connection in ${delay / 1000} seconds...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return attemptConnection(); // Retry
+      } else {
+        console.error('❌ Failed to initialize Redis cache after', MAX_RETRIES, 'attempts');
+        isRedisConnected = false;
+        return false;
+      }
+    }
+  };
+
+  await attemptConnection();
 };
 
 // Initialize Redis client

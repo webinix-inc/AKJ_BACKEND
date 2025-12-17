@@ -66,6 +66,17 @@ const { cacheConfigs } = require('../middlewares/cacheMiddleware');
 const router = express.Router();
 
 module.exports = (app) => {
+    console.log("📝 Registering quiz routes...");
+    
+    // Free tests endpoints (accessible to all - MUST be first to avoid route conflicts)
+    app.get('/api/v1/free-tests', (req, res, next) => {
+        console.log("✅ Free tests route hit!");
+        next();
+    }, quizController.fetchFreeTests);
+    app.get('/api/v1/admin/free-tests', [authJwt.verifyToken], quizController.fetchFreeTests);
+    
+    console.log("✅ Free tests routes registered");
+    
     //for admin- for quiz management
     app.post('/api/v1/admin/quizzes/:folderId',[authJwt.verifyToken],quizController.createQuiz);
 
@@ -98,7 +109,7 @@ module.exports = (app) => {
 
     // 🔧 NEW: Import DOCX with LaTeX math extraction
     app.post('/api/v1/admin/quiz/:quizId/import-docx',[authJwt.verifyToken],uploadImport.single('file'),importDocxToQuiz);
-
+    
     //for user- for quiz usage
     app.get('/api/v1/quizzes',[authJwt.verifyToken, cacheConfigs.quizzes()],quizController.fetchAllQuizzes);
     app.get('/api/v1/quizzes/:quizId',[authJwt.verifyToken, cacheConfigs.quizzes()],quizController.specificQuizDetails);

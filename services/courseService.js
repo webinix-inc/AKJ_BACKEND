@@ -22,6 +22,8 @@ const Faq = require("../models/faqModel");
 const Folder = require("../models/folderModel");
 const File = require("../models/fileModel");
 const Subscription = require("../models/subscriptionModel");
+const User = require("../models/userModel");
+const UserSubscription = require("../models/userSubscriptionModel");
 const installmentService = require("./installmentService");
 
 // Import folder creation function from courseController
@@ -67,11 +69,56 @@ const createCourseLogic = async (courseData, files) => {
       throw new Error("Invalid or missing subCategory ID.");
     }
 
-    // Check for duplicate course
-    const existingCourse = await Course.findOne({ title });
-    if (existingCourse) {
-      throw new Error("Course with this title already exists.");
+    // 🔥 CRITICAL: Check for duplicate course (case-insensitive, trimmed, within transaction)
+    // Trim and normalize the title for comparison
+    const normalizedTitle = (title || '').trim();
+    if (!normalizedTitle) {
+      console.error("❌ Empty title provided");
+      // Abort transaction before throwing
+      if (session.inTransaction()) {
+        await session.abortTransaction();
+      }
+      session.endSession();
+      throw new Error("Course title cannot be empty.");
     }
+    
+    console.log(`🔍 Checking for duplicate course with title: "${normalizedTitle}"`);
+    
+    // 🔥 CRITICAL: Check for duplicate BEFORE creating any course data
+    // Use case-insensitive regex to match titles regardless of case
+    // Escape special regex characters in the title to prevent regex injection
+    const escapedTitle = normalizedTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const titleRegex = new RegExp(`^\\s*${escapedTitle}\\s*$`, 'i');
+    
+    // Check for duplicate within transaction to ensure isolation
+    // Use readConcern to ensure we see the latest committed data
+    const existingCourse = await Course.findOne({ 
+      title: { $regex: titleRegex }
+    }).session(session);
+    
+    if (existingCourse) {
+      // Double-check with exact normalized comparison to avoid false positives
+      const existingTitleNormalized = (existingCourse.title || '').trim().toLowerCase();
+      const newTitleNormalized = normalizedTitle.toLowerCase();
+      
+      if (existingTitleNormalized === newTitleNormalized) {
+        console.error(`❌ Duplicate course found:`, {
+          existingTitle: existingCourse.title,
+          existingId: existingCourse._id,
+          newTitle: normalizedTitle
+        });
+        
+        // 🔥 CRITICAL: Abort transaction immediately before throwing error
+        if (session.inTransaction()) {
+          await session.abortTransaction();
+        }
+        session.endSession();
+        
+        throw new Error("Course with this title already exists.");
+      }
+    }
+    
+    console.log(`✅ No duplicate found for title: "${normalizedTitle}"`);
 
     // Validate subCategory and get category ID
     const categoryDoc = await CourseCategory.findOne({
@@ -101,9 +148,9 @@ const createCourseLogic = async (courseData, files) => {
       }
     }
 
-    // Create the course
+    // Create the course (use normalized/trimmed title)
     const course = new Course({
-      title,
+      title: normalizedTitle, // Use trimmed title
       description: descriptionArray,
       subject,
       price,
@@ -152,21 +199,44 @@ const createCourseLogic = async (courseData, files) => {
     );
     console.log("✅ Course added to subCategory");
 
-    // Automatically create a root folder for the course
-    const folderReqBody = {
-      name: `${title}`, // Root folder name
-      courseId: course._id, // Attach course ID
-    };
-    const folderReq = { body: folderReqBody }; // Mock the request to pass to createFolder controller
-    
-    // Call createFolder controller and get the folder response
-    const folderResponse = await createFolder(folderReq);
-    const rootFolderId = folderResponse._id; // Assuming createFolder returns the created folder object
-
-    // Update course with rootFolder
-    course.rootFolder = rootFolderId;
-    await course.save({ session });
-    console.log("✅ Root folder created and linked to course");
+    // Automatically create a root folder for the course (within transaction)
+    try {
+      const Folder = require('../models/folderModel');
+      
+      // Check if course already has a root folder
+      if (course.rootFolder) {
+        console.log("ℹ️ Course already has a root folder, skipping creation");
+      } else {
+        // Create folder within transaction
+        const newFolder = new Folder({
+          name: normalizedTitle,
+          folders: [],
+          files: [],
+          parentFolderId: null
+        });
+        await newFolder.save({ session });
+        
+        // Update course with rootFolder (within transaction)
+        course.rootFolder = newFolder._id;
+        await course.save({ session });
+        
+        // Auto-initialize Live Videos folder for course root folders
+        try {
+          const { initializeLiveVideosFolder } = require('../utils/folderUtils');
+          await initializeLiveVideosFolder(newFolder._id, {}, session);
+          console.log(`✅ Auto-created Live Videos folder for course: ${normalizedTitle}`);
+        } catch (liveVideosError) {
+          console.error('❌ Failed to create Live Videos folder:', liveVideosError);
+          // Don't fail the main course creation if Live Videos folder fails
+        }
+        
+        console.log("✅ Root folder created and linked to course");
+      }
+    } catch (folderError) {
+      console.error("❌ Error creating root folder:", folderError);
+      // Don't fail course creation if folder creation fails - folder can be created later
+      // But log the error for debugging
+    }
 
     // Commit the transaction
     await session.commitTransaction();
@@ -175,9 +245,13 @@ const createCourseLogic = async (courseData, files) => {
     console.log("🎉 Course creation completed successfully");
     return course;
   } catch (error) {
-    await session.abortTransaction();
+    // Only abort if transaction is still active (not already aborted)
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
     session.endSession();
-    console.error("❌ Error in createCourseLogic:", error);
+    console.error("❌ Error in createCourseLogic:", error.message || error);
+    console.error("❌ Error stack:", error.stack);
     throw error;
   }
 };
@@ -205,12 +279,20 @@ const updateCourseLogic = async (courseId, updateData, files) => {
     } = updateData;
 
     console.log("📚 Updating course with business logic service");
+    console.log("📝 Update data received:", {
+      title: title || 'not provided',
+      hasTitle: !!title,
+      titleType: typeof title,
+      titleValue: title
+    });
 
     // Find the existing course
     const course = await Course.findById(courseId);
     if (!course) {
       throw new Error("Course not found");
     }
+    
+    console.log("📋 Current course title:", course.title);
 
     // Handle description - can be HTML string or array
     let descriptionArray;
@@ -264,12 +346,20 @@ const updateCourseLogic = async (courseId, updateData, files) => {
     }
 
     // Check for unique title, excluding the current course
-    if (title && title !== course.title) {
-      const existingCourse = await Course.findOne({ title });
+    // Only validate uniqueness if title is being changed
+    if (title && title.trim() && title.trim() !== course.title) {
+      console.log("🔍 Checking title uniqueness - title is being changed");
+      const existingCourse = await Course.findOne({ 
+        title: title.trim(),
+        _id: { $ne: courseId } // Exclude current course
+      });
       if (existingCourse) {
+        console.log("❌ Title already exists:", title);
         throw new Error("Course with this title already exists.");
       }
-      course.title = title;
+      console.log("✅ Title is unique");
+    } else if (title && title.trim() === course.title) {
+      console.log("ℹ️ Title unchanged, will still update to ensure consistency");
     }
 
     // Handle file uploads
@@ -303,6 +393,17 @@ const updateCourseLogic = async (courseId, updateData, files) => {
 
     // Prepare update data object
     const updateFields = {};
+    
+    // 🔥 CRITICAL: Include title in updateFields if provided and not empty
+    // This ensures title updates even if it's the same value (for consistency)
+    if (title !== undefined && title !== null && String(title).trim() !== '') {
+      updateFields.title = String(title).trim();
+      console.log('📝 Title will be updated:', updateFields.title);
+    } else if (title !== undefined) {
+      console.log('⚠️ Title provided but is empty, skipping title update');
+    } else {
+      console.log('ℹ️ No title provided in update request');
+    }
     
     if (descriptionArray) updateFields.description = descriptionArray;
     if (subject) updateFields.subject = subject;
@@ -403,6 +504,21 @@ const deleteCourseLogic = async (courseId) => {
     const course = await Course.findById(courseId).populate("rootFolder");
     if (!course) {
       throw new Error("Course not found");
+    }
+
+    // Prevent deletion if students are enrolled/purchased this course
+    const hasActiveSubscriptions = await UserSubscription.exists({
+      course: courseId,
+      status: { $in: ["Pending", "Active"] },
+    });
+    const hasPurchasedUsers = await User.exists({
+      "purchasedCourses.course": courseId,
+    });
+
+    if (hasActiveSubscriptions || hasPurchasedUsers) {
+      throw new Error(
+        "Cannot delete course while students are enrolled. Please revoke or reassign access before deleting."
+      );
     }
 
     // Recursively delete its rootfolder and everything inside

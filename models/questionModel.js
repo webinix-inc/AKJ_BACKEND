@@ -21,7 +21,11 @@ const questionSchema = new mongoose.Schema({
     }],
     options: [{
         optionText: String,
-        isCorrect: Boolean
+        isCorrect: Boolean,
+        optionImage: [{
+            type: String,
+            default: null
+        }]
     }],
     solution: {
         type: String,

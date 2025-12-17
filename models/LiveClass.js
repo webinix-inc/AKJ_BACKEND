@@ -44,6 +44,7 @@ const LiveClassSchema = new mongoose.Schema({
   
   // MeritHub specific fields
   liveLink: { type: String }, // Primary instructor link (hostLink)
+  merithubInstructorId: { type: String }, // Instructor's MeritHub user ID (needed for status checks)
   instructorLink: { type: String }, // Instructor link (hostLink - full control)
   participantLink: { type: String }, // Participant link (commonParticipantLink - student permissions)
   moderatorLink: { type: String }, // Moderator link (commonModeratorLink - moderator permissions)

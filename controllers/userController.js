@@ -62,7 +62,7 @@ const sendWelcomeMessage = async (userId, userName = "Student", isNewUser = fals
     // Only send welcome message if it doesn't exist
     if (!existingWelcome) {
       const welcomeContent = isNewUser 
-        ? `🎉 Welcome to Wakade Classes, ${userName}! 
+        ? `🎉 Welcome to AKJ Academy, ${userName}! 
 
 We're excited to have you join our learning community! Here's what you can do:
 
@@ -74,10 +74,10 @@ We're excited to have you join our learning community! Here's what you can do:
 Our team is here to help you succeed. Feel free to ask anything!
 
 Best regards,
-Wakade Classes Team`
+AKJ Academy Team`
         : `👋 Welcome back, ${userName}! 
 
-Great to see you again at Wakade Classes. 
+Great to see you again at AKJ Academy. 
 
 Need any help with your courses or have questions? Just message us here!
 
@@ -572,10 +572,10 @@ exports.signupWithPhone = async (req, res) => {
       name: userFullName || `Student_${newUser._id}`, // Use actual user name
       title: "Student", // Meaningful title for students
       img: "https://hst.meritgraph.com/theme/img/png/avtr.png", // MeritHub default avatar
-      desc: `Student at Wakade Classes - ${userFullName}`, // Descriptive description
+      desc: `Student at AKJ Academy - ${userFullName}`, // Descriptive description
       lang: "en", // Language preference
       clientUserId: newUser._id.toString(), // Unique identifier (MongoDB _id)
-      email: newUser.email || `student_${newUser._id}@wakadeclasses.com`, // Unique email (real or dummy)
+      email: newUser.email || `student_${newUser._id}@AKJAcademyclasses.com`, // Unique email (real or dummy)
       role: "M", // Role: "M" for Students, "C" for Creator/Teacher
       timeZone: "Asia/Kolkata", // Time zone
       permission: "CJ", // Permission: "CJ" for Course and Class Joining
@@ -3059,12 +3059,9 @@ exports.getUserEnrolledCourses = async (req, res) => {
       user: userId,
     }).populate("course");
     
-    // Filter subscriptions to only include published courses
-    const publishedSubscriptions = subscriptions.filter(sub => 
-      sub.course && sub.course.isPublished
-    );
+    const validSubscriptions = subscriptions.filter((sub) => sub.course);
     
-    if (publishedSubscriptions.length === 0) {
+    if (validSubscriptions.length === 0) {
       return res.status(404).json({
         status: 404,
         message: "No enrolled courses found",
@@ -3072,7 +3069,13 @@ exports.getUserEnrolledCourses = async (req, res) => {
       });
     }
 
-    const courses = publishedSubscriptions.map((sub) => sub.course);
+    const courses = validSubscriptions.map((sub) => {
+      const courseObj = sub.course?.toObject ? sub.course.toObject() : sub.course;
+      return {
+        ...courseObj,
+        unpublishedForPublic: courseObj?.isPublished === false,
+      };
+    });
 
     return res.status(200).json({
       status: 200,
@@ -3190,20 +3193,8 @@ exports.getUserPurchasedCourses = async (req, res) => {
         return false;
       }
       
-      // For batch courses, allow access even if unpublished (batches are invitation-only)
-      if (pc.course.courseType === "Batch") {
-        console.log(`🔍 [DEBUG] Including batch course: ${pc.course.title} (published: ${pc.course.isPublished})`);
-        return true;
-      }
-      
-      // For regular courses, only include published ones
-      if (!pc.course.isPublished) {
-        console.log(`🔍 [DEBUG] Filtering out unpublished regular course: ${pc.course.title}`);
-        return false;
-      }
-      
-      console.log(`🔍 [DEBUG] Including published regular course: ${pc.course.title}`);
-      return true; // Include active published regular courses and all batch courses
+      console.log(`🔍 [DEBUG] Including course for user access: ${pc.course.title} (published: ${pc.course.isPublished})`);
+      return true;
     });
 
     console.log(`🔍 [DEBUG] Active purchased courses count after filtering: ${activePurchasedCourses.length}`);
@@ -3241,6 +3232,7 @@ exports.getUserPurchasedCourses = async (req, res) => {
       
       return {
         ...courseObj,
+        unpublishedForPublic: courseObj.isPublished === false,
         purchaseInfo: {
           purchasedAt: pc.assignedByAdmin?.assignedAt || pc.purchasedAt,
           expiresAt: pc.expiresAt,

@@ -207,6 +207,7 @@ exports.specificUserMessages = async (req, res) => {
     const { requestedUserID } = req.params;
     const { cursor, limit = 10 } = req.query;
     const senderId = req.user._id;
+    const userType = req.user.userType;
 
     if (!requestedUserID) {
       return res.status(400).json({ error: "User ID is required" });
@@ -221,17 +222,65 @@ exports.specificUserMessages = async (req, res) => {
 
     const cacheKey = exports.getCacheKey(senderId, requestedUserID);
     let messages;
-    let cachedMessages = await exports.getCachedData(cacheKey);
+    
+    // For ADMIN users, don't use cache to ensure we get all messages from any admin
+    // For regular users, use cache for performance
+    let cachedMessages = null;
+    if (userType !== "ADMIN") {
+      cachedMessages = await exports.getCachedData(cacheKey);
+    }
 
     if (!cursor && cachedMessages && cachedMessages.length > 0) {
       messages = cachedMessages;
     } else {
-      const matchCondition = {
-        $or: [
-          { sender: requestedUserID, receiver: senderId },
-          { sender: senderId, receiver: requestedUserID },
-        ],
-      };
+      // For ADMIN users: Include messages sent by ANY admin to the student
+      // For regular users: Only include messages between current user and requested user
+      let matchCondition;
+      let adminObjectIds = null; // Declare outside if block for debug use
+      
+      if (userType === "ADMIN") {
+        // Get all admin IDs
+        const adminIds = await User.find({ userType: "ADMIN" })
+          .select("_id")
+          .lean();
+        adminObjectIds = adminIds.map((a) => new mongoose.Types.ObjectId(a._id));
+        const requestedUserObjectId = new mongoose.Types.ObjectId(requestedUserID);
+        
+        console.log(`[specificUserMessages] ADMIN query - Admin IDs: ${adminObjectIds.length}, Student ID: ${requestedUserObjectId}`);
+        console.log(`[specificUserMessages] Admin ObjectIds:`, adminObjectIds.map(id => id.toString()));
+        console.log(`[specificUserMessages] Requested User ObjectId:`, requestedUserObjectId.toString());
+        
+        matchCondition = {
+          $or: [
+            // Messages from any admin to the student
+            { sender: { $in: adminObjectIds }, receiver: requestedUserObjectId },
+            // Messages from the student to any admin
+            { sender: requestedUserObjectId, receiver: { $in: adminObjectIds } },
+          ],
+        };
+        
+        // Log match condition in a readable format
+        console.log(`[specificUserMessages] Match condition:`, {
+          $or: [
+            {
+              sender: { $in: adminObjectIds.map(id => id.toString()) },
+              receiver: requestedUserObjectId.toString()
+            },
+            {
+              sender: requestedUserObjectId.toString(),
+              receiver: { $in: adminObjectIds.map(id => id.toString()) }
+            }
+          ]
+        });
+      } else {
+        // For non-admin users, use original logic
+        matchCondition = {
+          $or: [
+            { sender: requestedUserID, receiver: senderId },
+            { sender: senderId, receiver: requestedUserID },
+          ],
+        };
+      }
 
       if (cursor) {
         try {
@@ -249,19 +298,54 @@ exports.specificUserMessages = async (req, res) => {
         .sort({ createdAt: -1 })
         .limit(parseInt(limit, 10));
 
-      if (!cursor) {
+      console.log(`[specificUserMessages] Found ${messages.length} messages for userType: ${userType}, requestedUserID: ${requestedUserID}`);
+      
+      // Debug: Log first few message IDs and sender/receiver to verify query
+      if (messages.length > 0) {
+        console.log(`[specificUserMessages] Sample messages:`, messages.slice(0, 3).map(msg => ({
+          _id: msg._id.toString(),
+          sender: msg.sender.toString(),
+          receiver: msg.receiver?.toString(),
+          content: msg.content?.substring(0, 50) + '...'
+        })));
+      } else if (userType === "ADMIN") {
+        // If no messages found for admin, let's debug why
+        console.log(`[specificUserMessages] DEBUG: No messages found, checking database directly...`);
+        
+        // Check if message exists with this receiver
+        const testMessage = await Message.findOne({
+          receiver: new mongoose.Types.ObjectId(requestedUserID)
+        }).sort({ createdAt: -1 });
+        
+        if (testMessage) {
+          console.log(`[specificUserMessages] DEBUG: Found a message with this receiver:`, {
+            _id: testMessage._id.toString(),
+            sender: testMessage.sender.toString(),
+            receiver: testMessage.receiver.toString(),
+            senderIsAdmin: adminObjectIds?.some(id => id.toString() === testMessage.sender.toString()),
+            contentPreview: testMessage.content?.substring(0, 100)
+          });
+          
+          // Try to find messages with the exact query we're using
+          const directQuery = {
+            $or: [
+              { sender: { $in: adminObjectIds }, receiver: new mongoose.Types.ObjectId(requestedUserID) },
+              { sender: new mongoose.Types.ObjectId(requestedUserID), receiver: { $in: adminObjectIds } },
+            ],
+          };
+          const directResult = await Message.find(directQuery).limit(5);
+          console.log(`[specificUserMessages] DEBUG: Direct query result: ${directResult.length} messages`);
+        } else {
+          console.log(`[specificUserMessages] DEBUG: No messages found with receiver: ${requestedUserID}`);
+        }
+      }
+
+      // Only cache for non-admin users to avoid stale data
+      if (!cursor && userType !== "ADMIN") {
         await exports.setCachedData(cacheKey, messages);
       }
     }
 
-    // const matchCondition = {
-    //   $or: [
-    //     { sender: requestedUserID, receiver: senderId },
-    //     { sender: senderId, receiver: requestedUserID },
-    //   ],
-    // };
-
-    // const messages = await Message.find(matchCondition).sort({ createdAt: -1 });
 
     const formattedMessages = messages.map((msg) => ({
       _id: msg._id.toString(),
@@ -436,17 +520,82 @@ exports.getUsersWithMessages = async (req, res) => {
   const limit = req.query.limit ? parseInt(req.query.limit) : 10;
 
   try {
-    const messagePartners = await Message.aggregate([
-      {
+    // Build match stage: for ADMIN, include messages sent by any admin to students
+    let matchStage;
+    let adminObjectIds = null; // Declare outside if block for use in aggregation pipeline
+    
+    if (userType === "ADMIN") {
+      const adminIds = await User.find({ userType: "ADMIN" })
+        .select("_id")
+        .lean();
+      // Convert to ObjectIds for aggregation pipeline
+      adminObjectIds = adminIds.map((a) => new mongoose.Types.ObjectId(a._id));
+
+      matchStage = {
+        $match: {
+          $or: [
+            { sender: { $in: adminObjectIds } },
+            { receiver: { $in: adminObjectIds } },
+          ],
+        },
+      };
+    } else {
+      matchStage = {
         $match: {
           $or: [
             { sender: new mongoose.Types.ObjectId(userID) },
             { receiver: new mongoose.Types.ObjectId(userID) },
           ],
         },
-      },
-      { $sort: { createdAt: -1 } },
-      {
+      };
+    }
+
+    // Build aggregation pipeline
+    let aggregationPipeline = [matchStage, { $sort: { createdAt: -1 } }];
+    
+    // For ADMIN users, add a stage to identify the student (non-admin) partner
+    if (userType === "ADMIN" && adminObjectIds && adminObjectIds.length > 0) {
+      // Create an array of conditions to check if sender is an admin
+      // Since $in doesn't work with JS arrays in $cond, we'll use a different approach
+      // We'll create a $setIsSubset check or use $or with multiple $eq
+      const adminCheckConditions = adminObjectIds.map(adminId => ({
+        $eq: ["$sender", adminId]
+      }));
+      
+      aggregationPipeline.push({
+        $addFields: {
+          // Check if sender is an admin by using $or with multiple $eq checks
+          isSenderAdmin: {
+            $or: adminCheckConditions
+          },
+        },
+      });
+      
+      aggregationPipeline.push({
+        $addFields: {
+          // Identify which field is the student (the one that's NOT an admin)
+          studentPartner: {
+            $cond: {
+              if: "$isSenderAdmin",
+              then: "$receiver",
+              else: "$sender",
+            },
+          },
+        },
+      });
+      
+      aggregationPipeline.push({
+        $group: {
+          _id: "$studentPartner",
+          lastMessageTime: { $first: "$createdAt" },
+          lastMessage: { $first: "$content" },
+          lastMessageAttachments: { $first: "$attachments" },
+          lastMessageSender: { $first: "$sender" },
+        },
+      });
+    } else {
+      // For non-admin users, use original logic
+      aggregationPipeline.push({
         $group: {
           _id: {
             $cond: {
@@ -460,9 +609,12 @@ exports.getUsersWithMessages = async (req, res) => {
           lastMessageAttachments: { $first: "$attachments" },
           lastMessageSender: { $first: "$sender" },
         },
-      },
-      { $sort: { lastMessageTime: -1 } },
-    ]);
+      });
+    }
+    
+    aggregationPipeline.push({ $sort: { lastMessageTime: -1 } });
+    
+    const messagePartners = await Message.aggregate(aggregationPipeline);
 
     if (messagePartners.length > 0) {
       console.log(

@@ -431,7 +431,7 @@ async function addUsersToClass(classId, userIds, commonParticipantLink) {
   }
 }
 
-async function getClassStatus(classId) {
+async function getClassStatus(classId, instructorUserId = null) {
   try {
     if (!classId) throw new Error('getClassStatus requires classId');
 
@@ -439,20 +439,48 @@ async function getClassStatus(classId) {
     
     // Use Access Token for class status API
     const accessToken = await getAccessToken();
+    const bearerToken = accessToken.startsWith('Bearer ')
+      ? accessToken
+      : `Bearer ${accessToken}`;
+
+    const statusPath = instructorUserId
+      ? `${CLASS_BASE_URL}/${CLIENT_ID}/${encodeURIComponent(instructorUserId)}/status`
+      : `${CLASS_BASE_URL}/${CLIENT_ID}/${encodeURIComponent(classId)}/status`;
+
+    const requestConfig = {
+      headers: {
+        Authorization: bearerToken,
+        'Content-Type': 'application/json',
+      },
+      timeout: 15000,
+    };
+
+    if (instructorUserId) {
+      requestConfig.params = { classId };
+      console.log(`📊 [STATUS] Using instructor ${instructorUserId} with class filter ${classId}`);
+    }
     
-    const response = await axios.get(
-      `${CLASS_BASE_URL}/${CLIENT_ID}/${encodeURIComponent(classId)}/status`,
-      {
-        headers: {
-          Authorization: accessToken,
-          'Content-Type': 'application/json',
-        },
-        timeout: 15000,
-      }
-    );
+    const response = await axios.get(statusPath, requestConfig);
 
     console.log('✅ Class status retrieved successfully:', response.data);
-    return response.data;
+
+    const data = response.data || {};
+    if (instructorUserId && Array.isArray(data.classes)) {
+      const matchingClass = data.classes.find(
+        (cls) => cls.classId === classId || cls.id === classId
+      );
+
+      if (matchingClass) {
+        console.log('🔍 [STATUS] Matching class found in instructor status list');
+        return {
+          ...data,
+          status: matchingClass.status || data.status,
+          classes: [matchingClass],
+        };
+      }
+    }
+
+    return data;
   } catch (error) {
     if (error.response) {
       console.error('API Error:', error.response.data);

@@ -72,7 +72,7 @@ async function testNewClassUserLinks() {
     console.log('\n🔐 Step 3: Getting admin token...');
     
     const loginResponse = await axios.post(`${baseUrl}/api/v1/admin/login`, {
-      email: 'wakade@lms.com',
+      email: 'AKJAcademy@lms.com',
       password: 'walkad@123456'
     });
     

@@ -26,6 +26,7 @@ exports.createOrder = async (req, res) => {
       userId,
       courseId,
       planType,
+      installmentPlanId, // 🔥 NEW: Selected plan ID
       paymentMode,
       installmentIndex,
       totalInstallments,
@@ -42,11 +43,23 @@ exports.createOrder = async (req, res) => {
 
     let installmentPlan;
     if (paymentMode === "installment") {
-      installmentPlan = await Installment.findOne({ courseId, planType });
-      if (!installmentPlan) {
-        return res
-          .status(404)
-          .json({ success: false, message: "Installment plan not found" });
+      // 🔥 CRITICAL: Use installmentPlanId if provided, otherwise fallback to planType
+      if (installmentPlanId) {
+        installmentPlan = await Installment.findById(installmentPlanId);
+        if (!installmentPlan || installmentPlan.courseId.toString() !== courseId.toString()) {
+          return res
+            .status(404)
+            .json({ success: false, message: "Installment plan not found or doesn't match course" });
+        }
+        console.log(`✅ [createOrder] Using selected plan ID: ${installmentPlanId} (${installmentPlan.planType})`);
+      } else {
+        installmentPlan = await Installment.findOne({ courseId, planType });
+        if (!installmentPlan) {
+          return res
+            .status(404)
+            .json({ success: false, message: "Installment plan not found" });
+        }
+        console.log(`⚠️ [createOrder] Using planType fallback: ${planType}`);
       }
 
       const existingUserPayment = installmentPlan.userPayments.find(
@@ -93,6 +106,7 @@ exports.createOrder = async (req, res) => {
       courseId,
       paymentMode,
       planType,
+      installmentPlanId: installmentPlan?._id, // 🔥 NEW: Store selected plan ID
     };
 
     if (paymentMode === "installment") {

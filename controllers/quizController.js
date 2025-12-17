@@ -25,7 +25,7 @@ exports.createQuiz = async (req, res) => {
   console.log("Creating quiz - User:", req.user?._id);
   
   try {
-    const { quizName, duration, category } = req.body;
+    const { quizName, duration, category, isFreeTest } = req.body;
     const { folderId } = req.params;
     
     // Validate input
@@ -77,6 +77,7 @@ exports.createQuiz = async (req, res) => {
       quizName,
       duration,
       category,
+      isFreeTest: isFreeTest || false,
     });
 
     console.log("Quiz created successfully:", quiz._id);
@@ -182,6 +183,45 @@ exports.fetchAllQuizzes = async (req, res) => {
   }
 };
 
+exports.fetchFreeTests = async (req, res) => {
+  try {
+    console.log("Fetching free tests...");
+    const quizzes = await Quiz.find({ 
+      isFreeTest: true,
+      isActive: true 
+    })
+    .populate("questions")
+    .select("quizName duration category quizTotalMarks questions isActive createdAt")
+    .lean();
+    
+    console.log(`Found ${quizzes.length} free tests`);
+    
+    // Format the response with question count
+    const formattedQuizzes = quizzes.map(quiz => ({
+      _id: quiz._id,
+      quizName: quiz.quizName,
+      duration: quiz.duration,
+      category: quiz.category,
+      quizTotalMarks: quiz.quizTotalMarks,
+      questionCount: quiz.questions ? quiz.questions.length : 0,
+      createdAt: quiz.createdAt,
+    }));
+    
+    res.status(200).json({ 
+      success: true,
+      message: "Free tests retrieved successfully",
+      tests: formattedQuizzes 
+    });
+  } catch (error) {
+    console.error("Error fetching free tests:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "Internal server error",
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
+    });
+  }
+};
+
 exports.specificQuizDetails = async (req, res) => {
   try {
     const { quizId } = req.params;
@@ -197,7 +237,7 @@ exports.updateQuiz = async (req, res) => {
     const { quizId } = req.params;
     const updateFields = {};
 
-    ["quizName", "duration", "category"].forEach((field) => {
+    ["quizName", "duration", "category", "isFreeTest"].forEach((field) => {
       if (req.body[field] !== undefined) {
         updateFields[field] = req.body[field];
       }

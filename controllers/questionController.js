@@ -13,6 +13,7 @@ const extractor = new WordExtractor();
 
 const Question = require("../models/questionModel");
 const Quiz = require("../models/quizModel");
+const QuizFolder = require("../models/quizFolder");
 
 // Configure S3 instead of Cloudinary
 const s3 = new S3Client({
@@ -25,28 +26,135 @@ const s3 = new S3Client({
 
 console.log("✅ Using S3 for quiz image uploads instead of Cloudinary");
 
+// Helper function to upload image to S3 with proper path structure
+async function uploadQuestionImageToS3(imageSrc, folderName, testName, imageName) {
+  try {
+    if (!imageSrc || !imageSrc.startsWith("data:image")) {
+      throw new Error("Invalid image source - must be base64 data URL");
+    }
+
+    const base64Data = imageSrc.split(",")[1];
+    if (!base64Data) {
+      throw new Error("Invalid base64 data in image source");
+    }
+
+    const imageBuffer = Buffer.from(base64Data, "base64");
+    
+    if (imageBuffer.length === 0) {
+      throw new Error("Empty image buffer");
+    }
+    
+    if (imageBuffer.length > 10 * 1024 * 1024) { // 10MB limit
+      console.warn(`⚠️ Large image detected: ${Math.round(imageBuffer.length / 1024 / 1024)}MB`);
+    }
+    
+    // Sanitize folder name, test name, and image name
+    const sanitizeName = (name) => name.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const sanitizedFolderName = sanitizeName(folderName);
+    const sanitizedTestName = sanitizeName(testName);
+    const sanitizedImageName = sanitizeName(imageName);
+    
+    // Extract file extension from image data URL or default to png
+    const mimeMatch = imageSrc.match(/data:image\/(\w+);base64/);
+    const extension = mimeMatch ? mimeMatch[1] : 'png';
+    const fileName = `test/${sanitizedFolderName}/${sanitizedTestName}/${sanitizedImageName}.${extension}`;
+
+    const uploadParams = {
+      Bucket: authConfig.s3_bucket,
+      Key: fileName,
+      Body: imageBuffer,
+      ContentType: `image/${extension}`,
+      Metadata: {
+        'folder-name': folderName,
+        'test-name': testName,
+        'image-name': imageName,
+        'upload-timestamp': new Date().toISOString()
+      }
+    };
+
+    console.log(`📤 Uploading question image to S3: ${fileName} (${Math.round(imageBuffer.length / 1024)}KB)`);
+    const putCommand = new PutObjectCommand(uploadParams);
+    const result = await s3.send(putCommand);
+    const location = `https://${authConfig.s3_bucket}.s3.${authConfig.aws_region}.amazonaws.com/${fileName}`;
+    console.log(`✅ Question image uploaded successfully: ${location}`);
+    
+    // Return the S3 key (fileName) instead of full URL so presigned URLs can be generated later
+    return fileName;
+  } catch (error) {
+    console.error(`❌ Error uploading question image:`, error.message);
+    throw error;
+  }
+}
+
 exports.addQuestion = async (req, res) => {
   try {
     const { quizId } = req.params;
-    const { questionType, questionText, options, questionCorrectMarks } =
-      req.body;
+    const { questionText, options, questionCorrectMarks, questionIncorrectMarks, questionImage, questionType, solution } = req.body;
 
-    if (
-      !quizId ||
-      !questionType ||
-      !questionText ||
-      !options ||
-      options.length !== 4 ||
-      !questionCorrectMarks
-    ) {
-      return res.status(400).json({ error: "Invalid question data provided" });
+    // Validate quizId
+    if (!quizId) {
+      return res.status(400).json({ error: "Quiz ID is required" });
     }
 
+    // Validate questionText - allow HTML content, check if it has actual content
+    // Strip HTML tags to check for actual text content
+    const stripHtml = (html) => {
+      if (!html) return '';
+      return html.replace(/<[^>]*>/g, '').trim();
+    };
+    
+    const hasQuestionText = questionText && typeof questionText === 'string' && stripHtml(questionText).length > 0;
+    const hasQuestionImage = questionImage && Array.isArray(questionImage) && questionImage.length > 0;
+    
+    // Question must have either text or image
+    if (!hasQuestionText && !hasQuestionImage) {
+      return res.status(400).json({ 
+        error: "Question must have either text or image",
+        details: {
+          hasText: !!questionText,
+          textLength: questionText ? questionText.length : 0,
+          hasImage: hasQuestionImage
+        }
+      });
+    }
+
+    // Validate options
+    if (!options || !Array.isArray(options) || options.length !== 4) {
+      return res.status(400).json({ error: "Exactly 4 options are required" });
+    }
+
+    // Validate that at least one option has content (text or image)
+    const hasValidOptions = options.some(opt => {
+      const hasOptionText = opt.optionText && opt.optionText.trim().length > 0;
+      const hasOptionImage = opt.optionImage && Array.isArray(opt.optionImage) && opt.optionImage.length > 0;
+      return hasOptionText || hasOptionImage;
+    });
+
+    if (!hasValidOptions) {
+      return res.status(400).json({ error: "At least one option must have text or image" });
+    }
+
+    // Validate marks
+    if (!questionCorrectMarks || typeof questionCorrectMarks !== 'number' || questionCorrectMarks <= 0) {
+      return res.status(400).json({ error: "Valid question marks (greater than 0) are required" });
+    }
+
+    // Get quiz and folder information
     const quiz = await Quiz.findById(quizId);
     if (!quiz) {
       return res.status(404).json({ message: "Quiz not found" });
     }
 
+    // Find the folder that contains this quiz
+    const folder = await QuizFolder.findOne({ quizzes: quizId });
+    if (!folder) {
+      return res.status(404).json({ message: "Folder not found for this quiz" });
+    }
+
+    const folderName = folder.name;
+    const testName = quiz.quizName;
+
+    // Check for duplicate question
     const existingQuestion = await Question.findOne({
       quizId,
       questionText,
@@ -58,12 +166,73 @@ exports.addQuestion = async (req, res) => {
         .json({ message: "This question already exists in the quiz" });
     }
 
+    // Upload question images if provided
+    let uploadedQuestionImages = [];
+    if (questionImage && Array.isArray(questionImage) && questionImage.length > 0) {
+      for (let i = 0; i < questionImage.length; i++) {
+        const imageData = questionImage[i];
+        if (imageData && imageData.src && imageData.name) {
+          try {
+            const imageUrl = await uploadQuestionImageToS3(
+              imageData.src,
+              folderName,
+              testName,
+              imageData.name
+            );
+            uploadedQuestionImages.push(imageUrl);
+          } catch (error) {
+            console.error(`Error uploading question image ${i + 1}:`, error);
+            // Continue with other images even if one fails
+          }
+        }
+      }
+    }
+
+    // Process options and upload option images
+    const processedOptions = [];
+    for (let i = 0; i < options.length; i++) {
+      const option = options[i];
+      const processedOption = {
+        optionText: option.optionText || "",
+        isCorrect: option.isCorrect || false,
+        optionImage: []
+      };
+
+      // Upload option images if provided
+      if (option.optionImage && Array.isArray(option.optionImage) && option.optionImage.length > 0) {
+        for (let j = 0; j < option.optionImage.length; j++) {
+          const imageData = option.optionImage[j];
+          if (imageData && imageData.src && imageData.name) {
+            try {
+              const imageName = `option_${String.fromCharCode(65 + i)}_${imageData.name}`;
+              const imageUrl = await uploadQuestionImageToS3(
+                imageData.src,
+                folderName,
+                testName,
+                imageName
+              );
+              processedOption.optionImage.push(imageUrl);
+            } catch (error) {
+              console.error(`Error uploading option ${i + 1} image ${j + 1}:`, error);
+              // Continue with other images even if one fails
+            }
+          }
+        }
+      }
+
+      processedOptions.push(processedOption);
+    }
+
+    // Create question with default questionType as 'mcq' if not provided
     const newQuestion = new Question({
       quizId,
-      questionType,
+      questionType: questionType || 'mcq',
       questionText,
-      options,
-      questionCorrectMarks,
+      questionImage: uploadedQuestionImages,
+      options: processedOptions,
+      questionCorrectMarks: questionCorrectMarks || 2,
+      questionIncorrectMarks: questionIncorrectMarks || 0,
+      solution: solution || '',
     });
 
     const savedQuestion = await newQuestion.save();
@@ -99,7 +268,110 @@ exports.fetchAllQuestions = async (req, res) => {
   const { quizId } = req.params;
 
   try {
+    const { generatePresignedUrl } = require('../configs/aws.config');
+    const authConfig = require('../configs/auth.config');
+    
     const questions = await Question.find({ quizId }).lean();
+    
+    // Generate presigned URLs for question images and option images
+    for (let question of questions) {
+      // Process question images
+      if (question.questionImage && Array.isArray(question.questionImage) && question.questionImage.length > 0) {
+        const presignedQuestionImages = [];
+        for (let imageUrl of question.questionImage) {
+          if (imageUrl) {
+            try {
+              // Extract S3 key from URL
+              let s3Key = imageUrl;
+              
+              // If it's a full S3 URL, extract the key
+              if (imageUrl.includes('amazonaws.com/')) {
+                const urlParts = imageUrl.split('amazonaws.com/');
+                if (urlParts.length > 1) {
+                  s3Key = urlParts[1];
+                  // Remove query parameters if any
+                  if (s3Key.includes('?')) {
+                    s3Key = s3Key.split('?')[0];
+                  }
+                }
+              } else if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+                // Handle other URL formats - extract path after domain
+                try {
+                  const url = new URL(imageUrl);
+                  s3Key = url.pathname.substring(1); // Remove leading '/'
+                } catch (e) {
+                  // If URL parsing fails, assume it's already a key
+                  s3Key = imageUrl;
+                }
+              }
+              
+              // Decode URL encoding if present
+              s3Key = decodeURIComponent(s3Key);
+              
+              console.log(`🔗 Generating presigned URL for question image: ${s3Key.substring(0, 50)}...`);
+              const presignedUrl = await generatePresignedUrl(authConfig.s3_bucket, s3Key, 86400); // 24 hours
+              presignedQuestionImages.push(presignedUrl);
+            } catch (error) {
+              console.error('❌ Error generating presigned URL for question image:', error);
+              console.error('   Image URL:', imageUrl?.substring(0, 100));
+              presignedQuestionImages.push(imageUrl); // Fallback to original URL
+            }
+          }
+        }
+        question.questionImage = presignedQuestionImages;
+      }
+      
+      // Process option images
+      if (question.options && Array.isArray(question.options)) {
+        for (let option of question.options) {
+          if (option.optionImage && Array.isArray(option.optionImage) && option.optionImage.length > 0) {
+            const presignedOptionImages = [];
+            for (let imageUrl of option.optionImage) {
+              if (imageUrl) {
+                try {
+                  // Extract S3 key from URL
+                  let s3Key = imageUrl;
+                  
+                  // If it's a full S3 URL, extract the key
+                  if (imageUrl.includes('amazonaws.com/')) {
+                    const urlParts = imageUrl.split('amazonaws.com/');
+                    if (urlParts.length > 1) {
+                      s3Key = urlParts[1];
+                      // Remove query parameters if any
+                      if (s3Key.includes('?')) {
+                        s3Key = s3Key.split('?')[0];
+                      }
+                    }
+                  } else if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+                    // Handle other URL formats - extract path after domain
+                    try {
+                      const url = new URL(imageUrl);
+                      s3Key = url.pathname.substring(1); // Remove leading '/'
+                    } catch (e) {
+                      // If URL parsing fails, assume it's already a key
+                      s3Key = imageUrl;
+                    }
+                  }
+                  
+                  // Decode URL encoding if present
+                  s3Key = decodeURIComponent(s3Key);
+                  
+                  console.log(`🔗 Generating presigned URL for option image: ${s3Key.substring(0, 50)}...`);
+                  const presignedUrl = await generatePresignedUrl(authConfig.s3_bucket, s3Key, 86400); // 24 hours
+                  presignedOptionImages.push(presignedUrl);
+                } catch (error) {
+                  console.error('❌ Error generating presigned URL for option image:', error);
+                  console.error('   Image URL:', imageUrl?.substring(0, 100));
+                  presignedOptionImages.push(imageUrl); // Fallback to original URL
+                }
+              }
+            }
+            option.optionImage = presignedOptionImages;
+          }
+        }
+      }
+    }
+    
     res.status(200).json({ message: "All questions", questions });
   } catch (error) {
     console.error("Error in fetching questions", error);
@@ -139,42 +411,148 @@ exports.specificQuestionDetails = async (req, res) => {
 
 exports.updateQuestion = async (req, res) => {
   try {
-    const { questionId } = req.params;
+    const { questionId, quizId } = req.params;
+    const { questionText, questionType, questionImage, options, solution, questionCorrectMarks, questionIncorrectMarks } = req.body;
+    
+    const question = await Question.findById(questionId);
+    if (!question) {
+      return res.status(404).json({ message: "Question not found" });
+    }
+
+    // Get quiz and folder information for image uploads
+    const quiz = await Quiz.findById(quizId || question.quizId);
+    if (!quiz) {
+      return res.status(404).json({ message: "Quiz not found" });
+    }
+
+    const folder = await QuizFolder.findOne({ quizzes: quizId || question.quizId });
+    if (!folder) {
+      return res.status(404).json({ message: "Folder not found for this quiz" });
+    }
+
+    const folderName = folder.name;
+    const testName = quiz.quizName;
+
     const updateFields = {};
 
-    ["questionType", "questionText"].forEach((field) => {
-      if (req.body[field] !== undefined) {
-        updateFields[field] = req.body[field];
+    // Update basic fields
+    if (questionText !== undefined) updateFields.questionText = questionText;
+    if (questionType !== undefined) updateFields.questionType = questionType;
+    if (solution !== undefined) updateFields.solution = solution;
+    if (questionCorrectMarks !== undefined) updateFields.questionCorrectMarks = questionCorrectMarks;
+    if (questionIncorrectMarks !== undefined) updateFields.questionIncorrectMarks = questionIncorrectMarks;
+
+    // Process question images
+    if (questionImage !== undefined && Array.isArray(questionImage)) {
+      const uploadedQuestionImages = [];
+      
+      for (let i = 0; i < questionImage.length; i++) {
+        const imageData = questionImage[i];
+        
+        if (typeof imageData === 'string') {
+          // Existing URL - check if it's a base64 data URL
+          if (imageData.startsWith('data:image')) {
+            // New image to upload
+            const imageName = `question_img_${Date.now()}_${i}`;
+            try {
+              const uploadedUrl = await uploadQuestionImageToS3(imageData, folderName, testName, imageName);
+              if (uploadedUrl) {
+                uploadedQuestionImages.push(uploadedUrl);
+              }
+            } catch (error) {
+              console.error(`Error uploading question image ${i}:`, error);
+            }
+          } else {
+            // Existing S3 URL, keep it
+            uploadedQuestionImages.push(imageData);
+          }
+        } else if (imageData && imageData.src) {
+          // Object with src property
+          if (imageData.src.startsWith('data:image')) {
+            // New image to upload
+            const imageName = imageData.name || `question_img_${Date.now()}_${i}`;
+            try {
+              const uploadedUrl = await uploadQuestionImageToS3(imageData.src, folderName, testName, imageName);
+              if (uploadedUrl) {
+                uploadedQuestionImages.push(uploadedUrl);
+              }
+            } catch (error) {
+              console.error(`Error uploading question image ${i}:`, error);
+            }
+          } else {
+            // Existing URL
+            uploadedQuestionImages.push(imageData.src);
+          }
+        }
       }
-    });
+      
+      updateFields.questionImage = uploadedQuestionImages;
+    }
 
     // Process options
-    if (req.body.options) {
-      const question = await Question.findById(questionId);
-      if (!question) {
-        return res.status(404).json({ message: "Question not found" });
+    if (options !== undefined && Array.isArray(options)) {
+      // Ensure we have exactly 4 options
+      if (options.length !== 4) {
+        return res.status(400).json({ message: "Must have exactly 4 options" });
       }
 
-      updateFields.options = question.options.map((existingOption, index) => {
-        if (
-          req.body.options[index] !== undefined &&
-          req.body.options[index] !== null
-        ) {
-          return {
-            ...existingOption.toObject(),
-            ...req.body.options[index],
-            _id: existingOption._id, // to preserve the original _id
-          };
+      const processedOptions = [];
+      
+      for (let i = 0; i < options.length; i++) {
+        const option = options[i];
+        const processedOption = {
+          optionText: option.optionText || "",
+          isCorrect: option.isCorrect || false,
+          optionImage: []
+        };
+
+        // Process option images
+        if (option.optionImage && Array.isArray(option.optionImage)) {
+          for (let j = 0; j < option.optionImage.length; j++) {
+            const imageData = option.optionImage[j];
+            
+            if (typeof imageData === 'string') {
+              // Existing URL - check if it's a base64 data URL
+              if (imageData.startsWith('data:image')) {
+                // New image to upload
+                const imageName = `option_${String.fromCharCode(65 + i)}_img_${Date.now()}_${j}`;
+                try {
+                  const uploadedUrl = await uploadQuestionImageToS3(imageData, folderName, testName, imageName);
+                  if (uploadedUrl) {
+                    processedOption.optionImage.push(uploadedUrl);
+                  }
+                } catch (error) {
+                  console.error(`Error uploading option ${i} image ${j}:`, error);
+                }
+              } else {
+                // Existing S3 URL, keep it
+                processedOption.optionImage.push(imageData);
+              }
+            } else if (imageData && imageData.src) {
+              // Object with src property
+              if (imageData.src.startsWith('data:image')) {
+                // New image to upload
+                const imageName = imageData.name || `option_${String.fromCharCode(65 + i)}_img_${Date.now()}_${j}`;
+                try {
+                  const uploadedUrl = await uploadQuestionImageToS3(imageData.src, folderName, testName, imageName);
+                  if (uploadedUrl) {
+                    processedOption.optionImage.push(uploadedUrl);
+                  }
+                } catch (error) {
+                  console.error(`Error uploading option ${i} image ${j}:`, error);
+                }
+              } else {
+                // Existing URL
+                processedOption.optionImage.push(imageData.src);
+              }
+            }
+          }
         }
-        return existingOption; // to keep the existing option unchanged
-      });
 
-      // to ensure we're not accidentally removing options
-      if (updateFields.options.length !== question.options.length) {
-        return res
-          .status(400)
-          .json({ message: "Cannot change the number of options" });
+        processedOptions.push(processedOption);
       }
+
+      updateFields.options = processedOptions;
     }
 
     if (Object.keys(updateFields).length === 0) {
@@ -369,15 +747,54 @@ async function extractMathAndImages(bodyHtml, questionText, quizId, questionInde
   // Process real images for this question
   const realImagesForQuestion = allRealImages.filter(img => img.tableIndex === questionIndex);
   
-  for (const imageData of realImagesForQuestion) {
-    try {
-      const imageUrl = await uploadToS3(imageData.src, quizId, questionIndex, questionRealImages.length);
-      questionRealImages.push(imageUrl);
-      console.log(`✅ Real image uploaded: ${imageUrl}`);
-    } catch (uploadError) {
-      console.error(`❌ Failed to upload real image:`, uploadError);
-    }
+  console.log(`🖼️ Found ${realImagesForQuestion.length} images for question ${questionIndex + 1}`);
+  
+  // Get quiz and folder information for proper S3 path
+  const quiz = await Quiz.findById(quizId);
+  if (!quiz) {
+    console.error(`❌ Quiz not found: ${quizId}`);
   }
+  
+  const folder = await QuizFolder.findOne({ quizzes: quizId });
+  if (!folder) {
+    console.error(`❌ Folder not found for quiz: ${quizId}`);
+  }
+  
+  const folderName = folder?.name || 'default';
+  const testName = quiz?.quizName || 'default';
+  
+      for (let i = 0; i < realImagesForQuestion.length; i++) {
+        const imageData = realImagesForQuestion[i];
+        try {
+          if (!imageData.src || !imageData.src.startsWith('data:image')) {
+            console.error(`❌ Invalid image source for question ${questionIndex + 1}, image ${i + 1}`);
+            console.error(`   Source: ${imageData.src?.substring(0, 100)}...`);
+            continue;
+          }
+          
+          // Use the proper path structure: test/{folderName}/{testName}/{imageName}
+          const imageName = `question_${questionIndex + 1}_img_${i + 1}_${Date.now()}`;
+          console.log(`📤 Uploading image ${i + 1} for question ${questionIndex + 1}...`);
+          console.log(`   Folder: ${folderName}, Test: ${testName}, Name: ${imageName}`);
+          
+          const imageUrl = await uploadQuestionImageToS3(imageData.src, folderName, testName, imageName);
+          
+          // uploadQuestionImageToS3 returns the S3 key (path), store it directly
+          if (imageUrl) {
+            questionRealImages.push(imageUrl);
+            console.log(`✅ Real image ${i + 1} uploaded successfully: ${imageUrl}`);
+          } else {
+            console.error(`❌ Upload returned null/undefined for image ${i + 1}`);
+          }
+        } catch (uploadError) {
+          console.error(`❌ Failed to upload real image ${i + 1} for question ${questionIndex + 1}:`, uploadError);
+          console.error(`   Error message: ${uploadError.message}`);
+          console.error(`   Image data length: ${imageData.src?.length || 0}`);
+          console.error(`   Image data preview: ${imageData.src?.substring(0, 100)}...`);
+        }
+      }
+      
+      console.log(`📊 Question ${questionIndex + 1} image upload summary: ${questionRealImages.length}/${realImagesForQuestion.length} images uploaded`);
   
   console.log(`📐 Question ${questionIndex + 1} summary:`);
   console.log(`   Mathematical expressions: ${questionMathExpressions.length}`);
@@ -536,7 +953,48 @@ async function processWordDocumentEnhanced(filePath, quizId) {
       }
     });
     
-    const bodyHtml = result.value;
+    let bodyHtml = result.value;
+    
+    // 🔧 NEW: Process OMath/equation objects that mammoth might have converted
+    // Mammoth converts Word equations to MathML or special HTML, we need to extract them
+    // Check for MathML elements and convert them to images or extract as text
+    const $ = cheerio.load(bodyHtml);
+    
+    // Find all MathML elements (m:oMath, m:math, etc.)
+    const mathElements = $('m\\:oMath, m\\:math, math, [class*="math"], [class*="equation"]');
+    console.log(`🔢 Found ${mathElements.length} MathML/equation elements in document`);
+    
+    // Also check for elements that might contain equation data
+    const potentialMathElements = $('span, p, div').filter(function() {
+      const text = $(this).text();
+      // Check if it contains mathematical symbols that suggest it's an equation
+      return /[²³⁴⁵⁶⁷⁸⁹⁰√∑∫πθαβγδεζηλμνξρστφχψω≤≥≠∞∂∇±×÷\^]/.test(text) && 
+             /[0-9]/.test(text) && 
+             text.length < 100; // Equations are usually short
+    });
+    
+    console.log(`🔢 Found ${potentialMathElements.length} potential equation text elements`);
+    
+    // Log the HTML structure to see what mammoth is producing
+    if (mathElements.length > 0 || potentialMathElements.length > 0) {
+      console.log(`📝 Sample HTML structure (first 500 chars): ${bodyHtml.substring(0, 500)}`);
+      
+      // Try to extract equation text from MathML or HTML
+      mathElements.each((index, elem) => {
+        const $elem = $(elem);
+        const mathText = $elem.text().trim();
+        const mathHtml = $elem.html() || '';
+        console.log(`  📐 Math element ${index + 1}: "${mathText}" (HTML: ${mathHtml.substring(0, 100)})`);
+      });
+      
+      potentialMathElements.each((index, elem) => {
+        const $elem = $(elem);
+        const mathText = $elem.text().trim();
+        if (mathText.length > 0) {
+          console.log(`  📐 Potential equation ${index + 1}: "${mathText}"`);
+        }
+      });
+    }
     
     // Enhanced logging for conversion messages
     if (result.messages && result.messages.length > 0) {
@@ -558,6 +1016,36 @@ async function processWordDocumentEnhanced(filePath, quizId) {
     // Extract plain text for question parsing
     const extracted = await extractor.extract(filePath);
     const bodyText = extracted.getBody();
+    
+    // 🔧 NEW: Log the plain text to see if equations are there
+    console.log(`📄 Plain text extraction (first 1000 chars): "${bodyText.substring(0, 1000)}"`);
+    
+    // 🔧 NEW: Also check plain text for equations that might not be in HTML
+    const plainTextEquations = [];
+    const equationPatternsInText = [
+      // Pattern for: 2x^2-√5x+1=0
+      /([0-9]+[a-zA-Z]+\^?[0-9]*[+\-±×÷√][0-9]*[√]*[a-zA-Z]*[+\-±×÷√][0-9]*\s*=\s*[0-9]+)/g,
+      // Pattern for: 2x²-√5x+1=0 (with superscript)
+      /([0-9]+[a-zA-Z]+[²³⁴⁵⁶⁷⁸⁹⁰][+\-±×÷√][0-9]*[√]*[a-zA-Z]*[+\-±×÷√][0-9]*\s*=\s*[0-9]+)/g,
+      // More flexible pattern
+      /([0-9]*[a-zA-Z]*[\^²³⁴⁵⁶⁷⁸⁹⁰]*[+\-±×÷√][0-9]*[√]*[a-zA-Z]*[+\-±×÷√][0-9]*\s*=\s*[0-9]+)/g
+    ];
+    
+    equationPatternsInText.forEach(pattern => {
+      const matches = bodyText.match(pattern);
+      if (matches) {
+        matches.forEach(match => {
+          const cleanMatch = match.trim();
+          if (cleanMatch.length > 0 && !plainTextEquations.includes(cleanMatch)) {
+            plainTextEquations.push(cleanMatch);
+            console.log(`📐 Found equation in plain text: "${cleanMatch}"`);
+          }
+        });
+      }
+    });
+    
+    // Store plain text equations for later use in question processing
+    bodyHtml = bodyHtml + `<!-- PLAINTEXT_EQUATIONS: ${JSON.stringify(plainTextEquations)} -->`;
 
     // 🔧 ENHANCED: Use table count as the primary source of question count
     const questionsData = splitQuestionsEnhanced(bodyText);
@@ -595,7 +1083,8 @@ async function processWordDocumentEnhanced(filePath, quizId) {
         tableData, 
         bodyHtml,
         quizId,
-        i
+        i,
+        bodyText // Pass plain text for equation extraction
       );
       
       if (questionResult.success) {
@@ -737,23 +1226,56 @@ function integrateMatheExpressions(questionText, mathExpressions) {
   return integratedText;
 }
 
+// 🔧 NEW: Helper function to parse JSON stringified table data
+function parseTableDataArray(tableData) {
+  if (!tableData) return [];
+  
+  // If it's already an array of arrays, return as is
+  if (Array.isArray(tableData) && tableData.length > 0) {
+    // Check if first element is a string that looks like JSON
+    if (typeof tableData[0] === 'string' && tableData[0].startsWith('[')) {
+      // Parse JSON strings to arrays
+      return tableData.map(item => {
+        if (typeof item === 'string' && item.startsWith('[')) {
+          try {
+            return JSON.parse(item);
+          } catch (e) {
+            return item;
+          }
+        }
+        return item;
+      });
+    }
+    // If it's already array of arrays, return as is
+    if (Array.isArray(tableData[0])) {
+      return tableData;
+    }
+  }
+  
+  return [];
+}
+
 // 🔧 NEW: Enhanced question processing with better parsing
-async function processQuestionEnhanced(questionText, tableData, bodyHtml, quizId, questionIndex) {
+async function processQuestionEnhanced(questionText, tableData, bodyHtml, quizId, questionIndex, plainText = '') {
   try {
     const questionData = {};
     
+    // 🔧 ENHANCED: Parse table data if it contains JSON strings
+    const parsedTableData = parseTableDataArray(tableData);
+    
     // 🔧 ENHANCED: Extract question text from table data if available
     let actualQuestionText = questionText;
+    let questionTypeFromTable = null;
     
     console.log(`🔍 DEBUG: tableData type: ${typeof tableData}, isArray: ${Array.isArray(tableData)}, length: ${tableData?.length}`);
-    console.log(`🔍 DEBUG: tableData content:`, tableData);
+    console.log(`🔍 DEBUG: parsedTableData length: ${parsedTableData.length}`);
     
-    // If we have table data, extract the actual question from it
-    if (tableData && Array.isArray(tableData) && tableData.length > 0) {
+    // If we have parsed table data, extract the actual question from it
+    if (parsedTableData && Array.isArray(parsedTableData) && parsedTableData.length > 0) {
       // Look for the question row in table data
-      const questionRow = tableData.find(row => 
+      const questionRow = parsedTableData.find(row => 
         Array.isArray(row) && row.length >= 2 && 
-        (row[0] === 'Question' || row[0].toLowerCase().includes('question'))
+        (row[0] === 'Question' || (typeof row[0] === 'string' && row[0].toLowerCase().includes('question')))
       );
       
       if (questionRow && questionRow[1]) {
@@ -761,6 +1283,17 @@ async function processQuestionEnhanced(questionText, tableData, bodyHtml, quizId
         console.log(`📝 Using table-based question text: "${actualQuestionText.substring(0, 80)}..."`);
       } else {
         console.log(`⚠️ No question row found in table data, using text-based extraction`);
+      }
+      
+      // Extract question type from table data
+      const typeRow = parsedTableData.find(row => 
+        Array.isArray(row) && row.length >= 2 && 
+        (row[0] === 'Type' || (typeof row[0] === 'string' && row[0].toLowerCase().includes('type')))
+      );
+      
+      if (typeRow && typeRow[1]) {
+        questionTypeFromTable = typeRow[1].toLowerCase().trim();
+        console.log(`📝 Using table-based question type: "${questionTypeFromTable}"`);
       }
     }
     
@@ -776,16 +1309,150 @@ async function processQuestionEnhanced(questionText, tableData, bodyHtml, quizId
       questionIndex
     );
     
+    // 🔧 NEW: Also extract equation text directly from HTML
+    // Word equations (OMath) might be converted to text that we need to capture
+    const $ = cheerio.load(bodyHtml);
+    const equationTexts = [];
+    
+    // Find the question table and cell
+    const tables = $('table');
+    if (tables.length > questionIndex) {
+      const questionTable = $(tables[questionIndex]);
+      const questionRow = questionTable.find('tr').filter(function() {
+        return $(this).find('td, th').first().text().trim().toLowerCase() === 'question';
+      });
+      
+      if (questionRow.length > 0) {
+        const questionCell = questionRow.find('td, th').eq(1);
+        const cellText = questionCell.text();
+        const cellHtml = questionCell.html() || '';
+        
+        console.log(`🔍 Question cell text: "${cellText.substring(0, 200)}"`);
+        console.log(`🔍 Question cell HTML preview: "${cellHtml.substring(0, 300)}"`);
+        
+        // Look for equation patterns in the cell text
+        // Pattern: 2x^2-√5x+1=0 or 2x²-√5x+1=0 or similar
+        const equationPatterns = [
+          // Specific pattern for: 2x^2-√5x+1=0
+          /([0-9]+[a-zA-Z]+\^?[0-9]+[+\-±×÷√][0-9]*[√]*[0-9]*[a-zA-Z]*[+\-±×÷√][0-9]+\s*=\s*[0-9]+)/g,
+          // Pattern with superscript: 2x²-√5x+1=0
+          /([0-9]+[a-zA-Z]+[²³⁴⁵⁶⁷⁸⁹⁰][+\-±×÷√][0-9]*[√]*[0-9]*[a-zA-Z]*[+\-±×÷√][0-9]+\s*=\s*[0-9]+)/g,
+          // More general patterns
+          /([0-9]+[a-zA-Z]*[\^²³⁴⁵⁶⁷⁸⁹⁰]*[+\-±×÷√][0-9]*[√]*[a-zA-Z]*[+\-±×÷√][0-9]+\s*=\s*[0-9]+)/g,
+          /([0-9]*[a-zA-Z]*[\^²³⁴⁵⁶⁷⁸⁹⁰]*[+\-±×÷√][0-9]*[√]*[a-zA-Z]*[+\-±×÷√][0-9]*\s*=\s*[0-9]+)/g
+        ];
+        
+        equationPatterns.forEach(pattern => {
+          const matches = cellText.match(pattern);
+          if (matches) {
+            matches.forEach(match => {
+              const cleanMatch = match.trim();
+              if (cleanMatch.length > 0 && !equationTexts.includes(cleanMatch)) {
+                equationTexts.push(cleanMatch);
+                console.log(`📐 Found equation pattern in cell text: "${cleanMatch}"`);
+              }
+            });
+          }
+        });
+        
+        // 🔧 NEW: Also check the full HTML of the cell for equations that might be in spans or other elements
+        // Sometimes equations are split across multiple elements
+        const allCellText = questionCell.text(); // Get all text including nested elements
+        const cellTextWithSpaces = allCellText.replace(/\s+/g, ' '); // Normalize spaces
+        
+        // Look for equations in normalized text
+        equationPatterns.forEach(pattern => {
+          const matches = cellTextWithSpaces.match(pattern);
+          if (matches) {
+            matches.forEach(match => {
+              const cleanMatch = match.trim();
+              if (cleanMatch.length > 0 && !equationTexts.includes(cleanMatch)) {
+                equationTexts.push(cleanMatch);
+                console.log(`📐 Found equation in normalized cell text: "${cleanMatch}"`);
+              }
+            });
+          }
+        });
+        
+        // 🔧 NEW: Extract equations from HTML comments (if we stored them from plain text)
+        const htmlComments = cellHtml.match(/<!-- PLAINTEXT_EQUATIONS: (.*?) -->/);
+        if (htmlComments && htmlComments[1]) {
+          try {
+            const storedEquations = JSON.parse(htmlComments[1]);
+            storedEquations.forEach(eq => {
+              if (!equationTexts.includes(eq)) {
+                equationTexts.push(eq);
+                console.log(`📐 Found equation from plain text storage: "${eq}"`);
+              }
+            });
+          } catch (e) {
+            console.error('Error parsing stored equations:', e);
+          }
+        }
+        
+        // Also check HTML for MathML or special equation elements
+        const mathElements = questionCell.find('m\\:oMath, m\\:math, math, [class*="math"], [class*="equation"]');
+        mathElements.each((idx, elem) => {
+          const mathText = $(elem).text().trim();
+          if (mathText && mathText.length > 0 && !equationTexts.includes(mathText)) {
+            equationTexts.push(mathText);
+            console.log(`📐 Found equation in MathML/HTML: "${mathText}"`);
+          }
+        });
+      }
+    }
+    
+    // 🔧 NEW: Also search in plain text for equations near this question
+    if (plainText && plainText.length > 0) {
+      // Try to find equations in the plain text that might be related to this question
+      // Look for patterns like "2x^2-√5x+1=0" or "2x²-√5x+1=0"
+      const plainTextEquationPatterns = [
+        // Pattern for: 2x^2-√5x+1=0
+        /([0-9]+[a-zA-Z]+\^?[0-9]+[+\-±×÷√][0-9]*[√]*[0-9]*[a-zA-Z]*[+\-±×÷√][0-9]+\s*=\s*[0-9]+)/g,
+        // Pattern with superscript: 2x²-√5x+1=0
+        /([0-9]+[a-zA-Z]+[²³⁴⁵⁶⁷⁸⁹⁰][+\-±×÷√][0-9]*[√]*[0-9]*[a-zA-Z]*[+\-±×÷√][0-9]+\s*=\s*[0-9]+)/g,
+        // More flexible pattern
+        /([0-9]+[a-zA-Z]*[\^²³⁴⁵⁶⁷⁸⁹⁰]*[+\-±×÷√][0-9]*[√]*[a-zA-Z]*[+\-±×÷√][0-9]+\s*=\s*[0-9]+)/g
+      ];
+      
+      // Check if question text mentions "quadratic equation" - then look for equations nearby
+      const questionTextLower = questionData.questionText.toLowerCase();
+      if (questionTextLower.includes('quadratic equation') || questionTextLower.includes('equation')) {
+        plainTextEquationPatterns.forEach(pattern => {
+          const matches = plainText.match(pattern);
+          if (matches) {
+            matches.forEach(match => {
+              const cleanMatch = match.trim();
+              // Only add if it looks like a quadratic equation (has x^2 or x²)
+              if (cleanMatch.match(/x[\^²]/) && !equationTexts.includes(cleanMatch)) {
+                equationTexts.push(cleanMatch);
+                console.log(`📐 Found equation in plain text: "${cleanMatch}"`);
+              }
+            });
+          }
+        });
+      }
+    }
+    
+    // Combine extracted equations with math expressions
+    const allMathExpressions = [...mathExpressions];
+    equationTexts.forEach(eq => {
+      if (!allMathExpressions.includes(eq)) {
+        allMathExpressions.push(eq);
+        console.log(`✅ Added equation to math expressions: "${eq}"`);
+      }
+    });
+    
     // Store mathematical expressions in parts array
-    questionData.parts = mathExpressions.map(expr => ({
+    questionData.parts = allMathExpressions.map(expr => ({
       kind: 'math',
       content: expr
     }));
     
     // 🔧 NEW: Integrate mathematical expressions into question text
-    if (mathExpressions.length > 0) {
-      questionData.questionText = integrateMatheExpressions(questionData.questionText, mathExpressions);
-      console.log(`🔢 Integrated ${mathExpressions.length} mathematical expressions into question text`);
+    if (allMathExpressions.length > 0) {
+      questionData.questionText = integrateMatheExpressions(questionData.questionText, allMathExpressions);
+      console.log(`🔢 Integrated ${allMathExpressions.length} mathematical expressions into question text`);
     }
     
     // Store real images
@@ -793,10 +1460,10 @@ async function processQuestionEnhanced(questionText, tableData, bodyHtml, quizId
     
     // 🔧 ENHANCED: Parse options from table data if available
     let optionsData;
-    console.log(`🔍 DEBUG: Checking tableData for options - type: ${typeof tableData}, isArray: ${Array.isArray(tableData)}, length: ${tableData?.length}`);
-    if (tableData && (typeof tableData === 'string' || (Array.isArray(tableData) && tableData.length > 0))) {
+    console.log(`🔍 DEBUG: Checking parsedTableData for options - length: ${parsedTableData?.length}`);
+    if (parsedTableData && Array.isArray(parsedTableData) && parsedTableData.length > 0) {
       console.log(`✅ Using table-based option parsing`);
-      optionsData = parseOptionsFromTableData(tableData);
+      optionsData = parseOptionsFromTableData(parsedTableData);
       console.log(`📊 Table-based option parsing: ${optionsData.options.length} options found`);
     } else {
       console.log(`⚠️ Falling back to text-based option parsing`);
@@ -807,8 +1474,8 @@ async function processQuestionEnhanced(questionText, tableData, bodyHtml, quizId
     
     // 🔧 ENHANCED: Parse solution from table data if available
     let solution;
-    if (tableData && (typeof tableData === 'string' || (Array.isArray(tableData) && tableData.length > 0))) {
-      solution = parseSolutionFromTableData(tableData);
+    if (parsedTableData && Array.isArray(parsedTableData) && parsedTableData.length > 0) {
+      solution = parseSolutionFromTableData(parsedTableData);
       console.log(`💡 Using table-based solution parsing`);
     } else {
       solution = parseSolutionEnhanced(actualQuestionText);
@@ -831,30 +1498,35 @@ async function processQuestionEnhanced(questionText, tableData, bodyHtml, quizId
     
     // 🔧 ENHANCED: Parse marks from table data if available
     let marks;
-    if (tableData && Array.isArray(tableData) && tableData.length > 0) {
-      marks = parseMarksFromTableData(tableData);
+    if (parsedTableData && Array.isArray(parsedTableData) && parsedTableData.length > 0) {
+      marks = parseMarksFromTableData(parsedTableData);
       console.log(`📊 Using table-based marks parsing`);
-      } else {
+    } else {
       marks = parseMarksEnhanced(actualQuestionText);
       console.log(`📊 Using text-based marks parsing`);
     }
     questionData.questionCorrectMarks = marks.correct;
     questionData.questionIncorrectMarks = marks.incorrect;
     
-    // Enhanced question type detection
-    questionData.questionType = detectQuestionTypeEnhanced(actualQuestionText, questionData.options.length);
+    // Enhanced question type detection - use type from table if available
+    if (questionTypeFromTable) {
+      questionData.questionType = questionTypeFromTable;
+      console.log(`📝 Using question type from table: "${questionTypeFromTable}"`);
+    } else {
+      questionData.questionType = detectQuestionTypeEnhanced(actualQuestionText, questionData.options.length);
+      console.log(`📝 Detected question type: "${questionData.questionType}"`);
+    }
     
     // Store table data if available - convert to array of strings for schema compatibility
-    if (tableData && tableData.length > 0) {
+    if (parsedTableData && parsedTableData.length > 0) {
       try {
-        // Convert table data to array of strings (flatten if needed)
-        questionData.tables = Array.isArray(tableData) ? 
-          tableData.map(item => {
-            if (typeof item === 'string') return item;
-            if (typeof item === 'object') return JSON.stringify(item);
-            return String(item);
-          }) : 
-          [JSON.stringify(tableData)];
+        // Convert parsed table data to array of JSON strings for schema compatibility
+        questionData.tables = parsedTableData.map(item => {
+          if (typeof item === 'string') return item;
+          if (Array.isArray(item)) return JSON.stringify(item);
+          if (typeof item === 'object') return JSON.stringify(item);
+          return String(item);
+        });
         console.log(`📋 Processed table data: ${questionData.tables.length} items`);
       } catch (error) {
         console.error(`❌ Error processing table data:`, error);
@@ -981,75 +1653,73 @@ function parseOptionsFromTableData(tableData) {
   console.log(`📊 Parsing options from table data...`);
   const options = [];
   
-  // 🔧 FIX: Handle both string and array table data
-  let tableText = '';
-  if (typeof tableData === 'string') {
-    tableText = tableData;
-    console.log(`📄 Table data is string format`);
-  } else if (Array.isArray(tableData)) {
-    tableText = tableData.join(' ');
-    console.log(`📄 Table data is array format, converting to string`);
-  } else {
-    console.log(`⚠️ Table data format not recognized`);
-    return { options };
-  }
-  
-  console.log(`📄 Table text sample: "${tableText.substring(0, 200)}..."`);
-  
-  // 🔧 FIX: Parse options from the actual text structure
-  // Look for patterns like "A) text Correct/Incorrect"
-  const optionPattern = /([A-Z])\)\s*([^A-Z]*?)(?:\s+(correct|incorrect))/gi;
-  let match;
-  
-  while ((match = optionPattern.exec(tableText)) !== null) {
-    const optionLetter = match[1];
-    const optionText = match[2].trim();
-    const correctnessText = match[3].toLowerCase();
-    const isCorrect = correctnessText === 'correct';
+  // 🔧 FIX: Handle parsed array structure where each row is ["Option", "text", "Correct/Incorrect"]
+  if (Array.isArray(tableData)) {
+    // Look for rows that start with "Option"
+    const optionRows = tableData.filter(row => 
+      Array.isArray(row) && row.length >= 2 && 
+      (row[0] === 'Option' || (typeof row[0] === 'string' && row[0].toLowerCase().includes('option')))
+    );
     
-    // Clean up option text (remove extra spaces, tabs, etc.)
-    const cleanOptionText = optionText
-      .replace(/\s+/g, ' ')
-      .replace(/\t/g, ' ')
-      .trim();
+    console.log(`📊 Found ${optionRows.length} option rows in table data`);
     
-    options.push({
-      optionText: cleanOptionText,
-      isCorrect: isCorrect
-    });
-    
-    console.log(`   📝 Option ${optionLetter}: "${cleanOptionText}" (Correct: ${isCorrect})`);
-  }
-  
-  // 🔧 FALLBACK: If no options found with pattern, try alternative parsing
-  if (options.length === 0) {
-    console.log(`⚠️ No options found with standard pattern, trying alternative parsing...`);
-    
-    // Split by lines and look for option-like patterns
-    const lines = tableText.split(/[\n\r]+/);
-    for (const line of lines) {
-      const trimmedLine = line.trim();
-      
-      // Look for lines that start with A), B), etc.
-      const lineMatch = trimmedLine.match(/^([A-Z])\)\s*(.+)$/);
-      if (lineMatch) {
-        const optionLetter = lineMatch[1];
-        const fullText = lineMatch[2];
+    for (const row of optionRows) {
+      if (row.length >= 3) {
+        // Format: ["Option", "text", "Correct/Incorrect"]
+        const optionText = row[1] || '';
+        const correctnessText = (row[2] || '').toLowerCase().trim();
+        const isCorrect = correctnessText === 'correct';
         
-        // Extract option text and correctness
-        const correctMatch = fullText.match(/^(.*?)\s+(correct|incorrect)$/i);
-        if (correctMatch) {
-          const optionText = correctMatch[1].trim();
-          const isCorrect = correctMatch[2].toLowerCase() === 'correct';
-          
+        if (optionText.trim()) {
           options.push({
-            optionText: optionText,
-            isCorrect: isCorrect
+            optionText: optionText.trim(),
+            isCorrect: isCorrect,
+            optionImage: []
           });
           
-          console.log(`   📝 Option ${optionLetter}: "${optionText}" (Correct: ${isCorrect})`);
+          console.log(`   📝 Option: "${optionText.trim()}" (Correct: ${isCorrect})`);
+        }
+      } else if (row.length === 2) {
+        // Format: ["Option", "text"] - assume incorrect if no correctness specified
+        const optionText = row[1] || '';
+        if (optionText.trim()) {
+          options.push({
+            optionText: optionText.trim(),
+            isCorrect: false,
+            optionImage: []
+          });
+          
+          console.log(`   📝 Option: "${optionText.trim()}" (Correct: false - default)`);
         }
       }
+    }
+  }
+  
+  // 🔧 FALLBACK: If no options found, try text-based parsing
+  if (options.length === 0) {
+    console.log(`⚠️ No options found in table structure, trying text-based parsing...`);
+    
+    let tableText = '';
+    if (typeof tableData === 'string') {
+      tableText = tableData;
+    } else if (Array.isArray(tableData)) {
+      tableText = tableData.map(row => Array.isArray(row) ? row.join(' ') : String(row)).join(' ');
+    }
+    
+    // Look for patterns like "A) text Correct/Incorrect"
+    const optionPattern = /([A-Z])\)\s*([^A-Z]*?)(?:\s+(correct|incorrect))/gi;
+    let match;
+    
+    while ((match = optionPattern.exec(tableText)) !== null) {
+      const optionText = match[2].trim();
+      const correctnessText = match[3].toLowerCase();
+      const isCorrect = correctnessText === 'correct';
+      
+      options.push({
+        optionText: optionText,
+        isCorrect: isCorrect,
+        optionImage: []
+      });
     }
   }
   
@@ -1161,20 +1831,72 @@ function parseOptionsEnhanced(questionText) {
 function parseSolutionFromTableData(tableData) {
   console.log(`💡 Parsing solution from table data...`);
   
-  // 🔧 FIX: Handle both string and array table data
+  // 🔧 FIX: Handle parsed array structure where solution row is ["Solution", "text"]
+  if (Array.isArray(tableData)) {
+    // Look for solution row
+    const solutionRow = tableData.find(row => 
+      Array.isArray(row) && row.length >= 2 && 
+      (row[0] === 'Solution' || (typeof row[0] === 'string' && row[0].toLowerCase().includes('solution')))
+    );
+    
+    if (solutionRow && solutionRow[1]) {
+      const solutionText = solutionRow[1].trim();
+      console.log(`✅ Found solution in table: "${solutionText}"`);
+      
+      // Also try to find the correct option from option rows
+      const optionRows = tableData.filter(row => 
+        Array.isArray(row) && row.length >= 3 && 
+        (row[0] === 'Option' || (typeof row[0] === 'string' && row[0].toLowerCase().includes('option')))
+      );
+      
+      let correctLetter = null;
+      for (let i = 0; i < optionRows.length; i++) {
+        const row = optionRows[i];
+        if (row.length >= 3 && (row[2] || '').toLowerCase().trim() === 'correct') {
+          correctLetter = String.fromCharCode(65 + i); // A, B, C, D
+          break;
+        }
+      }
+      
+      return {
+        found: true,
+        letter: correctLetter,
+        explanation: solutionText,
+        fullText: solutionText
+      };
+    }
+    
+    // Fallback: Find correct option from option rows
+    const optionRows = tableData.filter(row => 
+      Array.isArray(row) && row.length >= 3 && 
+      (row[0] === 'Option' || (typeof row[0] === 'string' && row[0].toLowerCase().includes('option')))
+    );
+    
+    for (let i = 0; i < optionRows.length; i++) {
+      const row = optionRows[i];
+      if (row.length >= 3 && (row[2] || '').toLowerCase().trim() === 'correct') {
+        const correctLetter = String.fromCharCode(65 + i);
+        const correctOptionText = row[1] || '';
+        console.log(`✅ Found correct answer from options: ${correctLetter}) "${correctOptionText}"`);
+        
+        return {
+          found: true,
+          letter: correctLetter,
+          explanation: `The correct answer is ${correctLetter}) ${correctOptionText}`,
+          fullText: `Solution: ${correctLetter}) ${correctOptionText}`
+        };
+      }
+    }
+  }
+  
+  // 🔧 FALLBACK: Text-based parsing
   let tableText = '';
   if (typeof tableData === 'string') {
     tableText = tableData;
-    console.log(`📄 Table data is string format`);
   } else if (Array.isArray(tableData)) {
-    tableText = tableData.join(' ');
-    console.log(`📄 Table data is array format, converting to string`);
-  } else {
-    console.log(`⚠️ Table data format not recognized`);
-    return { found: false, letter: null, explanation: '', fullText: '' };
+    tableText = tableData.map(row => Array.isArray(row) ? row.join(' ') : String(row)).join(' ');
   }
   
-  // 🔧 FIX: Extract correct answer from options in the text
   // Look for the option marked as "correct"
   const correctOptionMatch = tableText.match(/([A-Z])\)\s*([^A-Z]*?)\s+correct/i);
   if (correctOptionMatch) {
@@ -1278,25 +2000,38 @@ function parseMarksFromTableData(tableData) {
     return { correct: 2, incorrect: 0 }; // Default values
   }
   
-  // Look for marks row in table data
+  // Look for marks row in table data - format: ["Marks", "2", "0"]
   for (const row of tableData) {
     if (Array.isArray(row) && row.length >= 2) {
       const firstCell = row[0];
       
       // Check if this is a marks row
-      if (firstCell === 'Marks' && row[1]) {
-        const marksText = row[1].trim();
-        const parts = marksText.split(/[,\s]+/);
-        
+      if ((firstCell === 'Marks' || (typeof firstCell === 'string' && firstCell.toLowerCase().includes('marks'))) && row.length >= 2) {
         let correct = 2; // default
         let incorrect = 0; // default
         
-        if (parts.length >= 2) {
-          const correctPart = parseFloat(parts[0]);
-          const incorrectPart = parseFloat(parts[1]);
+        // If row has 3 elements: ["Marks", "2", "0"]
+        if (row.length >= 3) {
+          const correctPart = parseFloat(row[1]);
+          const incorrectPart = parseFloat(row[2]);
           
           if (!isNaN(correctPart)) correct = correctPart;
           if (!isNaN(incorrectPart)) incorrect = incorrectPart;
+        } else if (row.length === 2) {
+          // If row has 2 elements: ["Marks", "2 0"] or ["Marks", "2,0"]
+          const marksText = String(row[1] || '').trim();
+          const parts = marksText.split(/[,\s]+/);
+          
+          if (parts.length >= 2) {
+            const correctPart = parseFloat(parts[0]);
+            const incorrectPart = parseFloat(parts[1]);
+            
+            if (!isNaN(correctPart)) correct = correctPart;
+            if (!isNaN(incorrectPart)) incorrect = incorrectPart;
+          } else if (parts.length === 1) {
+            const correctPart = parseFloat(parts[0]);
+            if (!isNaN(correctPart)) correct = correctPart;
+          }
         }
         
         console.log(`✅ Found marks in table: +${correct}, -${incorrect}`);

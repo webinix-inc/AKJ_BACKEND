@@ -22,13 +22,12 @@ const verifyToken = (req, res, next) => {
       });
     }
     const user = await User.findOne({ _id: decoded.id });
-    const user1 = await User.findOne({ _id: decoded.id });
-    if (!user && !user1) {
-      return res.status(400).send({
-        message: "The user that this token belongs to does not exist",
+    if (!user) {
+      return res.status(401).send({
+        message: "Invalid or expired session. Please log in again.",
       });
     }
-    req.user = user || user1;
+    req.user = user;
     next();
   });
 };

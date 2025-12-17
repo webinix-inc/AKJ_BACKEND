@@ -615,6 +615,7 @@ const createLiveClass = async (req, res) => {
         audio: false,
         video: false,
       },
+      ...(platform === "merithub" && { merithubInstructorId: userId }),
 
       // Add perma class specific fields only if type is "perma"
       ...(type === "perma" && {
@@ -725,20 +726,13 @@ const createLiveClass = async (req, res) => {
         });
       }
 
-      if (!instructor.merithubUserToken) {
-        console.log('❌ [MERITHUB] Instructor missing MeritHub token');
-        return res.status(400).json({
-          error: "Instructor's MeritHub token not found. Please re-register the instructor in MeritHub.",
-        });
-      }
-
       console.log(`🎥 [MERITHUB] Creating class for instructor: ${instructor.firstName} ${instructor.lastName}`);
       console.log('🚨🚨🚨 [DEBUG] OUR CONTROLLER IS BEING USED! 🚨🚨🚨');
       console.log('📤 [MERITHUB] Calling scheduleLiveClass API...');
       console.log('   Instructor merithubUserId:', userId);
-      console.log('   Has instructor token:', !!instructor.merithubUserToken);
-      
-      const apiResponse = await scheduleLiveClass(userId, liveClassDetails, instructor.merithubUserToken);
+      // Note: scheduleLiveClass uses service account token, not user token
+      // The userToken parameter is accepted but not used in the implementation
+      const apiResponse = await scheduleLiveClass(userId, liveClassDetails, null);
       
       console.log('📥 [MERITHUB] Received API response');
       console.log('   Response type:', typeof apiResponse);
@@ -1015,11 +1009,11 @@ const createLiveClass = async (req, res) => {
 
 const fetchAllClasses = async (req, res) => {
   try {
-    // Fetch all live classes from the database, excluding completed/deleted classes
-    // Only show upcoming, scheduled, and live classes
+    // Fetch all live classes from the database, excluding only soft-deleted entries.
+    // Admins can now see upcoming, live, and completed classes until they delete them manually.
     const classes = await LiveClass.find({
-      status: { $nin: ['completed', 'deleted', 'expired'] }
-    }).sort({ startTime: -1 }); // Sort by start time in descending order
+      status: { $ne: "deleted" },
+    }).sort({ startTime: -1 });
 
     if (!classes || classes.length === 0) {
       return res.status(200).json({
@@ -1028,59 +1022,9 @@ const fetchAllClasses = async (req, res) => {
       });
     }
 
-    // Filter out classes that have passed their END time (start time + duration) and are not live
-    const now = new Date();
-    const activeClasses = classes.filter(liveClass => {
-      const startTime = new Date(liveClass.startTime);
-      const duration = liveClass.duration || 60; // Default 60 minutes if not set
-      const endTime = new Date(startTime.getTime() + duration * 60 * 1000); // Add duration in milliseconds
-      const timeSinceEnd = now - endTime;
-
-      // Keep if:
-      // 1. Class hasn't ended yet (future class or currently running)
-      // 2. Class is currently live
-      const hasNotEnded = timeSinceEnd < 0; // Class hasn't ended yet
-      const isLive = liveClass.status === "lv";
-
-      return hasNotEnded || isLive;
-    });
-
-    // Auto-delete classes that have passed their END time and are not live
-    const classesToDelete = classes.filter(liveClass => {
-      const startTime = new Date(liveClass.startTime);
-      const duration = liveClass.duration || 60; // Default 60 minutes if not set
-      const endTime = new Date(startTime.getTime() + duration * 60 * 1000); // Add duration in milliseconds
-      const timeSinceEnd = now - endTime;
-
-      // Delete if:
-      // 1. Class has passed its END time (start time + duration)
-      // 2. Class is not live
-      return timeSinceEnd > 0 && liveClass.status !== "lv";
-    });
-
-    // Delete expired classes in background (don't wait for it)
-    if (classesToDelete.length > 0) {
-      console.log(`🗑️ [AUTO_DELETE] Found ${classesToDelete.length} expired classes to delete`);
-      classesToDelete.forEach(async (liveClass) => {
-        try {
-          await LiveClass.deleteOne({ _id: liveClass._id });
-          console.log(`✅ [AUTO_DELETE] Deleted expired class: ${liveClass.title}`);
-          
-          // Remove from users
-          await User.updateMany(
-            { "liveClasses.classId": liveClass.classId },
-            { $pull: { liveClasses: { classId: liveClass.classId } } }
-          );
-        } catch (deleteError) {
-          console.error(`❌ [AUTO_DELETE] Error deleting class ${liveClass._id}:`, deleteError);
-        }
-      });
-    }
-
-    // Respond with the filtered list of active classes
     res.status(200).json({
       message: "Live classes fetched successfully",
-      classes: activeClasses,
+      classes,
     });
   } catch (error) {
     console.error("Error fetching live classes:", error.message);
@@ -1117,7 +1061,7 @@ const fetchUserLiveClasses = async (req, res) => {
     // Exclude completed, deleted, and expired classes
     const classes = await LiveClass.find({
       courseIds: { $in: userCourseIds },
-      status: { $nin: ['completed', 'deleted', 'expired'] }
+      status: { $ne: "deleted" }
     }).sort({ startTime: -1 });
 
     console.log(`🎥 [LIVE CLASSES] Found ${classes.length} live classes for user's courses`);
@@ -1129,22 +1073,10 @@ const fetchUserLiveClasses = async (req, res) => {
       });
     }
 
-    // Filter out past classes (older than 2 hours) unless they're currently live
-    const now = new Date();
-    const activeClasses = classes.filter(liveClass => {
-      const startTime = new Date(liveClass.startTime);
-      const timeDiff = now - startTime;
-      const twoHours = 2 * 60 * 60 * 1000;
-
-      // Keep if: not started yet, currently live, or ended less than 2 hours ago
-      // Also exclude completed classes (shouldn't happen due to query filter, but double-check)
-      return (timeDiff < twoHours || liveClass.status === "lv") && 
-             liveClass.status !== "completed" && 
-             liveClass.status !== "deleted" &&
-             liveClass.status !== "expired";
-    });
-
-    console.log(`✅ [FILTERED] ${activeClasses.length} active/upcoming classes after filtering`);
+    // Requirement: keep classes visible for students until admins delete them.
+    // So we only exclude hard deleted ones above and return the full list here.
+    const activeClasses = classes;
+    console.log(`✅ [FILTERED] ${activeClasses.length} classes returned to user (no auto-removal)`);
 
     // 🔧 FIX: Use individual user links from user profiles (like working code)
     console.log(`🔗 [INDIVIDUAL_LINKS] Users will get their individual MeritHub links`);
@@ -1532,48 +1464,120 @@ const checkClassStatus = async (req, res) => {
       return res.status(404).json({ error: "Class not found" });
     }
 
+    // If our DB already marks this class as completed/expired/deleted, allow admin deletion right away
+    if (["completed", "expired", "deleted"].includes(liveClass.status)) {
+      return res.json({
+        status: liveClass.status,
+        canDelete: true,
+        message: "Class has ended and can be deleted",
+        classData: liveClass,
+      });
+    }
+
     // Try to get status from MeritHub if we have a MeritHub class ID
     // IMPORTANT: Always check MeritHub's actual status, even if our DB says "lv"
     // This ensures we detect when a class has ended even if the webhook hasn't been processed yet
     if (liveClass.classId && liveClass.platform === "merithub") {
       try {
-        const meritHubStatus = await getClassStatus(liveClass.classId);
+        // First check if class has passed its end time - if so, mark as completed
+        const now = new Date();
+        const startTime = new Date(liveClass.startTime);
+        const duration = liveClass.duration || 60;
+        const endTime = new Date(startTime.getTime() + duration * 60 * 1000);
+        const timeSinceEnd = now - endTime;
         
-        console.log(`📊 [STATUS CHECK] MeritHub status response:`, JSON.stringify(meritHubStatus, null, 2));
+        // If class has passed its end time, mark as completed immediately
+        if (timeSinceEnd > 0 && liveClass.status !== "lv") {
+          console.log(`⏰ [STATUS CHECK] Class has passed its end time (${Math.round(timeSinceEnd / 60000)} minutes ago) - marking as completed`);
+          await LiveClass.findByIdAndUpdate(liveClass._id, {
+            status: "completed"
+          });
+          return res.json({
+            status: "completed",
+            canDelete: true,
+            message: "Class has ended and can be deleted",
+            classData: { ...liveClass.toObject(), status: "completed" }
+          });
+        }
         
-        // FIRST: Check if MeritHub shows the class as completed (empty classes array or status "cp")
-        // This is the most reliable indicator that the class has ended
-        if (meritHubStatus.classes && Array.isArray(meritHubStatus.classes) && meritHubStatus.classes.length === 0) {
-          console.log(`⚠️ [STATUS CHECK] MeritHub returned empty classes array - class has ended`);
+        // Try to get status from MeritHub - try direct classId query first, then instructor query
+        let meritHubStatus = null;
+        let statusError = null;
+        
+        try {
+          // First try: Query directly by classId (more reliable)
+          console.log(`📊 [STATUS CHECK] Attempting direct classId query: ${liveClass.classId}`);
+          meritHubStatus = await getClassStatus(liveClass.classId, null);
+          console.log(`✅ [STATUS CHECK] Direct classId query succeeded`);
+        } catch (directError) {
+          console.log(`⚠️ [STATUS CHECK] Direct classId query failed: ${directError.message}`);
+          statusError = directError;
           
-          const now = new Date();
-          const startTime = new Date(liveClass.startTime);
-          const createdAt = new Date(liveClass.createdAt);
-          const duration = liveClass.duration || 60;
-          const endTime = new Date(startTime.getTime() + duration * 60 * 1000);
-          const timeSinceStart = now - startTime;
-          const timeSinceEnd = now - endTime;
-          const timeSinceCreation = now - createdAt;
-          const thirtySeconds = 0.5 * 60 * 1000;
-          
-          // Don't delete if class was just created (within 2 minutes)
-          if (timeSinceCreation < thirtySeconds) {
-            console.log(`⏳ [STATUS CHECK] Class was just created (${Math.round(timeSinceCreation / 1000)}s ago) - keeping it`);
+          // Fallback: Try instructor query if we have instructor ID
+          if (liveClass.merithubInstructorId) {
+            try {
+              console.log(`📊 [STATUS CHECK] Attempting instructor query: ${liveClass.merithubInstructorId} with classId: ${liveClass.classId}`);
+              meritHubStatus = await getClassStatus(liveClass.classId, liveClass.merithubInstructorId);
+              console.log(`✅ [STATUS CHECK] Instructor query succeeded`);
+            } catch (instructorError) {
+              console.log(`⚠️ [STATUS CHECK] Instructor query also failed: ${instructorError.message}`);
+              statusError = instructorError;
+            }
+          }
+        }
+        
+        if (!meritHubStatus) {
+          console.log(`❌ [STATUS CHECK] Both query methods failed - checking if class exists in MeritHub`);
+          // If both queries failed, the class might not exist in MeritHub
+          // Check if error indicates class doesn't exist
+          const errorMsg = statusError?.message?.toLowerCase() || '';
+          if (errorMsg.includes('not found') || errorMsg.includes('does not exist') || errorMsg.includes('404')) {
+            console.log(`✅ [STATUS CHECK] MeritHub confirms class does not exist - marking as completed`);
+            await LiveClass.findByIdAndUpdate(liveClass._id, {
+              status: "completed"
+            });
             return res.json({
-              status: liveClass.status || "scheduled",
-              canDelete: false,
-              message: "Class is scheduled (recently created)",
-              meritHubStatus,
-              classData: liveClass
+              status: "completed",
+              canDelete: true,
+              message: "Class does not exist in MeritHub (may have been deleted)",
+              classData: { ...liveClass.toObject(), status: "completed" }
             });
           }
-          
-          // If MeritHub returns empty classes array AND class has passed its start time,
-          // it means the class has been completed (MeritHub shows "session is already completed")
-          if (timeSinceStart > 0) {
-            console.log(`🗑️ [STATUS CHECK] MeritHub returned empty classes array and class has passed start time (${Math.round(timeSinceStart / 1000)}s ago) - marking as completed`);
+          // If we can't determine status, throw the error to be caught by outer catch
+          throw statusError || new Error('Failed to get class status from MeritHub');
+        }
+        
+        console.log(`📊 [STATUS CHECK] MeritHub status response:`, JSON.stringify(meritHubStatus, null, 2));
+
+        const classesArray = Array.isArray(meritHubStatus.classes) ? meritHubStatus.classes : [];
+        const activeMeritHubStatus = classesArray.length > 0 ? classesArray[0].status : null;
+        const isMeritHubLive =
+          meritHubStatus.status === "lv" ||
+          meritHubStatus.status === "live" ||
+          activeMeritHubStatus === "lv" ||
+          activeMeritHubStatus === "live";
+        
+        // Trust MeritHub's response: if it returns empty classes array, check if class exists
+        if (classesArray.length === 0) {
+          console.log(`⚠️ [STATUS CHECK] MeritHub returned empty classes array`);
+          console.log(`🔍 [STATUS CHECK] Class details: classId=${liveClass.classId}, createdAt=${liveClass.createdAt}, startTime=${liveClass.startTime}`);
+
+          const createdAt = new Date(liveClass.createdAt);
+          const protectionWindow = 2 * 60 * 1000; // 2 minutes after creation
+          const timeSinceCreation = now - createdAt;
+
+          // If MeritHub returns empty AND we have a valid classId, the class doesn't exist in MeritHub
+          // This means either:
+          // 1. Class creation failed silently
+          // 2. Class was deleted from MeritHub
+          // 3. ClassId is invalid
+          // In all cases, we should allow deletion
+          if (liveClass.classId && liveClass.classId !== liveClass._id.toString()) {
+            console.log(`⚠️ [STATUS CHECK] Class has valid classId (${liveClass.classId}) but MeritHub returns empty`);
+            console.log(`⚠️ [STATUS CHECK] This means the class does NOT exist in MeritHub`);
+            console.log(`✅ [STATUS CHECK] Allowing deletion - class can be removed and recreated if needed`);
             
-            // Update database status to "completed" so it gets filtered out
+            // Mark as error/completed so it can be deleted
             await LiveClass.findByIdAndUpdate(liveClass._id, {
               status: "completed"
             });
@@ -1581,11 +1585,39 @@ const checkClassStatus = async (req, res) => {
             return res.json({
               status: "completed",
               canDelete: true,
-              message: "Class has been completed (MeritHub shows session ended)",
+              message: "Class does not exist in MeritHub (may have failed to create). You can delete and recreate it.",
               meritHubStatus,
               classData: { ...liveClass.toObject(), status: "completed" }
             });
           }
+
+          // If class was just created and has no valid classId, protect it briefly
+          if (timeSinceCreation < protectionWindow) {
+            console.log(`⏳ [STATUS CHECK] Class was just created (${Math.round(timeSinceCreation / 1000)}s ago) and has no valid classId`);
+            console.log(`⏳ [STATUS CHECK] Protecting from deletion - may still be creating in MeritHub`);
+            return res.json({
+              status: liveClass.status || "scheduled",
+              canDelete: false,
+              message: "Class is scheduled (recently created, MeritHub may still be syncing)",
+              meritHubStatus,
+              classData: liveClass
+            });
+          }
+
+          // For older classes without valid classId: mark as completed
+          console.log(`✅ [STATUS CHECK] MeritHub returned empty classes array for class created ${Math.round(timeSinceCreation / 60000)} minutes ago`);
+          console.log(`✅ [STATUS CHECK] Marking as completed (trusting MeritHub response - class has ended or doesn't exist)`);
+          await LiveClass.findByIdAndUpdate(liveClass._id, {
+            status: "completed"
+          });
+
+          return res.json({
+            status: "completed",
+            canDelete: true,
+            message: "Class has been completed (MeritHub shows session ended or class doesn't exist)",
+            meritHubStatus,
+            classData: { ...liveClass.toObject(), status: "completed" }
+          });
         }
         
         // Check if MeritHub status explicitly indicates completion
@@ -1606,70 +1638,7 @@ const checkClassStatus = async (req, res) => {
           });
         }
 
-        // Check if MeritHub returned empty classes array
-        // This usually means the class has been completed or doesn't exist
-        // Also check if class was just created - don't delete newly created classes
-        if (meritHubStatus.classes && Array.isArray(meritHubStatus.classes) && meritHubStatus.classes.length === 0) {
-          console.log(`⚠️ [STATUS CHECK] MeritHub returned empty classes array - class may be completed`);
-          
-          const now = new Date();
-          const startTime = new Date(liveClass.startTime);
-          const createdAt = new Date(liveClass.createdAt);
-          const duration = liveClass.duration || 60; // Default 60 minutes if not set
-          const endTime = new Date(startTime.getTime() + duration * 60 * 1000); // Add duration in milliseconds
-          const timeSinceStart = now - startTime;
-          const timeSinceEnd = now - endTime;
-          const timeSinceCreation = now - createdAt;
-          const twoMinutes = 2 * 60 * 1000; // 2 minutes protection
-          
-          console.log(`⏰ [STATUS CHECK] Time check - Start: ${startTime.toISOString()}, Now: ${now.toISOString()}, Time since start: ${Math.round(timeSinceStart / 1000)}s`);
-          
-          // Don't delete if class was just created (within 2 minutes)
-          if (timeSinceCreation < twoMinutes) {
-            console.log(`⏳ [STATUS CHECK] Class was just created (${Math.round(timeSinceCreation / 1000)}s ago) - keeping it`);
-            return res.json({
-              status: liveClass.status || "scheduled",
-              canDelete: false,
-              message: "Class is scheduled (recently created)",
-              meritHubStatus,
-              classData: liveClass
-            });
-          }
-          
-          // If MeritHub returns empty classes array AND class has passed its start time,
-          // it means the class has been completed (MeritHub shows "session is already completed")
-          // This is the key indicator that the class has ended
-          if (timeSinceStart > 0 && liveClass.status !== "lv") {
-            console.log(`🗑️ [STATUS CHECK] MeritHub returned empty classes array and class has passed start time (${Math.round(timeSinceStart / 1000)}s ago) - marking as completed`);
-            return res.json({
-              status: "completed",
-              canDelete: true,
-              message: "Class has been completed (MeritHub shows session ended)",
-              meritHubStatus,
-              classData: liveClass
-            });
-          } else if (timeSinceEnd > 0 && liveClass.status !== "lv") {
-            // Also check if class has passed its end time
-            console.log(`🗑️ [STATUS CHECK] Class not found in MeritHub and has ended - marking for deletion`);
-            return res.json({
-              status: "expired",
-              canDelete: true,
-              message: "Class has ended and can be deleted",
-              meritHubStatus,
-              classData: liveClass
-            });
-          } else {
-            console.log(`⏳ [STATUS CHECK] MeritHub returned empty, but class hasn't started yet (starts in ${Math.round(-timeSinceStart / 1000)}s) - keeping it`);
-            // Don't mark as expired if class hasn't started yet
-            return res.json({
-              status: liveClass.status || "scheduled",
-              canDelete: false,
-              message: "Class is scheduled",
-              meritHubStatus,
-              classData: liveClass
-            });
-          }
-        }
+        // (second empty-array block removed; handled above)
         
         // Check if MeritHub status object itself indicates completion
         // Sometimes MeritHub might return status in a different format
@@ -1694,7 +1663,8 @@ const checkClassStatus = async (req, res) => {
           return res.json({
             status: "live",
             canDelete: false,
-            message: "Class is currently live and cannot be deleted",
+            canEdit: false,
+            message: "Class is currently live and cannot be deleted or edited",
             meritHubStatus,
             classData: liveClass
           });
@@ -1725,19 +1695,14 @@ const checkClassStatus = async (req, res) => {
         }
 
         // Check if class has passed its END time (start time + duration)
-        const now = new Date();
-        const startTime = new Date(liveClass.startTime);
-        const duration = liveClass.duration || 60; // Default 60 minutes if not set
-        const endTime = new Date(startTime.getTime() + duration * 60 * 1000); // Add duration in milliseconds
-        const timeSinceEnd = now - endTime;
         const timeSinceStart = now - startTime;
 
         // If class has passed its start time and MeritHub doesn't show it as live,
         // it might be completed (especially if it's been a while since start)
         // Also check if MeritHub returned empty classes array - this is a strong indicator of completion
-        if (timeSinceStart > 0 && liveClass.status !== "lv") {
+        if (timeSinceStart > 0 && liveClass.status !== "lv" && !isMeritHubLive) {
           // If MeritHub returned empty classes array, class has definitely ended
-          if (meritHubStatus.classes && Array.isArray(meritHubStatus.classes) && meritHubStatus.classes.length === 0) {
+          if (classesArray.length === 0) {
             console.log(`🗑️ [STATUS CHECK] Class has passed start time and MeritHub returned empty classes array - marking as completed`);
             return res.json({
               status: "completed",
@@ -1749,7 +1714,7 @@ const checkClassStatus = async (req, res) => {
           }
           
           // If class has passed start time by more than duration, it's likely completed
-          if (timeSinceStart > duration * 60 * 1000) {
+          if (timeSinceStart > duration * 60 * 1000 && !isMeritHubLive) {
             console.log(`🗑️ [STATUS CHECK] Class has passed start time by more than duration and is not live - marking as completed`);
             return res.json({
               status: "completed",
@@ -1762,26 +1727,110 @@ const checkClassStatus = async (req, res) => {
         }
 
         // Only mark as deletable if class has passed its END time and is not live
-        if (timeSinceEnd > 0 && meritHubStatus.status !== "lv") {
+        if (timeSinceEnd > 0 && meritHubStatus.status !== "lv" && !isMeritHubLive) {
+          // Mark as completed if it has passed end time
+          await LiveClass.findByIdAndUpdate(liveClass._id, {
+            status: "completed"
+          });
           return res.json({
-            status: "expired",
+            status: "completed",
             canDelete: true,
             message: "Class has ended and can be deleted",
+            meritHubStatus,
+            classData: { ...liveClass.toObject(), status: "completed" }
+          });
+        }
+
+        // Final check: if class has passed its end time, mark as completed regardless of MeritHub status
+        if (timeSinceEnd > 0 && liveClass.status !== "lv") {
+          console.log(`⏰ [STATUS CHECK] Class has passed end time - marking as completed`);
+          await LiveClass.findByIdAndUpdate(liveClass._id, {
+            status: "completed"
+          });
+          return res.json({
+            status: "completed",
+            canDelete: true,
+            message: "Class has ended and can be deleted",
+            meritHubStatus,
+            classData: { ...liveClass.toObject(), status: "completed" }
+          });
+        }
+
+        // Check if class is currently live - block deletion if live
+        if (isMeritHubLive) {
+          console.log(`🔴 [STATUS CHECK] Class is currently live - blocking deletion`);
+          return res.json({
+            status: "live",
+            canDelete: false,
+            canEdit: false,
+            message: "Class is currently live and cannot be deleted or edited",
             meritHubStatus,
             classData: liveClass
           });
         }
-
+        
+        // IMPORTANT: Explicitly handle "up" (upcoming) status - always allow delete/edit
+        const currentStatus = meritHubStatus.status || liveClass.status || "scheduled";
+        const isUpcoming = currentStatus === "up" || currentStatus === "scheduled";
+        
+        // Only disable delete/edit when class is ACTUALLY live, not just when scheduled time passes
+        // If status is "up" or "scheduled", always allow delete/edit
+        // This allows admin to delete/edit classes even after scheduled time if they haven't started yet
+        const canDeleteEdit = !isMeritHubLive && (isUpcoming || currentStatus !== "lv" && currentStatus !== "live");
+        
+        console.log(`📊 [STATUS CHECK] Status: ${currentStatus}, isMeritHubLive: ${isMeritHubLive}, canDeleteEdit: ${canDeleteEdit}`);
+        
         return res.json({
-          status: meritHubStatus.status || liveClass.status || "scheduled",
-          canDelete: false, // Don't allow deletion until class has ended
-          message: "Class is scheduled or in progress",
+          status: currentStatus,
+          canDelete: canDeleteEdit, // Allow deletion if class is not live
+          canEdit: canDeleteEdit, // Allow edit if class is not live
+          message: canDeleteEdit
+            ? "Class can be deleted or edited" 
+            : "Class is currently live and cannot be deleted or edited",
           meritHubStatus,
           classData: liveClass
         });
 
       } catch (statusError) {
         console.log(`⚠️ [STATUS CHECK] Could not get MeritHub status: ${statusError.message}`);
+        
+        // Check if error message indicates class is completed
+        const errorMessage = statusError.message?.toLowerCase() || '';
+        if (errorMessage.includes('already completed') || 
+            errorMessage.includes('session is already completed') ||
+            errorMessage.includes('completed') && errorMessage.includes('session')) {
+          console.log(`✅ [STATUS CHECK] MeritHub error indicates class is completed - marking as completed`);
+          await LiveClass.findByIdAndUpdate(liveClass._id, {
+            status: "completed"
+          });
+          return res.json({
+            status: "completed",
+            canDelete: true,
+            message: "Class has been completed (MeritHub shows session ended)",
+            classData: { ...liveClass.toObject(), status: "completed" }
+          });
+        }
+        
+        // If class has passed its end time, mark as completed even if API fails
+        const nowCheck = new Date();
+        const startTimeCheck = new Date(liveClass.startTime);
+        const durationCheck = liveClass.duration || 60;
+        const endTimeCheck = new Date(startTimeCheck.getTime() + durationCheck * 60 * 1000);
+        const timeSinceEndCheck = nowCheck - endTimeCheck;
+        
+        if (timeSinceEndCheck > 0 && liveClass.status !== "lv") {
+          console.log(`⏰ [STATUS CHECK] Class has passed end time and MeritHub API failed - marking as completed`);
+          await LiveClass.findByIdAndUpdate(liveClass._id, {
+            status: "completed"
+          });
+          return res.json({
+            status: "completed",
+            canDelete: true,
+            message: "Class has ended and can be deleted",
+            classData: { ...liveClass.toObject(), status: "completed" }
+          });
+        }
+        
         // Fall back to our database status
       }
     }
@@ -1796,19 +1845,49 @@ const checkClassStatus = async (req, res) => {
 
     // Only mark as expired if class has passed its END time and is not live
     if (timeSinceEnd > 0 && liveClass.status !== "lv") {
+      // Mark as completed if it has passed end time
+      await LiveClass.findByIdAndUpdate(liveClass._id, {
+        status: "completed"
+      });
       return res.json({
-        status: "expired",
+        status: "completed",
         canDelete: true,
         message: "Class has ended and can be deleted",
-        classData: liveClass
+        classData: { ...liveClass.toObject(), status: "completed" }
       });
     }
 
-    // Class is scheduled or in progress
+    // Check if class is currently live - block deletion if live
+    // IMPORTANT: Only check our DB status if MeritHub check failed
+    // Only disable if class is actually marked as live in our database
+    if (liveClass.status === "lv" || liveClass.status === "live") {
+      return res.json({
+        status: "live",
+        canDelete: false,
+        canEdit: false,
+        message: "Class is currently live and cannot be deleted or edited",
+        classData: liveClass
+      });
+    }
+    
+    // IMPORTANT: Explicitly handle "up" (upcoming) status - always allow delete/edit
+    const currentStatusFinal = liveClass.status || "scheduled";
+    const isUpcomingFinal = currentStatusFinal === "up" || currentStatusFinal === "scheduled";
+    
+    // Only disable delete/edit when class is ACTUALLY live, not just when scheduled time passes
+    // If status is "up" or "scheduled", always allow delete/edit
+    // This allows admin to delete/edit classes even after scheduled time if they haven't started yet
+    const canDeleteEditFinal = isUpcomingFinal || (currentStatusFinal !== "lv" && currentStatusFinal !== "live");
+    
+    console.log(`📊 [STATUS CHECK FALLBACK] Status: ${currentStatusFinal}, isUpcoming: ${isUpcomingFinal}, canDeleteEdit: ${canDeleteEditFinal}`);
+    
     return res.json({
-      status: liveClass.status || "scheduled",
-      canDelete: false, // Don't allow deletion until class has ended
-      message: "Class is scheduled or in progress",
+      status: currentStatusFinal,
+      canDelete: canDeleteEditFinal, // Allow deletion if class is not live
+      canEdit: canDeleteEditFinal, // Allow edit if class is not live
+      message: canDeleteEditFinal
+        ? "Class can be deleted or edited" 
+        : "Class is currently live and cannot be deleted or edited",
       classData: liveClass
     });
 
@@ -1859,10 +1938,9 @@ const handleMeritHubStatusPing = async (req, res) => {
         console.log("Class marked as live:", updatedClass);
       } else if (payload.status === "cp") {
         console.log(
-          `Class with ID ${payload.classId} has ended. Deleting class and updating users.`
+          `Class with ID ${payload.classId} has ended. Marking class as completed (no auto-delete).`
         );
 
-        // Find the class to retrieve associated data before deletion
         const liveClass = await LiveClass.findOne({ classId: payload.classId });
 
         if (!liveClass) {
@@ -1870,23 +1948,18 @@ const handleMeritHubStatusPing = async (req, res) => {
           return res.status(404).json({ error: "Class not found." });
         }
 
-        // Delete the live class immediately after session ends
-        await LiveClass.deleteOne({ classId: payload.classId });
-        console.log(`✅ Live class ${payload.classId} deleted after session ended.`);
+        liveClass.status = "completed";
+        liveClass.actualEndTime = payload.endTime
+          ? new Date(payload.endTime)
+          : new Date();
+        liveClass.recordingStatus = liveClass.recordingStatus || "pending";
 
-        // Remove the class from all users' liveClasses array
-        const usersUpdated = await User.updateMany(
-          { "liveClasses.classId": liveClass.classId },
-          { $pull: { liveClasses: { classId: liveClass.classId } } }
-        );
+        await liveClass.save();
+        console.log(`✅ Live class ${payload.classId} marked as completed.`);
 
-        console.log(
-          `✅ ${usersUpdated.modifiedCount} users updated to remove live class ${liveClass.title}.`
-        );
-
-        // Invalidate cache
+        // Invalidate cache so users see updated status but keep the class record
         await invalidateCache("profile:*");
-        console.log("🗑️ [CACHE] User profile cache invalidated after class deletion");
+        console.log("🗑️ [CACHE] User profile cache invalidated after completion ping");
       } else {
         console.log(`Unhandled status: ${payload.status}`);
       }
@@ -2182,6 +2255,49 @@ const addUserToLiveClass = async (req, res) => {
     }
 
     await user.save();
+
+    // Mark attendance immediately when user joins via app (one record per day/class)
+    try {
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date();
+      endOfDay.setHours(23, 59, 59, 999);
+
+      let attendanceRecord = await Attendance.findOne({
+        user: user._id,
+        liveClass: liveClass._id,
+        date: { $gte: startOfDay, $lte: endOfDay },
+      });
+
+      if (!attendanceRecord) {
+        attendanceRecord = await Attendance.create({
+          user: user._id,
+          course: liveClass.courseIds?.[0],
+          liveClass: liveClass._id,
+          liveClassId: liveClass.classId,
+          date: new Date(),
+          status: "Present",
+          joinTime: new Date(),
+          merithubUserId: user.merithubUserId,
+          role: "participant",
+          userType: user.userType || "student",
+        });
+
+        const adminUser = await User.findOne({ userType: "ADMIN" }).select("_id");
+        if (adminUser) {
+          await sendAttendanceMessage(adminUser._id, user._id, liveClass, {
+            duration: 0,
+            attendancePercentage: 0,
+            status: "Present",
+            joinTime: attendanceRecord.joinTime,
+            leaveTime: null,
+            totalTimeSeconds: 0,
+          });
+        }
+      }
+    } catch (attendanceError) {
+      console.error("⚠️ [ADD_USER_TO_CLASS] Failed to mark quick attendance:", attendanceError.message);
+    }
 
     // Invalidate cache to ensure fresh data
     await invalidateCache(`profile:${userId}`);

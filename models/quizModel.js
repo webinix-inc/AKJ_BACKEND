@@ -84,6 +84,10 @@ const quizSchema = new mongoose.Schema(
         },
       },
     ],
+    isFreeTest: {
+      type: Boolean,
+      default: false,
+    },
   },
   { timestamps: true }
 );

@@ -14,6 +14,70 @@ function extractMathExpressionsFromTables(bodyHtml) {
   
   console.log(`📋 Processing ${tables.length} tables for mathematical expressions`);
   
+  // 🔧 NEW: Extract ALL images from the entire HTML first
+  const allImagesInDocument = [];
+  $('img').each((index, img) => {
+    const $img = $(img);
+    const src = $img.attr('src');
+    if (src && src.startsWith('data:image')) {
+      // Get the parent element to determine context
+      const parent = $img.parent();
+      const parentHtml = parent.html() || '';
+      const parentText = parent.text().trim();
+      
+      allImagesInDocument.push({
+        src: src,
+        index: index,
+        parentText: parentText,
+        parentHtml: parentHtml.substring(0, 200),
+        element: $img
+      });
+    }
+  });
+  
+  console.log(`🖼️ Found ${allImagesInDocument.length} total images in document`);
+  
+  // 🔧 NEW: Extract MathML/equation elements that might not be images
+  // Word equations (OMath) might be converted to MathML or special HTML
+  const mathmlElements = $('m\\:oMath, m\\:math, math, [class*="math"], [class*="equation"]');
+  const equationTexts = [];
+  
+  mathmlElements.each((index, elem) => {
+    const $elem = $(elem);
+    const mathText = $elem.text().trim();
+    if (mathText && mathText.length > 0) {
+      equationTexts.push({
+        text: mathText,
+        html: $elem.html() || '',
+        index: index
+      });
+    }
+  });
+  
+  // Also look for text that looks like equations (contains math symbols)
+  $('span, p, div, td').each((index, elem) => {
+    const $elem = $(elem);
+    const text = $elem.text().trim();
+    // Check if it looks like an equation: has math symbols, numbers, and is reasonably short
+    if (text && text.length > 0 && text.length < 100 && 
+        /[²³⁴⁵⁶⁷⁸⁹⁰√∑∫πθαβγδεζηλμνξρστφχψω≤≥≠∞∂∇±×÷\^=]/.test(text) &&
+        /[0-9]/.test(text) &&
+        !equationTexts.some(eq => eq.text === text)) {
+      equationTexts.push({
+        text: text,
+        html: $elem.html() || '',
+        index: equationTexts.length
+      });
+    }
+  });
+  
+  console.log(`🔢 Found ${equationTexts.length} equation text elements (MathML/text)`);
+  if (equationTexts.length > 0) {
+    equationTexts.forEach((eq, idx) => {
+      console.log(`  📐 Equation ${idx + 1}: "${eq.text}"`);
+    });
+  }
+  
   tables.each((tableIndex, table) => {
     const $table = $(table);
     const rows = $table.find('tr');
@@ -32,9 +96,9 @@ function extractMathExpressionsFromTables(bodyHtml) {
       const questionImages = questionCell.find('img');
       
       console.log(`📝 Question: "${questionText.substring(0, 100)}..."`);
-      console.log(`🖼️ Images in question: ${questionImages.length}`);
+      console.log(`🖼️ Images in question cell: ${questionImages.length}`);
       
-      // Process images in question
+      // Process images directly in question cell
       questionImages.each((imgIndex, img) => {
         const $img = $(img);
         const src = $img.attr('src');
@@ -45,7 +109,18 @@ function extractMathExpressionsFromTables(bodyHtml) {
           
           console.log(`  🔍 Analyzing question image ${imgIndex + 1}: ${sizeKB}KB`);
           
-          // Small images in questions are likely mathematical expressions
+          // 🔧 FIX: ALL images in questions should be treated as real images
+          realImages.push({
+            src: src,
+            context: 'question',
+            tableIndex: tableIndex,
+            size: sizeKB,
+            imageIndex: imgIndex
+          });
+          
+          console.log(`  📸 Question image detected: ${sizeKB}KB (stored as real image)`);
+          
+          // Also try to extract math expression for text representation if needed
           if (sizeKB <= 5) {
             const mathExpression = generateMathExpressionFromContext(questionText, imgIndex);
             allMathExpressions.push({
@@ -54,20 +129,48 @@ function extractMathExpressionsFromTables(bodyHtml) {
               imageIndex: imgIndex,
               expression: mathExpression,
               context: questionText,
-              size: sizeKB
+              size: sizeKB,
+              hasImage: true
             });
             
-            console.log(`  ✅ Math expression detected: "${mathExpression}"`);
-          } else {
-            // Large images are likely diagrams
+            console.log(`  ✅ Math expression also extracted: "${mathExpression}"`);
+          }
+        }
+      });
+      
+      // 🔧 NEW: Also check for images near this table (before or after)
+      // Look for images that might be associated with this table but not inside it
+      const tableHtml = $table.html() || '';
+      const tableText = $table.text().trim();
+      
+      // Find images that are close to this table (within 500 characters before or after)
+      allImagesInDocument.forEach((imgData, imgDocIndex) => {
+        // Check if this image hasn't been assigned to another table yet
+        const alreadyAssigned = realImages.some(ri => ri.src === imgData.src);
+        
+        if (!alreadyAssigned) {
+          // Check if image is near this table by checking parent context
+          const imgParentText = imgData.parentText.toLowerCase();
+          const questionTextLower = questionText.toLowerCase();
+          
+          // If image parent contains question-related text, associate it with this table
+          if (questionTextLower.length > 0 && 
+              (imgParentText.includes(questionTextLower.substring(0, 20)) || 
+               questionTextLower.includes('quadratic') && imgParentText.includes('equation') ||
+               questionTextLower.includes('equation') && imgParentText.includes('equation'))) {
+            
+            const base64Data = imgData.src.split(',')[1];
+            const sizeKB = Math.round(base64Data.length * 0.75 / 1024);
+            
+            console.log(`  🔗 Found associated image near table ${tableIndex + 1}: ${sizeKB}KB`);
+            
             realImages.push({
-              src: src,
+              src: imgData.src,
               context: 'question',
               tableIndex: tableIndex,
-              size: sizeKB
+              size: sizeKB,
+              imageIndex: questionImages.length + realImages.filter(ri => ri.tableIndex === tableIndex).length
             });
-            
-            console.log(`  📸 Real image detected: ${sizeKB}KB`);
           }
         }
       });
@@ -127,6 +230,34 @@ function extractMathExpressionsFromTables(bodyHtml) {
       });
     }
   });
+  
+  // 🔧 NEW: If we have unassigned images and tables, try to match them by position
+  // This handles cases where images are outside tables but should be associated with questions
+  const unassignedImages = allImagesInDocument.filter(imgData => 
+    !realImages.some(ri => ri.src === imgData.src)
+  );
+  
+  if (unassignedImages.length > 0 && tables.length > 0) {
+    console.log(`\n🔍 Attempting to match ${unassignedImages.length} unassigned images to tables...`);
+    
+    // Simple heuristic: assign images to tables based on document order
+    // First image goes to first table, second to second, etc.
+    unassignedImages.forEach((imgData, imgIndex) => {
+      const tableIndex = Math.min(imgIndex, tables.length - 1);
+      const base64Data = imgData.src.split(',')[1];
+      const sizeKB = Math.round(base64Data.length * 0.75 / 1024);
+      
+      console.log(`  🔗 Assigning unassigned image ${imgIndex + 1} to table ${tableIndex + 1}: ${sizeKB}KB`);
+      
+      realImages.push({
+        src: imgData.src,
+        context: 'question',
+        tableIndex: tableIndex,
+        size: sizeKB,
+        imageIndex: realImages.filter(ri => ri.tableIndex === tableIndex).length
+      });
+    });
+  }
   
   console.log(`\n🎯 EXTRACTION SUMMARY:`);
   console.log(`   📐 Mathematical expressions found: ${allMathExpressions.length}`);

@@ -1919,54 +1919,6 @@ exports.deletePrivacy = async (req, res) => {
 // 📚 COURSE MANAGEMENT
 // ============================================================================
 
-exports.createCourse = async (req, res) => {
-  try {
-    // Extract course data from request
-    const courseData = req.body;
-    const files = req.files;
-    
-    // Validate required fields before calling service
-    const validationErrors = courseService.validateCourseData(courseData);
-    if (validationErrors.length > 0) {
-      return res.status(400).json({
-        message: "Validation failed",
-        errors: validationErrors
-      });
-    }
-
-    // Call course service to handle business logic
-    const course = await courseService.createCourseLogic(courseData, files);
-
-    res.status(201).json({ 
-      message: "Course created successfully.", 
-      data: { course } 
-    });
-  } catch (error) {
-    console.error("Error in createCourse controller:", error.message);
-    
-    // Handle specific business logic errors
-    if (error.message.includes("Invalid or missing subCategory ID") ||
-        error.message.includes("FAQs must be an array") ||
-        error.message.includes("Invalid subCategory ID format")) {
-      return res.status(400).json({
-        message: error.message
-      });
-    }
-    
-    if (error.message.includes("Course with this title already exists") ||
-        error.message.includes("Specified subCategory does not exist")) {
-      return res.status(400).json({
-        message: error.message
-      });
-    }
-
-    res.status(500).json({ 
-      message: "Server error", 
-      error: error.message 
-    });
-  }
-};
-
 exports.getAllCourses = async (req, res) => {
   try {
     // const {userType}=req.user;
@@ -1974,7 +1926,11 @@ exports.getAllCourses = async (req, res) => {
     //     ? { isPublished: true } // Show only published courses for users
     //     : {}; // No filter for other user types (e.g., admin)
 
-    const courses = await Course.find().populate("subjects").populate("rootFolder");
+    const courses = await Course.find()
+      .populate("subjects")
+      .populate("rootFolder")
+      .populate("category", "name")
+      .populate("faqs");
     return res.status(200).json({ status: 200, data: courses });
   } catch (error) {
     console.error(error);
@@ -2082,6 +2038,13 @@ exports.updateCourseById = async (req, res) => {
     const updateData = req.body;
     const files = req.files;
 
+    // Debug logging for FormData parsing
+    console.log("📦 Update Course Request:");
+    console.log("   - Course ID:", id);
+    console.log("   - Update Data Keys:", Object.keys(updateData || {}));
+    console.log("   - Title in request:", updateData?.title || 'not found');
+    console.log("   - Files received:", files ? Object.keys(files).length : 0);
+
     // Call course service to handle business logic
     const course = await courseService.updateCourseLogic(id, updateData, files);
 
@@ -2101,8 +2064,15 @@ exports.updateCourseById = async (req, res) => {
       });
     }
     
+    // Handle duplicate course title error (409 Conflict)
+    if (error.message.includes("Course with this title already exists")) {
+      return res.status(409).json({
+        status: 409,
+        message: error.message
+      });
+    }
+    
     if (error.message.includes("Invalid subCategory ID format") ||
-        error.message.includes("Course with this title already exists") ||
         error.message.includes("Specified subCategory does not exist")) {
       return res.status(400).json({
         status: 400,
@@ -2137,6 +2107,13 @@ exports.deleteCourseById = async (req, res) => {
       return res.status(404).json({ 
         status: 404, 
         message: error.message 
+      });
+    }
+
+    if (error.message.includes("Cannot delete course while students are enrolled")) {
+      return res.status(400).json({
+        status: 400,
+        message: error.message,
       });
     }
 
@@ -5904,65 +5881,227 @@ exports.updateDownloads = async (req, res) => {
  */
 exports.createCourse = async (req, res) => {
   try {
-    console.log("📚 Creating new course with data:", req.body);
-    console.log("📁 Uploaded files:", req.files ? Object.keys(req.files) : 'No files');
+    const courseData = { ...req.body };
+    const files = req.files;
 
-    // Extract course data from request body
-    const courseData = {
-      title: req.body.title,
-      description: req.body.description,
-      subject: req.body.subject,
-      price: req.body.price,
-      oldPrice: req.body.oldPrice,
-      startDate: req.body.startDate,
-      endDate: req.body.endDate,
-      discount: req.body.discount,
-      duration: req.body.duration,
-      lessons: req.body.lessons,
-      weeks: req.body.weeks,
-      subCategory: req.body.subCategory,
-      categoryId: req.body.categoryId,
-      level: req.body.level,
-      language: req.body.language,
-      status: req.body.status || 'draft',
-      isPublished: req.body.isPublished === 'true' ? true : false, // Convert string to boolean
-    };
+    console.log("📚 Creating new course with data:", courseData);
+    console.log("📁 Uploaded files:", files ? Object.keys(files) : "No files");
 
-    // Validate required fields
-    if (!courseData.title || !courseData.description) {
+    // Normalize primitive values coming from multipart/form-data (all strings)
+    const numericFields = [
+      "price",
+      "oldPrice",
+      "discount",
+      "duration",
+      "lessons",
+      "weeks",
+      "batchSize",
+    ];
+    numericFields.forEach((field) => {
+      if (courseData[field] !== undefined && courseData[field] !== null && courseData[field] !== "") {
+        const parsedValue = Number(courseData[field]);
+        if (!Number.isNaN(parsedValue)) {
+          courseData[field] = parsedValue;
+        }
+      }
+    });
+
+    if (courseData.isPublished !== undefined) {
+      courseData.isPublished =
+        courseData.isPublished === true ||
+        courseData.isPublished === "true";
+    }
+
+    // Debug logging for FAQs
+    console.log("📝 [DEBUG] Create Course - FAQs received:");
+    console.log("   - FAQs in req.body:", courseData.faqs);
+    console.log("   - Type of FAQs:", typeof courseData.faqs);
+    console.log("   - All req.body keys:", Object.keys(courseData));
+
+    // Ensure FAQs are properly extracted from FormData
+    if (courseData.faqs) {
+      if (typeof courseData.faqs === "string") {
+        try {
+          const parsedFaqs = JSON.parse(courseData.faqs);
+          console.log("   - Parsed FAQs:", parsedFaqs);
+          courseData.faqs = parsedFaqs;
+        } catch (parseError) {
+          console.log("   - ⚠️ Failed to parse FAQs as JSON, keeping as string");
+        }
+      } else if (!Array.isArray(courseData.faqs)) {
+        // Handle edge cases where FAQs might come as object instead of array
+        courseData.faqs = [courseData.faqs];
+      }
+    }
+
+    // Validate required fields before calling service
+    const validationErrors = courseService.validateCourseData(courseData);
+    if (validationErrors.length > 0) {
       return res.status(400).json({
         status: 400,
-        message: "Title and description are required",
-        data: null,
+        message: "Validation failed",
+        errors: validationErrors,
       });
     }
 
     // Use courseService to handle business logic
-    const newCourse = await courseService.createCourseLogic(courseData, req.files);
+    const newCourse = await courseService.createCourseLogic(courseData, files);
+
+    // Verify course was actually created before proceeding
+    if (!newCourse || !newCourse._id) {
+      console.error("❌ Course creation returned invalid result");
+      return res.status(500).json({
+        status: 500,
+        message: "Course creation failed - invalid result",
+        data: null,
+      });
+    }
+
+    // Verify the course exists in database (double-check)
+    const verifyCourse = await Course.findById(newCourse._id);
+    if (!verifyCourse) {
+      console.error("❌ Course was not found in database after creation");
+      return res.status(500).json({
+        status: 500,
+        message: "Course creation failed - course not found in database",
+        data: null,
+      });
+    }
+
+    // Try to populate the course, but don't fail if population fails
+    let populatedCourse;
+    try {
+      // Populate faqs and category (these work normally)
+      populatedCourse = await Course.findById(newCourse._id)
+        .populate("faqs")
+        .populate("category", "name");
+      
+      // subCategory is a nested subdocument, so we need to manually fetch it
+      if (populatedCourse && verifyCourse.subCategory) {
+        try {
+          // Get the category document
+          const categoryDoc = await CourseCategory.findById(verifyCourse.category);
+          if (categoryDoc && categoryDoc.subCategories) {
+            // Find the subcategory in the category's subCategories array
+            const subCat = categoryDoc.subCategories.find(
+              sub => sub._id.toString() === verifyCourse.subCategory.toString()
+            );
+            if (subCat) {
+              populatedCourse.subCategory = { 
+                name: subCat.name, 
+                _id: subCat._id,
+                status: subCat.status
+              };
+            }
+          }
+        } catch (subCatError) {
+          console.error("⚠️ Error fetching subCategory details:", subCatError);
+          // Continue without subCategory details
+        }
+      }
+    } catch (populateError) {
+      console.error("⚠️ Error populating course, returning course without populated fields:", populateError);
+      // If population fails, return the course without populated fields
+      populatedCourse = verifyCourse;
+    }
 
     console.log("✅ Course created successfully:", newCourse.title);
 
     return res.status(201).json({
       status: 201,
       message: "Course created successfully",
-      data: newCourse,
+      data: { course: populatedCourse || verifyCourse },
     });
   } catch (error) {
     console.error("❌ Error creating course:", error);
+    console.error("❌ Error details:", {
+      message: error.message,
+      name: error.name,
+      code: error.code,
+      stack: error.stack
+    });
     
-    // Handle validation errors
-    if (error.name === 'ValidationError') {
-      console.error("❌ Mongoose ValidationError:", error.errors);
-      return res.status(400).json({
-        status: 400,
-        message: "Validation error",
-        data: error.errors,
+    // Log the full error for debugging
+    if (error.stack) {
+      console.error("❌ Full error stack:", error.stack);
+    }
+
+    // 🔥 CRITICAL: Check if course was actually created despite the error
+    // If course exists, return success instead of error
+    if (courseData.title) {
+      try {
+        const normalizedTitle = (courseData.title || '').trim();
+        const titleRegex = new RegExp(`^\\s*${normalizedTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i');
+        const existingCourse = await Course.findOne({ title: { $regex: titleRegex } });
+        
+        if (existingCourse) {
+          console.log("✅ Course was created successfully despite error - returning success");
+          let populatedCourse;
+          try {
+            // Populate faqs and category (these work normally)
+            populatedCourse = await Course.findById(existingCourse._id)
+              .populate("faqs")
+              .populate("category", "name");
+            
+            // subCategory is a nested subdocument, so we need to manually fetch it
+            if (populatedCourse && existingCourse.subCategory) {
+              try {
+                // Get the category document
+                const categoryDoc = await CourseCategory.findById(existingCourse.category);
+                if (categoryDoc && categoryDoc.subCategories) {
+                  // Find the subcategory in the category's subCategories array
+                  const subCat = categoryDoc.subCategories.find(
+                    sub => sub._id.toString() === existingCourse.subCategory.toString()
+                  );
+                  if (subCat) {
+                    populatedCourse.subCategory = { 
+                      name: subCat.name, 
+                      _id: subCat._id,
+                      status: subCat.status
+                    };
+                  }
+                }
+              } catch (subCatError) {
+                console.error("⚠️ Error fetching subCategory details in recovery:", subCatError);
+                // Continue without subCategory details
+              }
+            }
+          } catch (populateError) {
+            console.error("⚠️ Error populating course in recovery, using basic course:", populateError);
+            populatedCourse = existingCourse;
+          }
+          
+          return res.status(201).json({
+            status: 201,
+            message: "Course created successfully",
+            data: { course: populatedCourse || existingCourse },
+          });
+        }
+      } catch (verifyError) {
+        console.error("❌ Error verifying course existence:", verifyError);
+      }
+    }
+
+    // Handle duplicate course title error (from service layer)
+    if (
+      error.message &&
+      error.message.includes("Course with this title already exists")
+    ) {
+      return res.status(409).json({
+        status: 409,
+        message: "Course with this title already exists",
+        data: null,
       });
     }
-    
-    // Handle other specific errors
-    if (error.message && error.message.includes('must be true or false')) {
-      console.error("❌ Boolean validation error:", error.message);
+
+    // Handle specific business logic errors
+    if (
+      error.message &&
+      (error.message.includes("Invalid or missing subCategory ID") ||
+        error.message.includes("FAQs must be an array") ||
+        error.message.includes("Invalid subCategory ID format") ||
+        error.message.includes("Specified subCategory does not exist"))
+    ) {
       return res.status(400).json({
         status: 400,
         message: error.message,
@@ -5970,7 +6109,25 @@ exports.createCourse = async (req, res) => {
       });
     }
 
-    // Handle duplicate key errors
+    // Handle validation errors from Mongoose
+    if (error.name === "ValidationError") {
+      return res.status(400).json({
+        status: 400,
+        message: "Validation error",
+        data: error.errors,
+      });
+    }
+
+    // Handle other specific errors
+    if (error.message && error.message.includes("must be true or false")) {
+      return res.status(400).json({
+        status: 400,
+        message: error.message,
+        data: null,
+      });
+    }
+
+    // Handle duplicate key errors (MongoDB unique index violations)
     if (error.code === 11000) {
       return res.status(409).json({
         status: 409,

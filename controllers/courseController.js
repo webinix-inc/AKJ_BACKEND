@@ -202,6 +202,16 @@ exports.createFolder = async (req, res = null) => {
       });
 
       await Folder.findByIdAndUpdate(newFolder._id, { parentFolderId: null });
+      
+      // Auto-initialize Live Videos folder for course root folders
+      try {
+        const { initializeLiveVideosFolder } = require('../utils/folderUtils');
+        await initializeLiveVideosFolder(newFolder._id);
+        console.log(`✅ Auto-created Live Videos folder for course: ${name}`);
+      } catch (error) {
+        console.error('❌ Failed to create Live Videos folder:', error);
+        // Don't fail the main folder creation if Live Videos folder fails
+      }
     }
 
     if (res) {

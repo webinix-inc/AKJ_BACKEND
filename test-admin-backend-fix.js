@@ -24,21 +24,21 @@ async function testAdminBackendFix() {
     await mongoose.connect(process.env.DB_URL);
     console.log('✅ Connected to MongoDB successfully');
 
-    // Step 1: Check if Wakade admin exists
-    console.log('\n👤 Step 1: Checking Wakade admin...');
+    // Step 1: Check if AKJAcademy admin exists
+    console.log('\n👤 Step 1: Checking AKJAcademy admin...');
     
     const admin = await User.findOne({
-      email: 'wakade@lms.com',
+      email: 'AKJAcademy@lms.com',
       userType: 'ADMIN'
     });
 
     if (!admin) {
-      console.log('❌ Wakade admin not found in database');
-      console.log('Please ensure the admin user exists with email: wakade@lms.com');
+      console.log('❌ AKJAcademy admin not found in database');
+      console.log('Please ensure the admin user exists with email: AKJAcademy@lms.com');
       return;
     }
 
-    console.log('✅ Wakade admin found:', {
+    console.log('✅ AKJAcademy admin found:', {
       id: admin._id,
       email: admin.email,
       name: `${admin.firstName} ${admin.lastName}`,
@@ -50,7 +50,7 @@ async function testAdminBackendFix() {
     console.log('\n🔐 Step 2: Logging in as admin...');
     
     const loginResponse = await axios.post(`${baseUrl}/api/v1/admin/login`, {
-      email: 'wakade@lms.com',
+      email: 'AKJAcademy@lms.com',
       password: 'walkad@123456'
     });
     
@@ -178,7 +178,7 @@ async function testAdminBackendFix() {
     console.log('\n🎉 Backend admin test completed!');
     console.log('\n📝 Summary:');
     console.log('- Using correct backend directory: ✅');
-    console.log('- Admin wakade@lms.com exists: ✅');
+    console.log('- Admin AKJAcademy@lms.com exists: ✅');
     console.log('- Admin can login: ✅');
     console.log('- Merithub registration route added: ✅');
     console.log('- Batch courses API working: Check above results');

@@ -549,10 +549,9 @@ const validateInstallmentPlan = (planData) => {
   const { planType, numberOfInstallments, price } = planData;
   const errors = [];
 
-  // Validate plan type
-  const validPlanTypes = ["3 months", "6 months", "12 months", "24 months", "36 months", "48 months", "60 months"];
-  if (!planType || !validPlanTypes.includes(planType)) {
-    errors.push(`Plan type must be one of: ${validPlanTypes.join(', ')}`);
+  // Validate plan type - accept any string value
+  if (!planType || typeof planType !== 'string') {
+    errors.push("Plan type must be a string");
   }
 
   // Validate number of installments
@@ -566,20 +565,15 @@ const validateInstallmentPlan = (planData) => {
     errors.push(priceValidation.error);
   }
 
-  // Validate installments against plan duration
+  // Validate installments against plan duration (extract months dynamically)
   if (planType && numberOfInstallments) {
-    const maxInstallments = {
-      "3 months": 3,
-      "6 months": 6,
-      "12 months": 12,
-      "24 months": 24,
-      "36 months": 36,
-      "48 months": 48,
-      "60 months": 60
-    };
-
-    if (numberOfInstallments > maxInstallments[planType]) {
-      errors.push(`Maximum ${maxInstallments[planType]} installments allowed for ${planType} plan`);
+    // Extract number of months from planType (e.g., "18 months" -> 18)
+    const monthsMatch = planType.match(/(\d+)\s*months?/i);
+    if (monthsMatch) {
+      const maxMonths = parseInt(monthsMatch[1], 10);
+      if (numberOfInstallments > maxMonths) {
+        errors.push(`Maximum ${maxMonths} installments allowed for ${planType} plan`);
+      }
     }
   }
 

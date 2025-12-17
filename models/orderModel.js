@@ -7,6 +7,7 @@ const orderSchema = new mongoose.Schema({
   currency: { type: String, default: "INR" },
   receipt: { type: String },
   planType:{type:String},
+  installmentPlanId: { type: mongoose.Schema.Types.ObjectId, ref: "Installment" }, // 🔥 NEW: Store selected plan ID
   trackingNumber: { type: String },
   status: { type: String, enum: ["created", "paid", "partial", "failed"], default: "created" },
   userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },

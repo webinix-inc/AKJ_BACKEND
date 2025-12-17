@@ -28,7 +28,7 @@ async function testLiveClassUserIdFlow() {
     console.log('\n👤 Step 1: Checking admin user details...');
     
     const admin = await User.findOne({
-      email: 'wakade@lms.com',
+      email: 'AKJAcademy@lms.com',
       userType: 'ADMIN'
     });
 
@@ -50,7 +50,7 @@ async function testLiveClassUserIdFlow() {
     console.log('\n🔐 Step 2: Logging in as admin...');
     
     const loginResponse = await axios.post(`${baseUrl}/api/v1/admin/login`, {
-      email: 'wakade@lms.com',
+      email: 'AKJAcademy@lms.com',
       password: 'walkad@123456'
     });
     

@@ -11,6 +11,7 @@ const masterFolderService = require('../services/masterFolderService');
 const Folder = require('../models/folderModel');
 const logger = require('../utils/logger');
 const mongoose = require('mongoose');
+const { initializeLiveVideosFolder } = require('../utils/folderUtils');
 
 // ============================================================================
 // 🚀 MASTER FOLDER MANAGEMENT
@@ -53,7 +54,24 @@ exports.initializeMasterFolder = async (req, res) => {
  */
 exports.getMasterFolderHierarchy = async (req, res) => {
   try {
-    const result = await masterFolderService.getMasterFolderHierarchy();
+    const { depth, includeFiles = 'true', folderId } = req.query;
+
+    if (folderId && !mongoose.Types.ObjectId.isValid(folderId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid folder ID'
+      });
+    }
+
+    const parsedDepth = Math.min(Math.max(parseInt(depth, 10) || 2, 1), 5);
+    const hierarchyOptions = {
+      depth: parsedDepth,
+      includeFiles: includeFiles !== 'false',
+      folderId: folderId || null,
+      lean: true
+    };
+
+    const result = await masterFolderService.getMasterFolderHierarchy(hierarchyOptions);
     
     res.status(200).json({
       success: true,
@@ -173,6 +191,18 @@ exports.createFolder = async (req, res) => {
       await Folder.findByIdAndUpdate(parentFolderId, {
         $push: { folders: newFolder._id }
       });
+    }
+    
+    // Auto-initialize Live Videos folder for top-level folders (no parent) or main folders
+    const isMainFolder = !parentFolderId || folderType === 'course';
+    if (isMainFolder) {
+      try {
+        const liveVideosFolder = await initializeLiveVideosFolder(newFolder._id);
+        logger.adminActivity(`Admin ${req.user._id} auto-created Live Videos folder for: ${name}`);
+      } catch (error) {
+        logger.error('Failed to create Live Videos folder:', error);
+        // Don't fail the main folder creation if Live Videos folder fails
+      }
     }
     
     logger.adminActivity(`Admin ${req.user._id} created folder: ${name}`);
