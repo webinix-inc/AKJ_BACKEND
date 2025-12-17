@@ -40,6 +40,7 @@ const allowedOrigins = [
   "https://13.233.215.250",
   "https://43.205.125.7",
   "https://52.66.125.129",
+  "https://akj-backend.onrender.com",
   
   // added by Himanshu
   "http://172.31.44.181", // New Users Frontend
@@ -55,7 +56,7 @@ const allowedOrigins = [
   // 🚀 FIX: Add production frontend URLs
   "http://3.110.88.52", // User Frontend (Production)
   "http://13.203.104.199", // Admin Frontend (Production)
-  "https://13.232.208.235", // User Frontend (Production HTTPS)
+  "https://akj-user-web.vercel.app", // User Frontend (Production HTTPS)
   "https://13.127.56.109", // Admin Frontend (Production HTTPS)
 ];
 
@@ -182,7 +183,7 @@ app.use((req, res, next) => {
 // app.use(express.raw({ type: '/', limit: '10mb' }));
 
 app.use(cors({
-  origin: ["http://lms.AKJAcademyclasses.com",
+  origin: ["https://akj-user-web.vercel.app",
     "https://lms.AKJAcademyclasses.com",
     "http://localhost:3000",
     "http://localhost:3001",// 🚀 FIX: Add production frontend URLs
