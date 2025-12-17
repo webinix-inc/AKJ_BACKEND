@@ -57,7 +57,7 @@ const allowedOrigins = [
   "http://3.110.88.52", // User Frontend (Production)
   "http://13.203.104.199", // Admin Frontend (Production)
   "https://akj-user-web.vercel.app", // User Frontend (Production HTTPS)
-  "https://13.127.56.109", // Admin Frontend (Production HTTPS)
+  "https://akj-admin-web.vercel.app/", // Admin Frontend (Production HTTPS)
 ];
 
 const app = express();
@@ -184,7 +184,8 @@ app.use((req, res, next) => {
 
 app.use(cors({
   origin: ["https://akj-user-web.vercel.app",
-    "https://lms.AKJAcademyclasses.com",
+    "https://akj-admin-web.vercel.app/",
+    "https://akj-backend.onrender.com",
     "http://localhost:3000",
     "http://localhost:3001",// 🚀 FIX: Add production frontend URLs
     "http://13.203.104.199", // Admin Frontend (Production HTTP)],
