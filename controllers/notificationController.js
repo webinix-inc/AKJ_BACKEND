@@ -26,22 +26,22 @@ exports.getAllNotifications = async (req, res) => {
             .limit(limit)
             .populate('createdBy', 'firstName')
             .select('-recipient');
-   
+
         const totalNotifications = await Notification.countDocuments(query);
         const totalPages = Math.ceil(totalNotifications / limit);
 
-        res.status(200).json({ 
+        res.status(200).json({
             message: 'Notifications fetched successfully',
-            notifications, 
-            totalPages, 
-            currentPage: page, 
-            totalNotifications 
+            notifications,
+            totalPages,
+            currentPage: page,
+            totalNotifications
         });
     } catch (error) {
         console.error('Error fetching user notifications:', error);
-        res.status(500).json({ 
-            message: 'Failed to fetch notifications', 
-            error: error.message 
+        res.status(500).json({
+            message: 'Failed to fetch notifications',
+            error: error.message
         });
     }
 };
@@ -101,16 +101,16 @@ exports.getCourseNotifications = async (req, res) => {
             success: false,
             message: 'Failed to fetch course notifications',
             error: error.message
-  });
-}
+        });
+    }
 };
 
 exports.sendBroadcastNotification = async (req, res) => {
     const { title, message, sendVia, metadata, priority } = req.body;
     const createdBy = req.user._id;
 
-    try {       
-        const users = await User.find({},{_id:1}).lean();
+    try {
+        const users = await User.find({}, { _id: 1 }).lean();
         const userIds = users.map((user) => user._id);
         const notification = new Notification({
             title,
@@ -120,25 +120,26 @@ exports.sendBroadcastNotification = async (req, res) => {
             sendVia,
             metadata,
             priority,
-            createdBy 
+            createdBy
         });
 
         await notification.save();
 
         if (req.io) {
-            console.log("Emitting notification to receivers:", userIds);
-            req.io.emit("broadcastNotification", { userIds, notification:{
+            console.log("Emitting broadcast notification to global room");
+            req.io.to("notification:global").emit("notification", {
                 title,
                 message,
                 type: 'TO EVERYONE',
                 metadata,
-                createdAt: new Date()
-            } });
-          } else {
+                createdAt: new Date(),
+                _id: notification._id
+            });
+        } else {
             console.warn("Socket.io not initialized");
-          }
+        }
 
-        res.status(201).json({success:true, message: 'Notification sent successfully', notification});
+        res.status(201).json({ success: true, message: 'Notification sent successfully', notification });
     } catch (error) {
         console.error('Error sending broadcast notification:', error);
         res.status(500).json({ message: 'Failed to send notification', error: error.message });
@@ -160,9 +161,9 @@ exports.sendCourseSpecificNotification = async (req, res) => {
         // Aggregation to find users who have purchased any of the given courses
         const courseUsers = await User.find({
             'purchasedCourses.course': { $in: courseIds }
-          }).populate('purchasedCourses.course', 'courseTitle courseDescription');
+        }).populate('purchasedCourses.course', 'courseTitle courseDescription');
 
-        console.log("Course Users:", courseUsers); 
+        console.log("Course Users:", courseUsers);
 
         // Map to get user IDs
         const recipientIds = courseUsers.map(user => user._id);
@@ -190,16 +191,18 @@ exports.sendCourseSpecificNotification = async (req, res) => {
 
         // Emit via socket if available
         if (req.io) {
-            console.log("Emitting notification to receivers:", recipientIds);
-            req.io.emit("broadcastNotification", {
-                userIds: recipientIds,
-                notification: {
+            console.log(`Emitting notification to ${courseIds.length} course rooms`);
+
+            courseIds.forEach(courseId => {
+                req.io.to(`course:${courseId}`).emit("notification", {
                     title,
                     message,
-                    type: 'COURSE_PURCHASE',
+                    type: 'COURSE_SPECIFIC',
+                    courseId: courseId,
                     metadata,
-                    createdAt: new Date()
-                }
+                    createdAt: new Date(),
+                    _id: notification._id
+                });
             });
         } else {
             console.warn("Socket.io not initialized");
@@ -216,15 +219,13 @@ exports.sendCourseSpecificNotification = async (req, res) => {
 exports.sendCoursePurchaseNotification = async (req, res) => {
     const { title, courseId, message, sendVia, metadata, priority } = req.body;
     const createdBy = req.user._id;
-    console.log('courseId:', courseId);
-    console.log('createdBy:', createdBy);
 
     try {
         if (!mongoose.Types.ObjectId.isValid(courseId)) {
             return res.status(400).json({ message: 'Invalid course ID' });
         }
 
-        const Notification = new Notification({
+        const notification = new Notification({
             title,
             message,
             type: 'NEW_COURSE_PURCHASE',
@@ -236,25 +237,26 @@ exports.sendCoursePurchaseNotification = async (req, res) => {
             createdBy
         });
 
-        await Notification.save();
+        await notification.save();
 
         if (req.io) {
-            console.log("Emitting notification to receivers:", req.user._id);
-            req.io.emit("broadcastNotification", { userIds: [req.user._id], notification: {
+            console.log("Emitting notification to user room:", req.user._id);
+            req.io.to(`notification:${req.user._id}`).emit("notification", {
                 title,
                 message,
                 type: 'NEW_COURSE_PURCHASE',
                 metadata,
-                createdAt: new Date()
-            } });
+                createdAt: new Date(),
+                _id: notification._id
+            });
         } else {
             console.warn("Socket.io not initialized");
         }
 
-        res.status(201).json({ success: true, message: 'Notification sent successfully For New Course Purchase', notification: Notification });
+        res.status(201).json({ success: true, message: 'Notification sent successfully For New Course Purchase', notification });
 
     } catch (error) {
         console.error('Error sending course purchase notification:', error);
         res.status(500).json({ message: 'Failed to send notification', error: error.message });
-    }   
+    }
 }

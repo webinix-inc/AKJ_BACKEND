@@ -12,35 +12,35 @@ const parseField = (field) => (field ? Number(field) : undefined);
 exports.getBooks = async (req, res) => {
   try {
     const books = await Book.find();
-    
+
     // Generate pre-signed URLs for book images (same as courses/banners)
     const { generatePresignedUrl } = require('../configs/aws.config');
     const processedBooks = await Promise.all(books.map(async (book) => {
       const bookObj = book.toObject();
-      
+
       // Process book image to use pre-signed URL
       if (bookObj.imageUrl && bookObj.imageUrl.includes('amazonaws.com/')) {
         try {
           const s3Key = bookObj.imageUrl.split('amazonaws.com/')[1];
           const bucketName = process.env.S3_BUCKET || 'wakadclass';
-          
+
           console.log(`🔗 [PRESIGN] Generating pre-signed URL for book ${book._id} image`);
-          
+
           // Generate pre-signed URL with longer expiration (24 hours)
           const presignedUrl = await generatePresignedUrl(bucketName, s3Key, 86400);
           bookObj.imageUrl = presignedUrl;
-          
+
           console.log(`✅ [PRESIGN] Generated pre-signed URL for book ${book._id}`);
-          
+
         } catch (error) {
           console.error(`❌ [PRESIGN] Failed to generate pre-signed URL for book ${book._id}:`, error);
           // Keep original URL as fallback
         }
       }
-      
+
       return bookObj;
     }));
-    
+
     console.log(`📚 Fetched ${books.length} books with pre-signed URLs`);
     res.json(processedBooks);
   } catch (error) {
@@ -56,31 +56,31 @@ exports.getBookById = async (req, res) => {
     if (!book) {
       return res.status(404).json({ message: "Book not found" });
     }
-    
+
     // Generate pre-signed URL for book image (same as other endpoints)
     const { generatePresignedUrl } = require('../configs/aws.config');
     const bookObj = book.toObject();
-    
+
     // Process book image to use pre-signed URL
     if (bookObj.imageUrl && bookObj.imageUrl.includes('amazonaws.com/')) {
       try {
         const s3Key = bookObj.imageUrl.split('amazonaws.com/')[1];
         const bucketName = process.env.S3_BUCKET || 'wakadclass';
-        
+
         console.log(`🔗 [PRESIGN] Generating pre-signed URL for single book ${book._id} image`);
-        
+
         // Generate pre-signed URL with longer expiration (24 hours)
         const presignedUrl = await generatePresignedUrl(bucketName, s3Key, 86400);
         bookObj.imageUrl = presignedUrl;
-        
+
         console.log(`✅ [PRESIGN] Generated pre-signed URL for single book ${book._id}`);
-        
+
       } catch (error) {
         console.error(`❌ [PRESIGN] Failed to generate pre-signed URL for single book ${book._id}:`, error);
         // Keep original URL as fallback
       }
     }
-    
+
     res.json(bookObj);
   } catch (error) {
     console.error("❌ Error fetching book:", error);
@@ -342,20 +342,33 @@ exports.updateBook = async (req, res) => {
       dimensions,
     };
 
-    // Handle new images
+    // Handle new images or deletion flags
     if (req.files && req.files.length > 0) {
       const imageUrls = req.files.map((file) => file.location); // S3 support
       updatedData.imageUrl = imageUrls[0]; // primary image
       updatedData.additionalImages = imageUrls.slice(1); // additional
     } else {
-      // No new images: preserve the old ones
+      // No new images found. Check for deletion flags or preserve existing.
       const existingBook = await Book.findById(req.params.id);
       if (!existingBook) {
         return res.status(404).json({ message: "Book not found" });
       }
 
-      updatedData.imageUrl = existingBook.imageUrl;
-      updatedData.additionalImages = existingBook.additionalImages;
+      // Handle Primary Image Deletion
+      if (req.body.deletePrimaryImage === 'true') {
+        updatedData.imageUrl = null;
+        // Ideally delete from S3 here using existingBook.imageUrl
+      } else {
+        updatedData.imageUrl = existingBook.imageUrl;
+      }
+
+      // Handle Additional Images Deletion
+      if (req.body.deleteAdditionalImages === 'true') {
+        updatedData.additionalImages = [];
+        // Ideally delete from S3 here using existingBook.additionalImages
+      } else {
+        updatedData.additionalImages = existingBook.additionalImages;
+      }
     }
 
     const updatedBook = await Book.findByIdAndUpdate(

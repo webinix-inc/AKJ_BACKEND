@@ -29,7 +29,8 @@ const User = require("../models/userModel");
 const Course = require("../models/courseModel");
 const Installment = require("../models/installmentModel");
 const LiveClass = require("../models/LiveClass");
-const Message = require("../models/messageModel");
+
+const Notification = require("../models/notificationModel"); // Imported Notification Model
 const { addUsersToClass } = require("../configs/merithub.config");
 
 // Initialize Razorpay instance
@@ -46,114 +47,9 @@ const generateReceipt = () => `receipt_${Math.floor(Math.random() * 1e6)}`;
 // ============================================================================
 // 💬 SEND PAYMENT RECEIPT MESSAGE TO STUDENT
 // ============================================================================
-const sendPaymentReceiptMessage = async (order, course, user) => {
-  try {
-    console.log("💬 sendPaymentReceiptMessage called with:", {
-      orderId: order?.orderId,
-      courseTitle: course?.title,
-      userName: user?.firstName
-    });
-    
-    // Find admin user to send message from
-    const adminUser = await User.findOne({ userType: "ADMIN" }).select("_id firstName lastName");
-    if (!adminUser) {
-      console.error("❌ No admin user found for payment receipt message");
-      return;
-    }
-    
-    console.log("✅ Admin user found:", adminUser._id);
-
-    // Format payment details - order.amount is in paise, convert to rupees
-    const amountInRupees = typeof order.amount === 'number' ? order.amount / 100 : parseFloat(order.amount) / 100;
-    const amount = amountInRupees.toLocaleString('en-IN', { 
-      minimumFractionDigits: 2, 
-      maximumFractionDigits: 2 
-    });
-    console.log("💰 Amount formatted:", { original: order.amount, inRupees: amountInRupees, formatted: amount });
-    const paymentDate = order.paidAt 
-      ? new Date(order.paidAt).toLocaleDateString('en-IN', {
-          day: '2-digit',
-          month: 'long',
-          year: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit'
-        })
-      : new Date().toLocaleDateString('en-IN', {
-          day: '2-digit',
-          month: 'long',
-          year: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit'
-        });
-
-    // Build message content
-    let messageContent = `🎉 Payment Receipt\n\n`;
-    messageContent += `Dear ${user.firstName || 'Student'},\n\n`;
-    messageContent += `Your payment has been successfully processed!\n\n`;
-    messageContent += `📋 Payment Details:\n`;
-    messageContent += `• Course: ${course?.title || 'N/A'}\n`;
-    messageContent += `• Amount: ₹${amount}\n`;
-    messageContent += `• Payment Date: ${paymentDate}\n`;
-    messageContent += `• Transaction ID: ${order.paymentId || 'N/A'}\n`;
-    messageContent += `• Order ID: ${order.orderId || 'N/A'}\n`;
-    messageContent += `• Tracking Number: ${order.trackingNumber || 'N/A'}\n`;
-
-    if (order.paymentMode === "installment" && order.installmentDetails) {
-      const installmentNumber = (order.installmentDetails.installmentIndex || 0) + 1;
-      const totalInstallments = order.installmentDetails.totalInstallments || 1;
-      messageContent += `• Installment: ${installmentNumber} of ${totalInstallments}\n`;
-    }
-
-    messageContent += `\n✅ Your payment receipt has been automatically downloaded.\n`;
-    messageContent += `\nThank you for your payment!\n\n`;
-    messageContent += `Best regards,\nAKJ Classes Team`;
-
-    // Create and save the message
-    const receiptMessage = new Message({
-      sender: adminUser._id,  // FROM admin
-      receiver: user._id,     // TO student
-      content: messageContent,
-      attachments: [],
-      isRead: false,
-      isBroadcast: false,
-      status: "sent",
-      timestamp: new Date(),
-    });
-
-    await receiptMessage.save();
-    console.log(`✅ Payment receipt message saved: Admin ${adminUser._id} → User ${user._id}`);
-    console.log(`📝 Message content preview:`, messageContent.substring(0, 100) + '...');
-
-    // Emit socket event for real-time delivery if socket is available
-    if (global.io) {
-      try {
-        global.io.to(user._id.toString()).emit("message", {
-          _id: receiptMessage._id,
-          content: receiptMessage.content,
-          sender: adminUser._id,
-          receiver: user._id,
-          createdAt: receiptMessage.createdAt,
-          attachments: [],
-          isBroadcast: false,
-          timestamp: receiptMessage.timestamp,
-          isRead: receiptMessage.isRead
-        });
-        console.log(`🔔 Payment receipt message emitted via socket to user ${user._id}`);
-      } catch (socketError) {
-        console.error("⚠️ Error emitting socket message:", socketError);
-        // Continue - message is saved in DB even if socket fails
-      }
-    } else {
-      console.warn("⚠️ Socket.io not available, message saved but not emitted");
-    }
-    
-    console.log(`✅ Payment receipt message process completed successfully`);
-  } catch (error) {
-    console.error("❌ Error sending payment receipt message:", error);
-    console.error("❌ Error stack:", error.stack);
-    // Don't throw - payment is already successful, message is just a notification
-  }
-};
+// ============================================================================
+// 💰 RAZORPAY ORDER CREATION BUSINESS LOGIC
+// ============================================================================
 
 const generateUniqueTrackingNumber = () =>
   `TN-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -188,11 +84,11 @@ const createRazorpayOrderLogic = async (orderData) => {
 
     // 🔥 CRITICAL: Declare installmentPlan outside the if block so it's accessible later
     let installmentPlan = null;
-    
+
     // Handle installment-specific logic
     if (paymentMode === "installment") {
       // 🔥 CRITICAL: Use installmentPlanId if provided, otherwise fallback to planType
-      
+
       if (installmentPlanId) {
         installmentPlan = await Installment.findById(installmentPlanId);
         if (!installmentPlan || installmentPlan.courseId.toString() !== courseId.toString()) {
@@ -208,7 +104,7 @@ const createRazorpayOrderLogic = async (orderData) => {
       } else {
         throw new Error("Either installmentPlanId or planType is required for installment payments");
       }
-      
+
       // 🔥 CRITICAL: Ensure installmentPlan is defined before proceeding
       if (!installmentPlan) {
         throw new Error("Installment plan is required but was not found");
@@ -218,30 +114,30 @@ const createRazorpayOrderLogic = async (orderData) => {
       // This ensures users keep their original plan prices even if admin changes the plan
       const User = require('../models/userModel');
       const user = await User.findById(userId).select('purchasedCourses');
-      
+
       if (user?.purchasedCourses) {
         const purchasedCourse = user.purchasedCourses.find((pc) => {
           const pcCourseId = pc.course?.toString?.() || pc.course;
           const currentCourseId = courseId?.toString?.() || courseId;
           return pcCourseId === currentCourseId && pc.paymentType === 'installment';
         });
-        
+
         if (purchasedCourse?.installments && purchasedCourse.installments.length > 0) {
           // Find the installment by installmentNumber (1-based) or by index
           const installmentNumber = installmentIndex + 1; // Convert to 1-based
           const savedInstallment = purchasedCourse.installments.find(
             inst => inst.installmentNumber === installmentNumber
           ) || purchasedCourse.installments[installmentIndex];
-          
+
           if (savedInstallment?.amount) {
             const savedAmount = savedInstallment.amount;
             console.log(`🔒 Enrolled user - Using saved amount ₹${savedAmount} instead of ₹${amount} for installment ${installmentNumber}`);
-            
+
             // Warn if amounts don't match (frontend should have sent correct amount)
             if (Math.abs(savedAmount - amount) > 0.01) {
               console.warn(`⚠️ Amount mismatch for enrolled user: Frontend sent ₹${amount}, but saved amount is ₹${savedAmount}. Using saved amount.`);
             }
-            
+
             // Override amount with saved amount
             amount = savedAmount;
           }
@@ -254,13 +150,13 @@ const createRazorpayOrderLogic = async (orderData) => {
           p.userId.toString() === userId &&
           p.installmentIndex === installmentIndex
       );
-      
+
       if (existingPayment) {
         // If installment already exists and is paid, don't allow creating another order
         if (existingPayment.isPaid) {
           throw new Error(`Installment ${installmentIndex + 1} has already been paid for this user`);
         }
-        
+
         // If installment exists but not paid, allow creating order (user might be retrying payment)
         // Don't add duplicate entry, just proceed with order creation
         console.log(`⚠️ Installment ${installmentIndex + 1} already exists but not paid. Allowing order creation for retry.`);
@@ -296,7 +192,7 @@ const createRazorpayOrderLogic = async (orderData) => {
     // Create internal order record
     // 🔥 CRITICAL: Safely get installmentPlanId - only access installmentPlan if paymentMode is installment
     let finalInstallmentPlanId = installmentPlanId; // Default to the provided installmentPlanId
-    
+
     if (paymentMode === "installment") {
       // Only access installmentPlan here where we know it should be set
       // Use typeof check to ensure variable exists before accessing
@@ -308,7 +204,7 @@ const createRazorpayOrderLogic = async (orderData) => {
         console.warn("⚠️ [createRazorpayOrderLogic] installmentPlan not found, using provided installmentPlanId");
       }
     }
-    
+
     const internalOrderData = {
       orderId: razorpayOrder.id,
       amount: razorpayOrder.amount,
@@ -397,7 +293,7 @@ const verifyPaymentSignatureLogic = async (signatureData) => {
       planType: order.planType || order.installmentDetails.planType,
       installmentPlanId: order.installmentPlanId // 🔥 NEW: Pass installmentPlanId to enrollment
     } : null;
-    
+
     // 🔥 CRITICAL: Enroll user in course - this must complete successfully
     let enrollmentResult;
     try {
@@ -409,7 +305,7 @@ const verifyPaymentSignatureLogic = async (signatureData) => {
         mockPaymentDetails,
         order.orderId // 🔥 CRITICAL: Pass orderId to help with installmentPlanId lookup
       );
-      
+
       // 🔥 CRITICAL: For installment payments, update Installment model separately
       // This ensures proper tracking and avoids duplicate updates
       if (order.paymentMode === "installment" && order.installmentPlanId) {
@@ -427,7 +323,7 @@ const verifyPaymentSignatureLogic = async (signatureData) => {
           // Don't throw - enrollment is already complete, this is just for tracking
         }
       }
-      
+
       console.log("✅ Payment signature verified and course enrolled", {
         courseId: order.courseId,
         userId: order.userId,
@@ -438,7 +334,7 @@ const verifyPaymentSignatureLogic = async (signatureData) => {
       // Re-throw to prevent payment from being marked as successful without enrollment
       throw new Error(`Course enrollment failed: ${enrollmentError.message}`);
     }
-    
+
     // 🔥 CRITICAL: Verify enrollment was successful by checking user's purchasedCourses
     try {
       const User = require('../models/userModel');
@@ -446,7 +342,7 @@ const verifyPaymentSignatureLogic = async (signatureData) => {
       const hasCourse = user.purchasedCourses.some(
         (pc) => pc.course.toString() === order.courseId.toString()
       );
-      
+
       if (!hasCourse) {
         console.error("❌ CRITICAL: Course enrollment verification failed - course not found in user's purchasedCourses");
         throw new Error("Course enrollment verification failed");
@@ -457,40 +353,74 @@ const verifyPaymentSignatureLogic = async (signatureData) => {
       throw new Error(`Enrollment verification failed: ${verificationError.message}`);
     }
 
-    // 🔥 SEND PAYMENT RECEIPT MESSAGE TO STUDENT'S CHAT
+    // 🔥 SEND SYSTEM NOTIFICATIONS (USER & ADMIN)
     try {
-      console.log("💬 Attempting to send payment receipt message...", {
-        userId: order.userId,
-        courseId: order.courseId,
-        orderId: order.orderId
+      console.log("🔔 Sending system notifications for purchase...");
+
+      // 1. Notify Student
+      const studentNotification = new Notification({
+        title: "Course Purchased Successfully! 🎉",
+        message: `You have successfully purchased ${course?.title || 'the course'}. Happy Learning!`,
+        type: 'NEW_COURSE_PURCHASE',
+        recipient: [order.userId],
+        courses: [order.courseId],
+        sendVia: 'NOTIFICATION', // Fixed: 'system' is not in enum
+        metadata: { orderId: order.orderId, amount: order.amount },
+        priority: 'HIGH',
+        createdBy: order.userId // Self-initiated
       });
-      
-      const user = await User.findById(order.userId).select("firstName lastName email");
-      const course = await Course.findById(order.courseId).select("title");
-      
-      if (!user) {
-        console.error("⚠️ User not found for payment receipt message:", order.userId);
-        return;
+      await studentNotification.save();
+
+      if (global.io) {
+        global.io.to(`notification:${order.userId}`).emit("notification", {
+          title: studentNotification.title,
+          message: studentNotification.message,
+          type: studentNotification.type,
+          metadata: studentNotification.metadata,
+          createdAt: new Date(),
+          _id: studentNotification._id
+        });
+        console.log(`✅ Notification sent to user ${order.userId}`);
       }
-      
-      if (!course) {
-        console.error("⚠️ Course not found for payment receipt message:", order.courseId);
-        return;
+
+      // 2. Notify Admin
+      // Find all admins
+      const admins = await User.find({ userType: "ADMIN" }).select("_id");
+      const adminIds = admins.map(a => a._id);
+
+      if (adminIds.length > 0) {
+        const adminNotification = new Notification({
+          title: "New Course Sale! 💰",
+          message: `${user?.firstName || 'A user'} has purchased ${course?.title || 'a course'} for ₹${order.amount / 100}.`,
+          type: 'ADMIN_ALERT',
+          recipient: adminIds,
+          courses: [order.courseId],
+          sendVia: 'NOTIFICATION',
+          metadata: { orderId: order.orderId, userId: order.userId },
+          priority: 'MEDIUM', // Fixed: Uppercase to match schema
+          createdBy: order.userId
+        });
+        await adminNotification.save();
+
+        // Emit to a special admin room or loop through admins
+        if (global.io) {
+          // Assuming admins might join their own notification rooms
+          adminIds.forEach(adminId => {
+            global.io.to(`notification:${adminId}`).emit("notification", {
+              title: adminNotification.title,
+              message: adminNotification.message,
+              type: adminNotification.type,
+              metadata: adminNotification.metadata,
+              createdAt: new Date(),
+              _id: adminNotification._id
+            });
+          });
+          console.log(`✅ Notification sent to ${adminIds.length} admins`);
+        }
       }
-      
-      console.log("✅ User and course found, sending message...", {
-        userName: user.firstName,
-        courseTitle: course.title
-      });
-      
-      // Refresh order to get latest data
-      const updatedOrder = await Order.findById(order._id);
-      await sendPaymentReceiptMessage(updatedOrder || order, course, user);
-      console.log("✅ Payment receipt message sent successfully");
-    } catch (messageError) {
-      console.error("❌ Error sending payment receipt message:", messageError);
-      console.error("❌ Message error details:", messageError.stack);
-      // Don't throw - payment is successful, message is just a notification
+
+    } catch (notificationError) {
+      console.error("❌ Error sending system notifications:", notificationError);
     }
 
     return {
@@ -522,10 +452,10 @@ const addCourseToUserLogic = async (userId, courseId, paymentMode, installmentDe
     const paymentId = paymentDetails.id || paymentDetails.payment_id || null;
     // 🔥 CRITICAL: Use passed orderId parameter if available, otherwise get from paymentDetails
     const finalOrderId = orderId || paymentDetails.order_id || null;
-    
+
     // 🔥 CRITICAL: Declare installmentPlan at function scope to avoid shadowing issues
     let installmentPlan = null;
-    
+
     // Find if user already has this course
     const courseIndex = user.purchasedCourses.findIndex(
       (c) => c.course.toString() === courseId.toString()
@@ -545,29 +475,29 @@ const addCourseToUserLogic = async (userId, courseId, paymentMode, installmentDe
         paymentType: paymentMode,
         installments: [],
       };
-      
+
       if (isInstallment) {
         newCourse.totalInstallments = totalInstallments;
         newCourse.planType = installmentDetails?.planType; // 🔥 Store planType immediately
-        
+
         // 🔒 CRITICAL: Store ALL installment amounts at enrollment time to lock in prices
         // This ensures enrolled users keep their original prices even if admin updates the plan
         try {
           // 🔥 CRITICAL: Get planType from installmentDetails (should always be present)
           // If not, get it from the CURRENT order being verified (using orderId from paymentDetails)
           let planTypeToUse = installmentDetails?.planType;
-          
+
           // 🔥 CRITICAL: Use installmentPlanId from installmentDetails or order if available
           let installmentPlanIdToUse = installmentDetails?.installmentPlanId;
-          
+
           // 🔥 OPTIMIZATION: Use installmentPlanId from order if available (faster than planType lookup)
           if (!installmentPlanIdToUse && finalOrderId) {
-            const currentOrder = await Order.findOne({ 
-              orderId: finalOrderId 
+            const currentOrder = await Order.findOne({
+              orderId: finalOrderId
             }).select('planType installmentPlanId'); // Only select needed fields for speed
             installmentPlanIdToUse = currentOrder?.installmentPlanId;
             planTypeToUse = currentOrder?.planType || planTypeToUse;
-            
+
             // If planType not in order but installmentPlanId is, fetch plan directly
             if (!planTypeToUse && installmentPlanIdToUse) {
               // Use global Installment model (already required at top of file)
@@ -578,7 +508,7 @@ const addCourseToUserLogic = async (userId, courseId, paymentMode, installmentDe
               console.log(`🔍 [ENROLLMENT] Got planType from current order: ${planTypeToUse}`);
             }
           }
-          
+
           // 🔥 CRITICAL: Use installmentPlanId if available, otherwise fallback to planType
           // Ensure installmentPlan is properly initialized before use
           if (installmentPlanIdToUse) {
@@ -590,12 +520,12 @@ const addCourseToUserLogic = async (userId, courseId, paymentMode, installmentDe
               installmentPlan = null;
             }
           }
-          
+
           // Fallback to planType lookup if installmentPlanId not available
           if (!installmentPlan && planTypeToUse) {
-            installmentPlan = await Installment.findOne({ 
-              courseId, 
-              planType: planTypeToUse 
+            installmentPlan = await Installment.findOne({
+              courseId,
+              planType: planTypeToUse
             });
             if (installmentPlan) {
               console.log(`✅ [ENROLLMENT] Using planType lookup: ${planTypeToUse}`);
@@ -603,24 +533,24 @@ const addCourseToUserLogic = async (userId, courseId, paymentMode, installmentDe
               console.warn(`⚠️ [ENROLLMENT] Plan not found with planType: ${planTypeToUse}`);
             }
           }
-          
+
           // Final fallback: Get from any recent order (but this should rarely happen)
           if (!planTypeToUse) {
-            const recentOrder = await Order.findOne({ 
-              userId, 
-              courseId, 
-              paymentMode: 'installment' 
+            const recentOrder = await Order.findOne({
+              userId,
+              courseId,
+              paymentMode: 'installment'
             }).select('planType').sort({ createdAt: -1 }); // Only select planType for speed
             planTypeToUse = recentOrder?.planType;
             console.log(`⚠️ [ENROLLMENT] Using planType from recent order (fallback): ${planTypeToUse}`);
           }
-          
+
           if (!planTypeToUse) {
             throw new Error(`❌ planType not found for course enrollment. OrderId: ${finalOrderId}, CourseId: ${courseId}`);
           }
-          
+
           console.log(`✅ [ENROLLMENT] Using planType: ${planTypeToUse} for course ${courseId}`);
-          
+
           // 🔥 CRITICAL: Final check - if installmentPlan still not found, try one more time with orderId
           if (!installmentPlan && finalOrderId) {
             const currentOrder = await Order.findOne({ orderId: finalOrderId }).select('installmentPlanId planType');
@@ -633,17 +563,17 @@ const addCourseToUserLogic = async (userId, courseId, paymentMode, installmentDe
               }
             }
           }
-          
+
           // Final validation - ensure installmentPlan is found
           if (!installmentPlan) {
             throw new Error(`❌ Installment plan not found. OrderId: ${finalOrderId}, CourseId: ${courseId}, PlanType: ${planTypeToUse}`);
           }
-          
+
           // 🔥 CRITICAL: Verify this is the correct plan (safety check)
           if (installmentPlan.courseId.toString() !== courseId.toString()) {
             throw new Error(`❌ Installment plan courseId mismatch. Plan: ${installmentPlan.courseId}, Expected: ${courseId}`);
           }
-          
+
           if (installmentPlan && installmentPlan.installments && installmentPlan.installments.length > 0) {
             // Store all installment amounts from the plan at enrollment time
             installmentPlan.installments.forEach((planInst, idx) => {
@@ -652,7 +582,7 @@ const addCourseToUserLogic = async (userId, courseId, paymentMode, installmentDe
               // 🔥 CRITICAL: Only mark as paid if paymentId exists (payment was actually processed)
               // Use finalOrderId instead of orderId to ensure we have the correct value
               const hasValidPayment = isFirstInstallment && paymentId && finalOrderId;
-              
+
               newCourse.installments.push({
                 installmentNumber: instNumber,
                 amount: planInst.amount, // Store original amount from plan
@@ -662,7 +592,7 @@ const addCourseToUserLogic = async (userId, courseId, paymentMode, installmentDe
                 isPaid: !!hasValidPayment, // 🔥 CRITICAL: Ensure boolean value
               });
             });
-            
+
             console.log(`🔒 Locked in ${installmentPlan.installments.length} installment amounts for user ${userId} at enrollment`);
             console.log(`   Installment amounts: ${installmentPlan.installments.map(i => `₹${i.amount}`).join(', ')}`);
           } else {
@@ -706,7 +636,7 @@ const addCourseToUserLogic = async (userId, courseId, paymentMode, installmentDe
 
       user.purchasedCourses.push(newCourse);
       await user.save();
-      
+
       // 🔥 CRITICAL: Verify the course was actually saved
       const savedUser = await User.findById(userId).select('purchasedCourses');
       const savedCourse = savedUser.purchasedCourses.find(
@@ -720,17 +650,17 @@ const addCourseToUserLogic = async (userId, courseId, paymentMode, installmentDe
     } else {
       // Course already exists - update for subsequent installment payments
       const purchasedCourse = user.purchasedCourses[courseIndex];
-      
+
       if (isInstallment) {
         // 🔥 CRITICAL: Ensure planType is stored (should already be there, but update if missing)
         if (!purchasedCourse.planType && installmentDetails?.planType) {
           purchasedCourse.planType = installmentDetails.planType;
           console.log(`✅ [ENROLLMENT] Updated missing planType for existing course: ${installmentDetails.planType}`);
         }
-        
+
         // Update total amount paid
         purchasedCourse.amountPaid = (purchasedCourse.amountPaid || 0) + amountPaid;
-        
+
         // Check if this installment already exists
         const existingInstallment = purchasedCourse.installments.find(
           (inst) => inst.installmentNumber === installmentNumber
@@ -759,7 +689,7 @@ const addCourseToUserLogic = async (userId, courseId, paymentMode, installmentDe
           const savedInstallment = purchasedCourse.installments.find(
             inst => inst.installmentNumber === installmentNumber
           );
-          
+
           if (savedInstallment) {
             // Use saved amount
             // 🔥 CRITICAL: Ensure isPaid is always a boolean, and use finalOrderId
@@ -793,7 +723,7 @@ const addCourseToUserLogic = async (userId, courseId, paymentMode, installmentDe
 
       await user.save();
       console.log(`💳 Updated course payment for user ${userId}, course ${courseId}, new total: ₹${purchasedCourse.amountPaid}`);
-      
+
       // 🔥 CRITICAL: Verify the course update was actually saved
       const savedUser = await User.findById(userId).select('purchasedCourses');
       const savedCourse = savedUser.purchasedCourses.find(
@@ -849,7 +779,7 @@ const integrateLiveClassesLogic = async (userId, courseId) => {
 
     // Find live classes where the courseId is in the courseIds array (supports multiple courses per class)
     const classes = await LiveClass.find({ courseIds: { $in: [courseId] } });
-    
+
     const addUserToClasses = classes.map(async (cls) => {
       if (!cls.classId || !cls.commonParticipantLink) return;
 
@@ -876,7 +806,7 @@ const integrateLiveClassesLogic = async (userId, courseId) => {
           [user.merithubUserId],
           commonParticipantLink
         );
-        
+
         const userRes = response.find((r) => r.userId === user.merithubUserId);
         if (!userRes?.userLink) {
           console.error(`❌ [INTEGRATE] No individual link returned for user ${user.merithubUserId}`);
@@ -895,10 +825,10 @@ const integrateLiveClassesLogic = async (userId, courseId) => {
           platform: "merithub", // Add platform for consistency
         };
 
-          await User.findByIdAndUpdate(userId, { $push: { liveClasses: liveClassInfo } });
-          console.log(`✅ Added user to live class: ${cls.title}`);
-        }
-       catch (classError) {
+        await User.findByIdAndUpdate(userId, { $push: { liveClasses: liveClassInfo } });
+        console.log(`✅ Added user to live class: ${cls.title}`);
+      }
+      catch (classError) {
         console.error(`❌ Error adding user to class ${cls.title}:`, classError);
       }
     });
@@ -919,7 +849,7 @@ const handleInstallmentPaymentLogic = async (userId, courseId, installmentDetail
     console.log("💳 Processing installment payment with payment service");
 
     let plan = null;
-    
+
     // 🔥 CRITICAL: First try to get installmentPlanId from order (most accurate)
     if (orderId) {
       const Order = require('../models/orderModel');
@@ -929,13 +859,13 @@ const handleInstallmentPaymentLogic = async (userId, courseId, installmentDetail
         console.log(`✅ [INSTALLMENT PAYMENT] Using installmentPlanId from order: ${currentOrder.installmentPlanId}`);
       }
     }
-    
+
     // Fallback to planType lookup only if installmentPlanId not available
     if (!plan && planType) {
       plan = await Installment.findOne({ courseId, planType });
       console.log(`⚠️ [INSTALLMENT PAYMENT] Using planType fallback: ${planType}`);
     }
-    
+
     if (!plan) {
       throw new Error("Installment plan not found");
     }
@@ -977,13 +907,13 @@ const handleInstallmentPaymentLogic = async (userId, courseId, installmentDetail
         plan.userPayments[entryIndex].paidAmount = installmentDetails.amount || plan.installments[installmentDetails.installmentIndex]?.amount || 0;
       }
     }
-    
+
     // Update installment in plan.installments array
     if (plan.installments[installmentDetails.installmentIndex]) {
       plan.installments[installmentDetails.installmentIndex].isPaid = true;
       plan.installments[installmentDetails.installmentIndex].paidOn = new Date();
     }
-    
+
     // Recalculate remaining amount based on actual paid installments
     const paidAmount = plan.installments
       .filter(inst => inst.isPaid)
@@ -994,7 +924,7 @@ const handleInstallmentPaymentLogic = async (userId, courseId, installmentDetail
     const paidInstallments = plan.userPayments.filter(
       (p) => p.userId.toString() === userId && p.isPaid
     ).length;
-    
+
     if (paidInstallments === plan.installments.length) {
       plan.status = "completed";
     }
@@ -1104,7 +1034,7 @@ const handlePaymentCapturedLogic = async (paymentDetails) => {
       planType: planType || installmentDetails.planType,
       installmentPlanId: order.installmentPlanId || installmentDetails.installmentPlanId // 🔥 CRITICAL: Include installmentPlanId
     } : null;
-    
+
     await addCourseToUserLogic(userId, courseId, paymentMode, installmentDetailsWithPlanType, paymentDetails, order_id);
 
     // 🔥 SEND PAYMENT RECEIPT MESSAGE TO STUDENT'S CHAT
@@ -1114,25 +1044,25 @@ const handlePaymentCapturedLogic = async (paymentDetails) => {
         courseId,
         orderId: order_id
       });
-      
+
       const user = await User.findById(userId).select("firstName lastName email");
       const course = await Course.findById(courseId).select("title");
-      
+
       if (!user) {
         console.error("⚠️ User not found for payment receipt message:", userId);
         return;
       }
-      
+
       if (!course) {
         console.error("⚠️ Course not found for payment receipt message:", courseId);
         return;
       }
-      
+
       console.log("✅ User and course found, sending message...", {
         userName: user.firstName,
         courseTitle: course.title
       });
-      
+
       // Refresh order to get latest data
       const updatedOrder = await Order.findOne({ orderId: order_id });
       await sendPaymentReceiptMessage(updatedOrder || order, course, user);
@@ -1290,7 +1220,7 @@ module.exports = {
   calculatePaymentChargesLogic,
   getOrderStatusLogic,
   getUserOrdersLogic,
-  
+
   // Utility functions
   generateReceipt,
   generateUniqueTrackingNumber,

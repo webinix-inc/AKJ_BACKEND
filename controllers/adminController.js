@@ -125,7 +125,7 @@ exports.registration = async (req, res) => {
       req.body.userType = "ADMIN";
       req.body.accountVerification = true;
       const userCreate = await User.create(req.body);
-      
+
       // 🚀 LOG ADMIN REGISTRATION SUCCESS
       logger.adminActivity(
         userCreate._id,
@@ -133,7 +133,7 @@ exports.registration = async (req, res) => {
         'REGISTRATION',
         `Email: ${userCreate.email}, Phone: ${userCreate.phone}, IP: ${req.ip}`
       );
-      
+
       return res
         .status(200)
         .send({ message: "registered successfully ", data: userCreate });
@@ -234,9 +234,9 @@ exports.signin = async (req, res) => {
 
     // Log admin login activity
     logger.adminActivity(
-      user._id, 
-      `${user.firstName} ${user.lastName}`, 
-      'LOGIN', 
+      user._id,
+      `${user.firstName} ${user.lastName}`,
+      'LOGIN',
       `UserType: ${user.userType}, IP: ${req.ip}`
     );
 
@@ -407,7 +407,7 @@ exports.changePassword = async (req, res) => {
           },
           { new: true }
         );
-        
+
         // 🚀 LOG PASSWORD CHANGE SUCCESS
         logger.adminActivity(
           user._id,
@@ -415,7 +415,7 @@ exports.changePassword = async (req, res) => {
           'PASSWORD_CHANGE',
           `Email: ${user.email}, IP: ${req.ip}`
         );
-        
+
         return res
           .status(200)
           .send({ message: "Password update successfully.", data: updated });
@@ -471,13 +471,13 @@ exports.adminLogoutUser = async (req, res) => {
       updateQuery =
         deviceType === "web"
           ? {
-              "activeTokens.webToken": null,
-              "activeTokens.webDeviceId": null,
-            }
+            "activeTokens.webToken": null,
+            "activeTokens.webDeviceId": null,
+          }
           : {
-              "activeTokens.mobileToken": null,
-              "activeTokens.mobileDeviceId": null,
-            };
+            "activeTokens.mobileToken": null,
+            "activeTokens.mobileDeviceId": null,
+          };
     } else {
       updateQuery = {
         isLoggedOut: true,
@@ -551,9 +551,10 @@ exports.getProfile = async (req, res) => {
     const data = await User.findOne({ _id: req.user._id });
     console.log(data);
     if (data) {
+      const processedData = await processUserImage(data);
       return res
         .status(200)
-        .json({ status: 200, message: "get Profile", data: data });
+        .json({ status: 200, message: "get Profile", data: processedData });
     } else {
       return res
         .status(404)
@@ -734,12 +735,36 @@ exports.updateUserDetails = async (req, res) => {
   }
 };
 
+// Helper to process user image with presigned URL
+const processUserImage = async (user) => {
+  if (!user || !user.image) return user;
+
+  try {
+    const userObj = user.toObject ? user.toObject() : { ...user };
+
+    // If it's an S3 URL, extract key and sign it
+    if (userObj.image.includes("amazonaws.com")) {
+      const key = userObj.image.split("amazonaws.com/")[1];
+      if (key) {
+        userObj.image = await generatePresignedUrl(authConfig.s3_bucket, key);
+      }
+    }
+    return userObj;
+  } catch (error) {
+    console.error("Error signing user image:", error);
+    return user;
+  }
+};
+
 exports.uploadProfilePicture = async (req, res) => {
   try {
     const userId = req.params.id;
-    console.log("uploadProfilePicture UsedID :", userId);
+    console.log("📸 [DEBUG] uploadProfilePicture called for UserID:", userId);
+    console.log("📸 [DEBUG] req.file object:", req.file ? JSON.stringify(req.file, null, 2) : "UNDEFINED");
+    console.log("📸 [DEBUG] req.headers['content-type']:", req.headers['content-type']);
 
     if (!req.file) {
+      console.error("❌ [ERROR] No file received in req.file");
       return res
         .status(400)
         .json({ status: 400, error: "Image file is required" });
@@ -747,7 +772,7 @@ exports.uploadProfilePicture = async (req, res) => {
 
     const updatedUser = await User.findByIdAndUpdate(
       userId,
-      { image: req.file.path },
+      { image: req.file.location || req.file.path },
       { new: true }
     );
     console.log("updated user is here", updatedUser);
@@ -756,10 +781,12 @@ exports.uploadProfilePicture = async (req, res) => {
       return res.status(404).json({ status: 404, message: "User not found" });
     }
 
+    const processedUser = await processUserImage(updatedUser);
+
     return res.status(200).json({
       status: 200,
       message: "Profile Picture Uploaded successfully",
-      data: updatedUser,
+      data: processedUser,
     });
   } catch (error) {
     return res.status(500).json({
@@ -776,17 +803,17 @@ exports.uploadProfilePicture = async (req, res) => {
 // Helper function to extract S3 key from URL
 const extractS3KeyFromUrl = (imageUrl) => {
   if (!imageUrl) return null;
-  
+
   // If it's already a key (no domain), return as is
   if (!imageUrl.includes('amazonaws.com/') && !imageUrl.includes('http')) {
     return imageUrl;
   }
-  
+
   // Extract key from full S3 URL
   if (imageUrl.includes('amazonaws.com/')) {
     return imageUrl.split('amazonaws.com/')[1];
   }
-  
+
   return imageUrl;
 };
 
@@ -904,28 +931,28 @@ exports.AddBanner = async (req, res) => {
 exports.getBanner = async (req, res) => {
   try {
     const banners = await Banner.find().populate("course", "title _id");
-    
+
     // Generate pre-signed URLs with longer expiration and better error handling
     const { generatePresignedUrl } = require('../configs/aws.config');
     const processedBanners = await Promise.all(banners.map(async (banner) => {
       const bannerObj = banner.toObject();
-      
+
       if (bannerObj.image && bannerObj.image.includes('amazonaws.com/')) {
         try {
           const s3Key = bannerObj.image.split('amazonaws.com/')[1];
           const bucketName = process.env.S3_BUCKET || 'wakadclass';
-          
+
           console.log(`🔗 [PRESIGN] Generating pre-signed URL for banner ${banner._id}`);
           console.log(`🔗 [PRESIGN] S3 Key: ${s3Key}`);
           console.log(`🔗 [PRESIGN] Bucket: ${bucketName}`);
-          
+
           // Generate pre-signed URL with longer expiration (24 hours)
           const presignedUrl = await generatePresignedUrl(bucketName, s3Key, 86400);
           bannerObj.image = presignedUrl;
-          
+
           console.log(`✅ [PRESIGN] Generated pre-signed URL for banner ${banner._id}`);
           console.log(`✅ [PRESIGN] URL: ${presignedUrl.substring(0, 100)}...`);
-          
+
         } catch (error) {
           console.error(`❌ [PRESIGN] Failed to generate pre-signed URL for banner ${banner._id}:`, error);
           console.error(`❌ [PRESIGN] Error name: ${error.name}`);
@@ -933,10 +960,10 @@ exports.getBanner = async (req, res) => {
           // Keep original URL as fallback
         }
       }
-      
+
       return bannerObj;
     }));
-    
+
     console.log(`📋 Fetched ${banners.length} banners with streaming URLs`);
     return res.status(200).json({ status: 200, data: processedBanners });
   } catch (error) {
@@ -963,9 +990,9 @@ exports.updateBanner = async (req, res) => {
     }
 
     // Check if another banner with same name exists (excluding current banner)
-    const existingBanner = await Banner.findOne({ 
-      name: name.trim(), 
-      _id: { $ne: id } 
+    const existingBanner = await Banner.findOne({
+      name: name.trim(),
+      _id: { $ne: id }
     });
     if (existingBanner) {
       return res.status(400).json({
@@ -997,12 +1024,12 @@ exports.updateBanner = async (req, res) => {
     if (req.file) {
       // Get the current banner to access the old image
       const currentBanner = await Banner.findById(id);
-      
+
       if (currentBanner && currentBanner.image) {
         try {
           // Extract S3 key from old image URL
           const oldS3Key = extractS3KeyFromUrl(currentBanner.image);
-          
+
           if (oldS3Key) {
             // Delete old image from S3
             const fileService = require('../services/fileService');
@@ -1014,14 +1041,14 @@ exports.updateBanner = async (req, res) => {
           console.error("⚠️ Failed to delete old banner image from S3:", s3Error.message);
         }
       }
-      
+
       updateData.image = req.file.location || req.file.path; // S3 uses location, fallback to path
     }
 
     const updatedBanner = await Banner.findByIdAndUpdate(id, updateData, {
       new: true,
     }).populate("course", "title _id");
-    
+
     if (!updatedBanner) {
       return res.status(404).json({ status: 404, message: "Banner not found" });
     }
@@ -1057,9 +1084,9 @@ exports.removeBanner = async (req, res) => {
     // First, get the banner to access the image before deleting
     const bannerToDelete = await Banner.findById(id);
     if (!bannerToDelete) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         status: 404,
-        error: "Banner not found" 
+        error: "Banner not found"
       });
     }
 
@@ -1070,7 +1097,7 @@ exports.removeBanner = async (req, res) => {
       try {
         // Extract S3 key from image URL
         const s3Key = extractS3KeyFromUrl(bannerToDelete.image);
-        
+
         if (s3Key) {
           // Delete image from S3
           const fileService = require('../services/fileService');
@@ -1096,16 +1123,16 @@ exports.removeBanner = async (req, res) => {
     }
 
     console.log(`✅ Banner deleted successfully: ${bannerToDelete.name}`);
-    res.status(200).json({ 
+    res.status(200).json({
       status: 200,
-      message: "Banner deleted successfully" 
+      message: "Banner deleted successfully"
     });
   } catch (error) {
     console.error("❌ Error deleting banner:", error);
-    res.status(500).json({ 
+    res.status(500).json({
       status: 500,
       error: "Failed to delete banner",
-      message: error.message 
+      message: error.message
     });
   }
 };
@@ -1121,7 +1148,7 @@ exports.createSubscription = async (req, res) => {
   try {
     // Extract subscription data from request body
     const subscriptionData = req.body;
-    
+
     // Validate required fields before calling service
     const validationErrors = subscriptionService.validateSubscriptionData(subscriptionData);
     if (validationErrors.length > 0) {
@@ -1142,7 +1169,7 @@ exports.createSubscription = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in createSubscription controller:", error.message);
-    
+
     // Handle specific business logic errors
     if (error.message.includes("Course not found")) {
       return res.status(404).json({
@@ -1151,11 +1178,11 @@ exports.createSubscription = async (req, res) => {
         data: null,
       });
     }
-    
-    if (error.message.includes("already exists") || 
-        error.message.includes("Invalid subscription type") ||
-        error.message.includes("should be an array") ||
-        error.message.includes("must be a non-negative number")) {
+
+    if (error.message.includes("already exists") ||
+      error.message.includes("Invalid subscription type") ||
+      error.message.includes("should be an array") ||
+      error.message.includes("must be a non-negative number")) {
       return res.status(400).json({
         status: 400,
         message: error.message,
@@ -1274,21 +1301,21 @@ exports.updateSubscription = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in updateSubscription controller:", error.message);
-    
+
     // Handle specific business logic errors
-    if (error.message.includes("Subscription not found") || 
-        error.message.includes("Course not found")) {
+    if (error.message.includes("Subscription not found") ||
+      error.message.includes("Course not found")) {
       return res.status(404).json({
         status: 404,
         message: error.message,
         data: null,
       });
     }
-    
+
     if (error.message.includes("Invalid subscription type") ||
-        error.message.includes("should be an array") ||
-        error.message.includes("must be a non-negative number") ||
-        error.message.includes("Cannot remove validity")) {
+      error.message.includes("should be an array") ||
+      error.message.includes("must be a non-negative number") ||
+      error.message.includes("Cannot remove validity")) {
       return res.status(400).json({
         status: 400,
         message: error.message,
@@ -1320,7 +1347,7 @@ exports.deleteSubscription = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in deleteSubscription controller:", error.message);
-    
+
     // Handle specific business logic errors
     if (error.message.includes("Subscription not found")) {
       return res.status(404).json({
@@ -1945,12 +1972,12 @@ exports.getAllPublishedCourses = async (req, res) => {
     const courses = await Course.find({ isPublished: true }).populate(
       "subjects"
     );
-    
+
     // Generate pre-signed URLs for course images (same as banners)
     const { generatePresignedUrl } = require('../configs/aws.config');
     const processedCourses = await Promise.all(courses.map(async (course) => {
       const courseObj = course.toObject();
-      
+
       // Process course images to use pre-signed URLs
       if (courseObj.courseImage && courseObj.courseImage.length > 0) {
         courseObj.courseImage = await Promise.all(courseObj.courseImage.map(async (imageUrl) => {
@@ -1958,16 +1985,16 @@ exports.getAllPublishedCourses = async (req, res) => {
             try {
               const s3Key = imageUrl.split('amazonaws.com/')[1];
               const bucketName = process.env.S3_BUCKET || 'wakadclass';
-              
+
               console.log(`🔗 [PRESIGN] Generating pre-signed URL for course ${course._id} image`);
               console.log(`🔗 [PRESIGN] S3 Key: ${s3Key}`);
-              
+
               // Generate pre-signed URL with longer expiration (24 hours)
               const presignedUrl = await generatePresignedUrl(bucketName, s3Key, 86400);
-              
+
               console.log(`✅ [PRESIGN] Generated pre-signed URL for course ${course._id}`);
               return presignedUrl;
-              
+
             } catch (error) {
               console.error(`❌ [PRESIGN] Failed to generate pre-signed URL for course ${course._id}:`, error);
               console.error(`❌ [PRESIGN] Error name: ${error.name}`);
@@ -1979,10 +2006,10 @@ exports.getAllPublishedCourses = async (req, res) => {
           return imageUrl;
         }));
       }
-      
+
       return courseObj;
     }));
-    
+
     console.log(`📚 Fetched ${courses.length} courses with pre-signed URLs`);
     return res.status(200).json({ status: 200, data: processedCourses });
   } catch (error) {
@@ -2055,7 +2082,7 @@ exports.updateCourseById = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in updateCourseById controller:", error.message);
-    
+
     // Handle specific business logic errors
     if (error.message.includes("Course not found")) {
       return res.status(404).json({
@@ -2063,7 +2090,7 @@ exports.updateCourseById = async (req, res) => {
         message: error.message
       });
     }
-    
+
     // Handle duplicate course title error (409 Conflict)
     if (error.message.includes("Course with this title already exists")) {
       return res.status(409).json({
@@ -2071,9 +2098,9 @@ exports.updateCourseById = async (req, res) => {
         message: error.message
       });
     }
-    
+
     if (error.message.includes("Invalid subCategory ID format") ||
-        error.message.includes("Specified subCategory does not exist")) {
+      error.message.includes("Specified subCategory does not exist")) {
       return res.status(400).json({
         status: 400,
         message: error.message
@@ -2101,12 +2128,12 @@ exports.deleteCourseById = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in deleteCourseById controller:", error.message);
-    
+
     // Handle specific business logic errors
     if (error.message.includes("Course not found")) {
-      return res.status(404).json({ 
-        status: 404, 
-        message: error.message 
+      return res.status(404).json({
+        status: 404,
+        message: error.message
       });
     }
 
@@ -2117,10 +2144,10 @@ exports.deleteCourseById = async (req, res) => {
       });
     }
 
-    return res.status(500).json({ 
-      status: 500, 
-      message: "Server error", 
-      error: error.message 
+    return res.status(500).json({
+      status: 500,
+      message: "Server error",
+      error: error.message
     });
   }
 };
@@ -2143,7 +2170,7 @@ exports.togglePublishCourse = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in togglePublishCourse controller:", error.message);
-    
+
     // Handle specific business logic errors
     if (error.message.includes("Course not found")) {
       return res.status(404).json({
@@ -2151,7 +2178,7 @@ exports.togglePublishCourse = async (req, res) => {
         message: error.message,
       });
     }
-    
+
     if (error.message.includes("must be a boolean value")) {
       return res.status(400).json({
         status: 400,
@@ -2175,9 +2202,9 @@ exports.addTeacherToCourse = async (req, res) => {
     // Validate teacher before calling service
     const teacher = await User.findById(teacherId);
     if (!teacher || teacher.userType !== "TEACHER") {
-      return res.status(404).json({ 
-        status: 404, 
-        message: "Teacher not found" 
+      return res.status(404).json({
+        status: 404,
+        message: "Teacher not found"
       });
     }
 
@@ -2191,19 +2218,19 @@ exports.addTeacherToCourse = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in addTeacherToCourse controller:", error.message);
-    
+
     // Handle specific business logic errors
     if (error.message.includes("Course not found")) {
-      return res.status(404).json({ 
-        status: 404, 
-        message: error.message 
+      return res.status(404).json({
+        status: 404,
+        message: error.message
       });
     }
 
-    return res.status(500).json({ 
-      status: 500, 
-      message: "Server error", 
-      error: error.message 
+    return res.status(500).json({
+      status: 500,
+      message: "Server error",
+      error: error.message
     });
   }
 };
@@ -2221,19 +2248,19 @@ exports.removeTeacherFromCourse = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in removeTeacherFromCourse controller:", error.message);
-    
+
     // Handle specific business logic errors
     if (error.message.includes("Course not found")) {
-      return res.status(404).json({ 
-        status: 404, 
-        message: error.message 
+      return res.status(404).json({
+        status: 404,
+        message: error.message
       });
     }
 
-    return res.status(500).json({ 
-      status: 500, 
-      message: "Server error", 
-      error: error.message 
+    return res.status(500).json({
+      status: 500,
+      message: "Server error",
+      error: error.message
     });
   }
 };
@@ -2313,9 +2340,9 @@ exports.getCourseCategories = async (req, res) => {
 exports.getAllCourseCategories = async (req, res) => {
   try {
     console.log("📂 Fetching all course categories");
-    
+
     const categories = await CourseCategory.find({});
-    
+
     console.log(`📂 Found ${categories.length} categories`);
 
     return res.status(200).json({
@@ -2382,7 +2409,7 @@ exports.removeCourseCategory = async (req, res) => {
   try {
     const { id } = req.params;
     console.log("🗑️ Deleting category with ID:", id);
-    
+
     const category = await CourseCategory.findById(id);
     if (!category) {
       return res.status(404).json({
@@ -2394,7 +2421,7 @@ exports.removeCourseCategory = async (req, res) => {
 
     await CourseCategory.findByIdAndDelete(category._id);
     console.log("✅ Category deleted successfully:", category.name);
-    
+
     return res.status(200).json({
       message: "Category deleted successfully",
       status: 200,
@@ -2417,36 +2444,36 @@ exports.removeCourseCategory = async (req, res) => {
 exports.fixSubscriptionCourse = async (req, res) => {
   try {
     console.log('🔍 Checking subscriptions...');
-    
+
     // Find all subscriptions
     const subscriptions = await Subscription.find().populate('course');
     console.log(`📊 Found ${subscriptions.length} subscriptions`);
-    
+
     let fixedCount = 0;
-    
+
     for (const subscription of subscriptions) {
       console.log(`\n📋 Subscription: ${subscription.name}`);
       console.log(`   - ID: ${subscription._id}`);
       console.log(`   - Course: ${subscription.course ? subscription.course.title : 'NULL'}`);
-      
+
       if (!subscription.course) {
         console.log('❌ Course is null - needs fixing');
-        
+
         // Find available courses
         const courses = await Course.find();
         console.log(`📚 Available courses:`);
         courses.forEach((course, index) => {
           console.log(`   ${index + 1}. ${course.title} (${course._id})`);
         });
-        
+
         if (courses.length > 0) {
           // Associate with the first available course
           const targetCourse = courses[0];
           console.log(`🔧 Associating with course: ${targetCourse.title}`);
-          
+
           subscription.course = targetCourse._id;
           await subscription.save();
-          
+
           console.log('✅ Subscription updated successfully');
           fixedCount++;
         }
@@ -2454,7 +2481,7 @@ exports.fixSubscriptionCourse = async (req, res) => {
         console.log('✅ Course association is valid');
       }
     }
-    
+
     console.log('\n🎯 Verification - checking updated subscriptions:');
     const updatedSubscriptions = await Subscription.find().populate('course');
     const result = updatedSubscriptions.map(sub => ({
@@ -2462,7 +2489,7 @@ exports.fixSubscriptionCourse = async (req, res) => {
       course: sub.course ? sub.course.title : 'NULL',
       courseId: sub.course ? sub.course._id : null
     }));
-    
+
     return res.status(200).json({
       status: 200,
       message: `Fixed ${fixedCount} subscriptions`,
@@ -2471,7 +2498,7 @@ exports.fixSubscriptionCourse = async (req, res) => {
         subscriptions: result
       }
     });
-    
+
   } catch (error) {
     console.error('❌ Error:', error);
     return res.status(500).json({
@@ -2555,7 +2582,7 @@ exports.createSubCategory = async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Error creating sub-category:", error);
-    
+
     // Handle validation errors
     if (error.name === 'ValidationError') {
       return res.status(400).json({
@@ -2579,21 +2606,21 @@ exports.createSubCategory = async (req, res) => {
 const repairCategoryRelationships = async () => {
   try {
     console.log("🔧 Starting category relationship repair...");
-    
+
     // Find courses with invalid category references
     const coursesWithInvalidCategories = await Course.find({
       category: { $exists: true, $ne: null }
     }).populate('category');
-    
+
     let repairedCount = 0;
-    
+
     for (const course of coursesWithInvalidCategories) {
       if (!course.category) {
         console.log(`🔧 Repairing course: ${course.title} - missing category`);
-        
+
         // Find or create a default category
         let defaultCategory = await CourseCategory.findOne({ name: "General" });
-        
+
         if (!defaultCategory) {
           defaultCategory = new CourseCategory({
             name: "General",
@@ -2603,16 +2630,16 @@ const repairCategoryRelationships = async () => {
           await defaultCategory.save();
           console.log("✅ Created default 'General' category");
         }
-        
+
         // Update the course with the default category
         await Course.findByIdAndUpdate(course._id, {
           category: defaultCategory._id
         });
-        
+
         repairedCount++;
       }
     }
-    
+
     console.log(`✅ Repaired ${repairedCount} course category relationships`);
     return repairedCount;
   } catch (error) {
@@ -2628,7 +2655,7 @@ const repairCategoryRelationships = async () => {
 exports.getSubCategories = async (req, res) => {
   try {
     console.log("🔍 getSubCategories function called");
-    
+
     const { categoryId } = req.params;
 
     console.log("📂 Fetching sub-categories for category:", categoryId);
@@ -2647,30 +2674,30 @@ exports.getSubCategories = async (req, res) => {
     const category = await CourseCategory.findById(categoryId).select('name subCategories');
     if (!category) {
       console.warn("⚠️ Category not found, checking for orphaned subcategories...");
-      
+
       // Check if there are any courses with this category that might need a default category
       const coursesWithCategory = await Course.find({ category: categoryId }).limit(5);
-      
+
       if (coursesWithCategory.length > 0) {
         console.log(`📋 Found ${coursesWithCategory.length} courses with missing category. Creating default category...`);
-        
+
         // Create a default category
         const defaultCategory = new CourseCategory({
           name: "Default Category",
           status: true,
           subCategories: []
         });
-        
+
         await defaultCategory.save();
         console.log("✅ Created default category:", defaultCategory._id);
-        
+
         return res.status(200).json({
           status: 200,
           message: "Category created and subcategories fetched",
           data: [],
         });
       }
-      
+
       return res.status(404).json({
         status: 404,
         message: "Category not found",
@@ -2706,9 +2733,9 @@ exports.getSubCategories = async (req, res) => {
 exports.repairCategoryRelationships = async (req, res) => {
   try {
     console.log("🔧 Manual category repair triggered");
-    
+
     const repairedCount = await repairCategoryRelationships();
-    
+
     res.status(200).json({
       status: 200,
       message: `Successfully repaired ${repairedCount} category relationships`,
@@ -2930,7 +2957,7 @@ exports.UploadCourseDocument = async (req, res) => {
         for (const file of uploadedFiles[field]) {
           const fileExtension = file.originalname.split('.').pop().toLowerCase();
           let fileType = "document"; // default
-          
+
           if (['mp4', 'webm', 'mkv', 'avi', 'mov'].includes(fileExtension)) {
             fileType = "video";
           } else if (['pdf'].includes(fileExtension)) {
@@ -2938,7 +2965,7 @@ exports.UploadCourseDocument = async (req, res) => {
           } else if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(fileExtension)) {
             fileType = "image";
           }
-          
+
           const newFile = await File.create({
             url: file.location, // S3 URL
             name: title || file.originalname, // File name
@@ -3770,7 +3797,7 @@ exports.createProduct = async (req, res) => {
     // Extract product data from request
     const productData = req.body;
     const files = req.files;
-    
+
     // Validate required fields before calling service
     const validationErrors = productService.validateProductData(productData);
     if (validationErrors.length > 0) {
@@ -3791,7 +3818,7 @@ exports.createProduct = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in createProduct controller:", error.message);
-    
+
     // Handle specific business logic errors
     if (error.message.includes("Category not found")) {
       return res.status(404).json({
@@ -3858,11 +3885,11 @@ exports.updateProduct = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in updateProduct controller:", error.message);
-    
+
     // Handle specific business logic errors
     if (error.message.includes("Product not found") ||
-        error.message.includes("Category not found") ||
-        error.message.includes("SubCategory not found")) {
+      error.message.includes("Category not found") ||
+      error.message.includes("SubCategory not found")) {
       return res.status(404).json({
         status: 404,
         message: error.message,
@@ -4135,7 +4162,7 @@ exports.searchProducts = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in searchProducts controller:", error.message);
-    
+
     res.status(500).json({
       status: 500,
       message: "Error searching products",
@@ -4227,14 +4254,14 @@ exports.paginateProductSearch = async (req, res) => {
     // Call product service to handle business logic
     const result = await productService.paginateProductSearchLogic(searchParams);
 
-    return res.status(200).json({ 
-      status: 200, 
-      message: result.message, 
-      data: result.data 
+    return res.status(200).json({
+      status: 200,
+      message: result.message,
+      data: result.data
     });
   } catch (error) {
     console.error("Error in paginateProductSearch controller:", error.message);
-    
+
     return res.status(500).json({
       status: 500,
       message: "Internal server error",
@@ -5975,7 +6002,7 @@ exports.createCourse = async (req, res) => {
       populatedCourse = await Course.findById(newCourse._id)
         .populate("faqs")
         .populate("category", "name");
-      
+
       // subCategory is a nested subdocument, so we need to manually fetch it
       if (populatedCourse && verifyCourse.subCategory) {
         try {
@@ -5987,8 +6014,8 @@ exports.createCourse = async (req, res) => {
               sub => sub._id.toString() === verifyCourse.subCategory.toString()
             );
             if (subCat) {
-              populatedCourse.subCategory = { 
-                name: subCat.name, 
+              populatedCourse.subCategory = {
+                name: subCat.name,
                 _id: subCat._id,
                 status: subCat.status
               };
@@ -6020,7 +6047,7 @@ exports.createCourse = async (req, res) => {
       code: error.code,
       stack: error.stack
     });
-    
+
     // Log the full error for debugging
     if (error.stack) {
       console.error("❌ Full error stack:", error.stack);
@@ -6033,7 +6060,7 @@ exports.createCourse = async (req, res) => {
         const normalizedTitle = (courseData.title || '').trim();
         const titleRegex = new RegExp(`^\\s*${normalizedTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i');
         const existingCourse = await Course.findOne({ title: { $regex: titleRegex } });
-        
+
         if (existingCourse) {
           console.log("✅ Course was created successfully despite error - returning success");
           let populatedCourse;
@@ -6042,7 +6069,7 @@ exports.createCourse = async (req, res) => {
             populatedCourse = await Course.findById(existingCourse._id)
               .populate("faqs")
               .populate("category", "name");
-            
+
             // subCategory is a nested subdocument, so we need to manually fetch it
             if (populatedCourse && existingCourse.subCategory) {
               try {
@@ -6054,8 +6081,8 @@ exports.createCourse = async (req, res) => {
                     sub => sub._id.toString() === existingCourse.subCategory.toString()
                   );
                   if (subCat) {
-                    populatedCourse.subCategory = { 
-                      name: subCat.name, 
+                    populatedCourse.subCategory = {
+                      name: subCat.name,
                       _id: subCat._id,
                       status: subCat.status
                     };
@@ -6070,7 +6097,7 @@ exports.createCourse = async (req, res) => {
             console.error("⚠️ Error populating course in recovery, using basic course:", populateError);
             populatedCourse = existingCourse;
           }
-          
+
           return res.status(201).json({
             status: 201,
             message: "Course created successfully",
@@ -6188,7 +6215,7 @@ exports.togglePublishCourse = async (req, res) => {
 
     // Set the publish status to desired state
     console.log("🔍 Current isPublished value:", course.isPublished, typeof course.isPublished);
-    
+
     // If no desired state provided, toggle the current state
     let newStatus;
     if (isPublished !== undefined) {
@@ -6199,14 +6226,14 @@ exports.togglePublishCourse = async (req, res) => {
       const isCurrentlyPublished = course.isPublished === true;
       newStatus = !isCurrentlyPublished;
     }
-    
+
     // Use findByIdAndUpdate to avoid full model validation
     console.log("🔄 New isPublished value:", newStatus, typeof newStatus);
-    
+
     const updatedCourse = await Course.findByIdAndUpdate(
       id,
       { isPublished: newStatus },
-      { 
+      {
         new: true, // Return updated document
         runValidators: false // Skip validation to avoid courseType enum issues
       }
@@ -6262,7 +6289,7 @@ exports.getAllPublishedCoursesForUser = async (req, res) => {
     const { generatePresignedUrl } = require('../configs/aws.config');
     const processedCourses = await Promise.all(courses.map(async (course) => {
       const courseObj = course.toObject();
-      
+
       // Process course images to use pre-signed URLs
       if (courseObj.courseImage && courseObj.courseImage.length > 0) {
         courseObj.courseImage = await Promise.all(courseObj.courseImage.map(async (imageUrl) => {
@@ -6270,15 +6297,15 @@ exports.getAllPublishedCoursesForUser = async (req, res) => {
             try {
               const s3Key = imageUrl.split('amazonaws.com/')[1];
               const bucketName = process.env.S3_BUCKET || 'wakadclass';
-              
+
               console.log(`🔗 [PRESIGN] Generating pre-signed URL for user course ${course._id} image`);
-              
+
               // Generate pre-signed URL with longer expiration (24 hours)
               const presignedUrl = await generatePresignedUrl(bucketName, s3Key, 86400);
-              
+
               console.log(`✅ [PRESIGN] Generated pre-signed URL for user course ${course._id}`);
               return presignedUrl;
-              
+
             } catch (error) {
               console.error(`❌ [PRESIGN] Failed to generate pre-signed URL for user course ${course._id}:`, error);
               // Keep original URL as fallback
@@ -6288,7 +6315,7 @@ exports.getAllPublishedCoursesForUser = async (req, res) => {
           return imageUrl;
         }));
       }
-      
+
       return courseObj;
     }));
 
@@ -6320,7 +6347,7 @@ exports.createBatchCourse = async (req, res) => {
     console.log('\n🚀 ===== BATCH COURSE CREATION STARTED =====');
     console.log('📝 Request Body:', JSON.stringify(req.body, null, 2));
     console.log('📁 Files Received:', req.files ? req.files.length : 0);
-    
+
     if (req.files && req.files.length > 0) {
       console.log('📸 File Details:');
       req.files.forEach((file, index) => {
@@ -6362,7 +6389,7 @@ exports.createBatchCourse = async (req, res) => {
       console.log(`   - Description: ${description ? '✅' : '❌'}`);
       console.log(`   - Category: ${category ? '✅' : '❌'}`);
       console.log(`   - Batch Name: ${batchName ? '✅' : '❌'}`);
-      
+
       return res.status(400).json({
         status: 400,
         message: "Missing required fields: title, description, category, batchName",
@@ -6376,7 +6403,7 @@ exports.createBatchCourse = async (req, res) => {
     if (req.files && req.files.length > 0) {
       console.log(`\n📸 ===== IMAGE PROCESSING STARTED =====`);
       console.log(`📁 Total files to process: ${req.files.length}`);
-      
+
       for (const file of req.files) {
         console.log(`\n🔍 Processing file: ${file.originalname}`);
         console.log(`   - Field Name: ${file.fieldname}`);
@@ -6385,7 +6412,7 @@ exports.createBatchCourse = async (req, res) => {
         console.log(`   - S3 Bucket: ${file.bucket || 'Not available'}`);
         console.log(`   - S3 Key: ${file.key || 'Not available'}`);
         console.log(`   - S3 Location: ${file.location || 'Not available'}`);
-        
+
         if (file.fieldname === 'courseImage') {
           if (file.location) {
             courseImageUrls.push(file.location);
@@ -6399,7 +6426,7 @@ exports.createBatchCourse = async (req, res) => {
           console.log(`⚠️ Skipping file - not a courseImage field`);
         }
       }
-      
+
       console.log(`\n📊 Image Processing Summary:`);
       console.log(`   - Total files processed: ${req.files.length}`);
       console.log(`   - Course images found: ${courseImageUrls.length}`);
@@ -6450,7 +6477,7 @@ exports.createBatchCourse = async (req, res) => {
       courseId: savedCourse._id,
     };
     console.log('📂 Folder creation request:', folderReqBody);
-    
+
     const folderReq = { body: folderReqBody };
     const folderResponse = await createFolder(folderReq);
     const rootFolderId = folderResponse._id;
@@ -6470,7 +6497,7 @@ exports.createBatchCourse = async (req, res) => {
     console.log(`   - Images Uploaded: ${savedCourse.courseImage.length}`);
     console.log(`   - Root Folder: ${savedCourse.rootFolder}`);
     console.log(`   - Published: ${savedCourse.isPublished}`);
-    
+
     if (savedCourse.courseImage.length > 0) {
       console.log(`📸 Uploaded Images:`);
       savedCourse.courseImage.forEach((url, index) => {
@@ -6544,9 +6571,9 @@ exports.addUserToBatchCourse = async (req, res) => {
     }
 
     // Find the batch course
-    const course = await Course.findOne({ 
-      _id: courseId, 
-      courseType: "Batch" 
+    const course = await Course.findOne({
+      _id: courseId,
+      courseType: "Batch"
     });
 
     if (!course) {
@@ -6627,10 +6654,10 @@ exports.addUserToBatchCourse = async (req, res) => {
     // Verify the save worked by re-fetching
     const verifyUser = await User.findById(userId);
     const verifyCourse = await Course.findById(courseId);
-    
+
     const userHasCourse = verifyUser.purchasedCourses.some(pc => pc.course.toString() === courseId);
     const courseHasUser = verifyCourse.manualEnrollments.some(e => e.user.toString() === userId);
-    
+
     console.log(`🔍 [DEBUG] Verification after save:`);
     console.log(`🔍 [DEBUG] - User has course in purchasedCourses: ${userHasCourse}`);
     console.log(`🔍 [DEBUG] - Course has user in manualEnrollments: ${courseHasUser}`);
@@ -6647,7 +6674,7 @@ exports.addUserToBatchCourse = async (req, res) => {
 
     console.log(`✅ User added to batch course: ${user.firstName} ${user.lastName} -> ${course.batchName}`);
 
-    
+
 
     res.status(200).json({
       status: 200,
@@ -6677,7 +6704,7 @@ exports.updateBatchCourse = async (req, res) => {
     console.log('🆔 Course ID to update:', id);
     console.log('📝 Request Body:', JSON.stringify(req.body, null, 2));
     console.log('📁 Files Received:', req.files ? req.files.length : 0);
-    
+
     if (req.files && req.files.length > 0) {
       console.log('📸 File Details:');
       req.files.forEach((file, index) => {
@@ -6697,7 +6724,7 @@ exports.updateBatchCourse = async (req, res) => {
     if (req.files && req.files.length > 0) {
       console.log(`\n📸 ===== IMAGE PROCESSING FOR UPDATE =====`);
       console.log(`📁 Total files to process: ${req.files.length}`);
-      
+
       const imageUrls = [];
       for (const file of req.files) {
         console.log(`\n🔍 Processing file: ${file.originalname}`);
@@ -6705,7 +6732,7 @@ exports.updateBatchCourse = async (req, res) => {
         console.log(`   - MIME Type: ${file.mimetype}`);
         console.log(`   - File Size: ${file.size} bytes`);
         console.log(`   - S3 Location: ${file.location || 'Not available'}`);
-        
+
         if (file.fieldname === 'courseImage') {
           if (file.location) {
             imageUrls.push(file.location);
@@ -6719,7 +6746,7 @@ exports.updateBatchCourse = async (req, res) => {
           console.log(`⚠️ Skipping file - not a courseImage field`);
         }
       }
-      
+
       if (imageUrls.length > 0) {
         updateData.courseImage = imageUrls;
         console.log(`\n📊 Image Update Summary:`);
@@ -6764,7 +6791,7 @@ exports.updateBatchCourse = async (req, res) => {
     console.log(`   - Course Type: ${updatedCourse.courseType}`);
     console.log(`   - Images Count: ${updatedCourse.courseImage?.length || 0}`);
     console.log(`   - Published: ${updatedCourse.isPublished}`);
-    
+
     if (updatedCourse.courseImage && updatedCourse.courseImage.length > 0) {
       console.log('📸 Updated Images:');
       updatedCourse.courseImage.forEach((url, index) => {
@@ -6833,9 +6860,9 @@ exports.removeUserFromBatchCourse = async (req, res) => {
     const { courseId, userId } = req.params;
 
     // Find the batch course
-    const course = await Course.findOne({ 
-      _id: courseId, 
-      courseType: "Batch" 
+    const course = await Course.findOne({
+      _id: courseId,
+      courseType: "Batch"
     });
 
     if (!course) {
@@ -6870,7 +6897,7 @@ exports.removeUserFromBatchCourse = async (req, res) => {
 
     // Remove from both course.manualEnrollments AND user.purchasedCourses
     course.manualEnrollments.splice(enrollmentIndex, 1);
-    
+
     // Remove from user's purchasedCourses array
     user.purchasedCourses = user.purchasedCourses.filter(
       pc => pc.course.toString() !== courseId
@@ -6905,9 +6932,9 @@ exports.getBatchCourseById = async (req, res) => {
   try {
     const { courseId } = req.params;
 
-    const course = await Course.findOne({ 
-      _id: courseId, 
-      courseType: "Batch" 
+    const course = await Course.findOne({
+      _id: courseId,
+      courseType: "Batch"
     })
       .populate('category', 'name')
       .populate('teacher', 'firstName lastName email')
@@ -6944,7 +6971,7 @@ exports.getBatchCourseById = async (req, res) => {
 exports.fixBatchCoursesRootFolder = async (req, res) => {
   try {
     console.log('🔧 Starting batch course rootFolder fix...');
-    
+
     // Find batch courses without rootFolder
     const batchCoursesWithoutFolder = await Course.find({
       courseType: "Batch",
@@ -6954,9 +6981,9 @@ exports.fixBatchCoursesRootFolder = async (req, res) => {
         { rootFolder: undefined }
       ]
     });
-    
+
     console.log(`Found ${batchCoursesWithoutFolder.length} batch courses without rootFolder`);
-    
+
     if (batchCoursesWithoutFolder.length === 0) {
       return res.status(200).json({
         status: 200,
@@ -6964,15 +6991,15 @@ exports.fixBatchCoursesRootFolder = async (req, res) => {
         data: { fixed: 0, total: 0 }
       });
     }
-    
+
     const { createFolder } = require('./courseController');
     let fixedCount = 0;
     const results = [];
-    
+
     for (const course of batchCoursesWithoutFolder) {
       try {
         console.log(`🔧 Fixing course: ${course.title} (${course._id})`);
-        
+
         // Create folder for the batch course
         const folderReqBody = {
           name: course.title,
@@ -6981,11 +7008,11 @@ exports.fixBatchCoursesRootFolder = async (req, res) => {
         const folderReq = { body: folderReqBody };
         const folderResponse = await createFolder(folderReq);
         const rootFolderId = folderResponse._id;
-        
+
         // Update course with rootFolder
         course.rootFolder = rootFolderId;
         await course.save();
-        
+
         fixedCount++;
         results.push({
           courseId: course._id,
@@ -6993,9 +7020,9 @@ exports.fixBatchCoursesRootFolder = async (req, res) => {
           rootFolderId: rootFolderId,
           status: 'fixed'
         });
-        
+
         console.log(`✅ Fixed course: ${course.title} -> rootFolder: ${rootFolderId}`);
-        
+
       } catch (error) {
         console.error(`❌ Error fixing course ${course.title}:`, error);
         results.push({
@@ -7006,9 +7033,9 @@ exports.fixBatchCoursesRootFolder = async (req, res) => {
         });
       }
     }
-    
+
     console.log(`🎉 Batch course fix completed: ${fixedCount}/${batchCoursesWithoutFolder.length} fixed`);
-    
+
     res.status(200).json({
       status: 200,
       message: `Fixed ${fixedCount} out of ${batchCoursesWithoutFolder.length} batch courses`,
@@ -7018,7 +7045,7 @@ exports.fixBatchCoursesRootFolder = async (req, res) => {
         results: results
       }
     });
-    
+
   } catch (error) {
     console.error("❌ Error in fixBatchCoursesRootFolder:", error);
     res.status(500).json({
@@ -7033,28 +7060,28 @@ exports.fixBatchCoursesRootFolder = async (req, res) => {
 exports.debugUserCourses = async (req, res) => {
   try {
     const { userId } = req.params;
-    
+
     if (!userId) {
       return res.status(400).json({
         status: 400,
         message: "User ID is required",
       });
     }
-    
+
     const user = await User.findById(userId).populate({
       path: 'purchasedCourses.course',
       select: 'title courseType isPublished _id'
     });
-    
+
     if (!user) {
       return res.status(404).json({
         status: 404,
         message: "User not found",
       });
     }
-    
+
     console.log(`🔍 [DEBUG] User courses for ${user.firstName} ${user.lastName}:`);
-    
+
     const courseDetails = user.purchasedCourses.map(pc => ({
       courseId: pc.course?._id?.toString() || 'N/A',
       courseTitle: pc.course?.title || 'N/A',
@@ -7064,9 +7091,9 @@ exports.debugUserCourses = async (req, res) => {
       assignedAt: pc.assignedByAdmin?.assignedAt || null,
       expiresAt: pc.expiresAt || null
     }));
-    
+
     console.log(`🔍 [DEBUG] Course details:`, courseDetails);
-    
+
     res.status(200).json({
       status: 200,
       message: "User course debug info retrieved successfully",
@@ -7077,7 +7104,7 @@ exports.debugUserCourses = async (req, res) => {
         courses: courseDetails
       }
     });
-    
+
   } catch (error) {
     console.error("❌ Error in debugUserCourses:", error);
     res.status(500).json({
@@ -7092,149 +7119,149 @@ exports.debugUserCourses = async (req, res) => {
 exports.fixUserBatchAccess = async (req, res) => {
   try {
     const { userId, courseId } = req.body;
-    
+
     console.log(`🔧 [DEBUG] fixUserBatchAccess called with:`);
     console.log(`🔧 [DEBUG] - userId: ${userId}`);
     console.log(`🔧 [DEBUG] - courseId: ${courseId}`);
 
-// FORCE FIX: Direct database operation for the specific user
-if (!userId && !courseId) {
-  const tempUserId = '6889f297ae1f381179cf6f50';
-  const tempCourseId = '6895a124640829b294034fa0';
-  console.log(`🔧 [FORCE FIX] Direct database operation for user ${tempUserId} to course ${tempCourseId}`);
-  
-  try {
-    const tempUser = await User.findById(tempUserId);
-    const tempCourse = await Course.findById(tempCourseId);
-    
-    if (!tempUser) {
-      return res.status(404).json({ status: 404, message: "User not found" });
-    }
-    
-    if (!tempCourse) {
-      return res.status(404).json({ status: 404, message: "Course not found" });
-    }
-    
-    console.log(`🔧 [FORCE FIX] Found user: ${tempUser.firstName} ${tempUser.lastName}`);
-    console.log(`🔧 [FORCE FIX] Found course: ${tempCourse.title || tempCourse.batchName} (Type: ${tempCourse.courseType})`);
-    
-    // Check current access
-    const hasInPurchased = tempUser.purchasedCourses.some(pc => pc.course.toString() === tempCourseId);
-    const hasInEnrollments = tempCourse.manualEnrollments.some(e => e.user.toString() === tempUserId);
-    
-    console.log(`🔧 [FORCE FIX] Current access status:`);
-    console.log(`🔧 [FORCE FIX] - In purchased courses: ${hasInPurchased}`);
-    console.log(`🔧 [FORCE FIX] - In manual enrollments: ${hasInEnrollments}`);
-    
-    let changes = [];
-    
-    if (!hasInPurchased) {
-      tempUser.purchasedCourses.push({
-        course: tempCourseId,
-        assignedByAdmin: {
-          isAssigned: true,
-          assignedAt: new Date(),
-          assignedBy: tempUserId
-        },
-        expiresAt: null
-      });
-      changes.push("Added to purchased courses");
-      console.log(`🔧 [FORCE FIX] Added course to user's purchased courses`);
-    }
-    
-    if (tempCourse.courseType === 'Batch' && !hasInEnrollments) {
-      tempCourse.manualEnrollments.push({
-        user: tempUserId,
-        enrolledBy: tempUserId,
-        status: 'Active'
-      });
-      changes.push("Added to manual enrollments");
-      console.log(`🔧 [FORCE FIX] Added user to course's manual enrollments`);
-    }
-    
-    if (changes.length > 0) {
-      console.log(`🔧 [FORCE FIX] Saving changes: ${changes.join(', ')}`);
-      
-      // Force save with validation disabled
-      const saveResults = await Promise.all([
-        tempUser.save({ validateBeforeSave: false }),
-        tempCourse.save({ validateBeforeSave: false })
-      ]);
-      
-      console.log(`✅ [FORCE FIX] Save results: User=${!!saveResults[0]}, Course=${!!saveResults[1]}`);
-      
-      // Verify the changes
-      const verifyUser = await User.findById(tempUserId);
-      const verifyCourse = await Course.findById(tempCourseId);
-      
-      const finalUserHas = verifyUser.purchasedCourses.some(pc => pc.course.toString() === tempCourseId);
-      const finalCourseHas = verifyCourse.manualEnrollments.some(e => e.user.toString() === tempUserId);
-      
-      console.log(`🔧 [FORCE FIX] Final verification:`);
-      console.log(`🔧 [FORCE FIX] - User has course: ${finalUserHas}`);
-      console.log(`🔧 [FORCE FIX] - Course has user: ${finalCourseHas}`);
-      
-      return res.status(200).json({
-        status: 200,
-        message: `✅ FORCE FIX: Successfully applied changes - ${changes.join(', ')}`,
-        data: { 
-          userId: tempUserId, 
-          courseId: tempCourseId,
-          changes,
-          verification: { userHasCourse: finalUserHas, courseHasUser: finalCourseHas }
+    // FORCE FIX: Direct database operation for the specific user
+    if (!userId && !courseId) {
+      const tempUserId = '6889f297ae1f381179cf6f50';
+      const tempCourseId = '6895a124640829b294034fa0';
+      console.log(`🔧 [FORCE FIX] Direct database operation for user ${tempUserId} to course ${tempCourseId}`);
+
+      try {
+        const tempUser = await User.findById(tempUserId);
+        const tempCourse = await Course.findById(tempCourseId);
+
+        if (!tempUser) {
+          return res.status(404).json({ status: 404, message: "User not found" });
         }
-      });
-    } else {
-      return res.status(200).json({
-        status: 200,
-        message: `✅ User already has proper access to course`,
-        data: { userId: tempUserId, courseId: tempCourseId }
-      });
+
+        if (!tempCourse) {
+          return res.status(404).json({ status: 404, message: "Course not found" });
+        }
+
+        console.log(`🔧 [FORCE FIX] Found user: ${tempUser.firstName} ${tempUser.lastName}`);
+        console.log(`🔧 [FORCE FIX] Found course: ${tempCourse.title || tempCourse.batchName} (Type: ${tempCourse.courseType})`);
+
+        // Check current access
+        const hasInPurchased = tempUser.purchasedCourses.some(pc => pc.course.toString() === tempCourseId);
+        const hasInEnrollments = tempCourse.manualEnrollments.some(e => e.user.toString() === tempUserId);
+
+        console.log(`🔧 [FORCE FIX] Current access status:`);
+        console.log(`🔧 [FORCE FIX] - In purchased courses: ${hasInPurchased}`);
+        console.log(`🔧 [FORCE FIX] - In manual enrollments: ${hasInEnrollments}`);
+
+        let changes = [];
+
+        if (!hasInPurchased) {
+          tempUser.purchasedCourses.push({
+            course: tempCourseId,
+            assignedByAdmin: {
+              isAssigned: true,
+              assignedAt: new Date(),
+              assignedBy: tempUserId
+            },
+            expiresAt: null
+          });
+          changes.push("Added to purchased courses");
+          console.log(`🔧 [FORCE FIX] Added course to user's purchased courses`);
+        }
+
+        if (tempCourse.courseType === 'Batch' && !hasInEnrollments) {
+          tempCourse.manualEnrollments.push({
+            user: tempUserId,
+            enrolledBy: tempUserId,
+            status: 'Active'
+          });
+          changes.push("Added to manual enrollments");
+          console.log(`🔧 [FORCE FIX] Added user to course's manual enrollments`);
+        }
+
+        if (changes.length > 0) {
+          console.log(`🔧 [FORCE FIX] Saving changes: ${changes.join(', ')}`);
+
+          // Force save with validation disabled
+          const saveResults = await Promise.all([
+            tempUser.save({ validateBeforeSave: false }),
+            tempCourse.save({ validateBeforeSave: false })
+          ]);
+
+          console.log(`✅ [FORCE FIX] Save results: User=${!!saveResults[0]}, Course=${!!saveResults[1]}`);
+
+          // Verify the changes
+          const verifyUser = await User.findById(tempUserId);
+          const verifyCourse = await Course.findById(tempCourseId);
+
+          const finalUserHas = verifyUser.purchasedCourses.some(pc => pc.course.toString() === tempCourseId);
+          const finalCourseHas = verifyCourse.manualEnrollments.some(e => e.user.toString() === tempUserId);
+
+          console.log(`🔧 [FORCE FIX] Final verification:`);
+          console.log(`🔧 [FORCE FIX] - User has course: ${finalUserHas}`);
+          console.log(`🔧 [FORCE FIX] - Course has user: ${finalCourseHas}`);
+
+          return res.status(200).json({
+            status: 200,
+            message: `✅ FORCE FIX: Successfully applied changes - ${changes.join(', ')}`,
+            data: {
+              userId: tempUserId,
+              courseId: tempCourseId,
+              changes,
+              verification: { userHasCourse: finalUserHas, courseHasUser: finalCourseHas }
+            }
+          });
+        } else {
+          return res.status(200).json({
+            status: 200,
+            message: `✅ User already has proper access to course`,
+            data: { userId: tempUserId, courseId: tempCourseId }
+          });
+        }
+
+      } catch (forceFixError) {
+        console.error(`❌ [FORCE FIX] Error:`, forceFixError);
+        return res.status(500).json({
+          status: 500,
+          message: `Force fix failed: ${forceFixError.message}`,
+          error: forceFixError.message
+        });
+      }
     }
-    
-  } catch (forceFixError) {
-    console.error(`❌ [FORCE FIX] Error:`, forceFixError);
-    return res.status(500).json({
-      status: 500,
-      message: `Force fix failed: ${forceFixError.message}`,
-      error: forceFixError.message
-    });
-  }
-}
-    
+
     if (!userId || !courseId) {
       return res.status(400).json({
         status: 400,
         message: "User ID and Course ID are required",
       });
     }
-    
+
     // Find the user and course
     const user = await User.findById(userId);
     const course = await Course.findById(courseId);
-    
+
     if (!user) {
       return res.status(404).json({
         status: 404,
         message: "User not found",
       });
     }
-    
+
     if (!course) {
       return res.status(404).json({
         status: 404,
         message: "Course not found",
       });
     }
-    
+
     console.log(`🔧 Fixing batch access for user: ${user.firstName} ${user.lastName}`);
     console.log(`🔧 Course: ${course.title} (${course.courseType})`);
-    
+
     // Check if user already has the course
     const hasAlreadyPurchased = user.purchasedCourses.some(
       pc => pc.course.toString() === courseId
     );
-    
+
     if (hasAlreadyPurchased) {
       return res.status(200).json({
         status: 200,
@@ -7247,7 +7274,7 @@ if (!userId && !courseId) {
         }
       });
     }
-    
+
     // Add the batch course to user's purchasedCourses array
     user.purchasedCourses.push({
       course: courseId,
@@ -7258,12 +7285,12 @@ if (!userId && !courseId) {
       },
       expiresAt: null // Batch courses don't expire by default
     });
-    
+
     // Also ensure user is in course's manualEnrollments
     const isAlreadyEnrolled = course.manualEnrollments.some(
       enrollment => enrollment.user.toString() === userId
     );
-    
+
     if (!isAlreadyEnrolled) {
       course.manualEnrollments.push({
         user: userId,
@@ -7271,11 +7298,11 @@ if (!userId && !courseId) {
         status: 'Active'
       });
     }
-    
+
     await Promise.all([user.save(), course.save()]);
-    
+
     console.log(`✅ Fixed batch access for user: ${user.firstName} ${user.lastName} -> ${course.title}`);
-    
+
     res.status(200).json({
       status: 200,
       message: "User batch course access fixed successfully",
@@ -7288,7 +7315,7 @@ if (!userId && !courseId) {
         accessGranted: true
       }
     });
-    
+
   } catch (error) {
     console.error("❌ Error in fixUserBatchAccess:", error);
     res.status(500).json({
@@ -7303,14 +7330,14 @@ if (!userId && !courseId) {
 exports.checkBatchFileAccess = async (req, res) => {
   try {
     const { courseId, userId } = req.body;
-    
+
     if (!courseId) {
       return res.status(400).json({
         status: 400,
         message: "Course ID is required",
       });
     }
-    
+
     const course = await Course.findById(courseId);
     if (!course) {
       return res.status(404).json({
@@ -7318,17 +7345,17 @@ exports.checkBatchFileAccess = async (req, res) => {
         message: "Course not found",
       });
     }
-    
+
     if (course.courseType !== "Batch") {
       return res.status(400).json({
         status: 400,
         message: "This utility is only for batch courses",
       });
     }
-    
+
     let userInfo = null;
     let hasAccess = false;
-    
+
     if (userId) {
       const user = await User.findById(userId).populate('purchasedCourses.course', 'title courseType');
       if (user) {
@@ -7340,11 +7367,11 @@ exports.checkBatchFileAccess = async (req, res) => {
         };
       }
     }
-    
+
     // Get course folder and files
     const Folder = require('../models/folderModel');
     const File = require('../models/fileModel');
-    
+
     const rootFolder = await Folder.findById(course.rootFolder).populate('files');
     if (!rootFolder) {
       return res.status(404).json({
@@ -7352,30 +7379,30 @@ exports.checkBatchFileAccess = async (req, res) => {
         message: "Course root folder not found",
       });
     }
-    
+
     const fileAccessInfo = rootFolder.files.map(file => {
       const wasManuallyLocked = file.isViewable === false;
       let userCanAccess = false;
-      
+
       if (hasAccess) {
         // Batch course logic: unlocked by default unless manually locked
         userCanAccess = !wasManuallyLocked;
       }
-      
+
       return {
         fileId: file._id,
         fileName: file.name,
         originalIsViewable: file.isViewable,
         wasManuallyLocked: wasManuallyLocked,
         userCanAccess: userCanAccess,
-        explanation: hasAccess 
-          ? (wasManuallyLocked 
-              ? "🔒 Locked - Admin manually locked this file" 
-              : "🔓 Unlocked - Default batch behavior")
+        explanation: hasAccess
+          ? (wasManuallyLocked
+            ? "🔒 Locked - Admin manually locked this file"
+            : "🔓 Unlocked - Default batch behavior")
           : "❌ No access - User not enrolled in batch"
       };
     });
-    
+
     res.status(200).json({
       status: 200,
       message: "Batch file access analysis completed",
@@ -7396,7 +7423,7 @@ exports.checkBatchFileAccess = async (req, res) => {
         }
       }
     });
-    
+
   } catch (error) {
     console.error("❌ Error in checkBatchFileAccess:", error);
     res.status(500).json({
@@ -7417,18 +7444,18 @@ exports.addFreeClassToFolder = async (req, res) => {
 
     // Validate required fields
     if (!name || !url) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         message: "Name and URL are required",
-        error: "Missing required fields" 
+        error: "Missing required fields"
       });
     }
 
     // Validate YouTube URL
     const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+/;
     if (!youtubeRegex.test(url)) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         message: "Invalid YouTube URL",
-        error: "Please provide a valid YouTube URL" 
+        error: "Please provide a valid YouTube URL"
       });
     }
 
@@ -7436,12 +7463,12 @@ exports.addFreeClassToFolder = async (req, res) => {
     const Folder = require("../models/folderModel");
     const File = require("../models/fileModel");
     const mongoose = require("mongoose");
-    
+
     const folder = await Folder.findById(folderId);
     if (!folder) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         message: "Folder not found",
-        error: "The specified folder does not exist" 
+        error: "The specified folder does not exist"
       });
     }
 
@@ -7475,7 +7502,7 @@ exports.addFreeClassToFolder = async (req, res) => {
     console.log(`✅ [DEBUG] Free class added successfully to folder ${folderId}`);
     console.log(`✅ [DEBUG] Updated folder now has ${updatedFolder.files.length} files`);
 
-    res.status(201).json({ 
+    res.status(201).json({
       message: "Free class added successfully",
       freeClass: savedFile,
       folder: updatedFolder
@@ -7483,9 +7510,9 @@ exports.addFreeClassToFolder = async (req, res) => {
 
   } catch (error) {
     console.error("❌ Error adding free class to folder:", error);
-    res.status(500).json({ 
+    res.status(500).json({
       message: "Failed to add free class",
-      error: error.message 
+      error: error.message
     });
   }
 };
@@ -7496,14 +7523,14 @@ exports.addFreeClassToFolder = async (req, res) => {
 exports.debugAssignmentFolders = async (req, res) => {
   try {
     const Folder = require("../models/folderModel");
-    
+
     console.log('🔍 [DEBUG] Checking assignment folders...');
-    
+
     // Find all folders with name "Assignments"
     const assignmentFolders = await Folder.find({ name: "Assignments" });
-    
+
     console.log(`🔍 [DEBUG] Found ${assignmentFolders.length} assignment folders`);
-    
+
     const folderInfo = assignmentFolders.map(folder => ({
       id: folder._id,
       name: folder.name,
@@ -7514,12 +7541,12 @@ exports.debugAssignmentFolders = async (req, res) => {
       hasParentFolder: !!folder.parentFolder,
       hasParentFolderId: !!folder.parentFolderId
     }));
-    
+
     // Also check student folders
     const studentFolders = await Folder.find({
       name: { $regex: /_/ }, // Names with underscore
     }).limit(5); // Limit to first 5 for debugging
-    
+
     const studentInfo = studentFolders.map(folder => ({
       id: folder._id,
       name: folder.name,
@@ -7528,7 +7555,7 @@ exports.debugAssignmentFolders = async (req, res) => {
       isSystemFolder: folder.isSystemFolder,
       folderType: folder.folderType
     }));
-    
+
     res.status(200).json({
       status: 200,
       message: 'Assignment folder debug info',
@@ -7539,7 +7566,7 @@ exports.debugAssignmentFolders = async (req, res) => {
         totalStudentFolders: studentFolders.length
       }
     });
-    
+
   } catch (error) {
     console.error('❌ [ERROR] Debug assignment folders failed:', error);
     res.status(500).json({
@@ -7554,9 +7581,9 @@ exports.fixAssignmentFolders = async (req, res) => {
   try {
     console.log('🔧 [DEBUG] Starting assignment folder fix...');
     console.log('🔧 [DEBUG] User:', req.user ? `${req.user.firstName} (${req.user.userType})` : 'No user');
-    
+
     // Find all folders with name "Assignments" that have wrong field names
-    const assignmentFolders = await Folder.find({ 
+    const assignmentFolders = await Folder.find({
       name: "Assignments",
       $or: [
         { parentFolder: { $exists: true } }, // Old field name
@@ -7564,15 +7591,15 @@ exports.fixAssignmentFolders = async (req, res) => {
         { folderType: { $ne: 'assignments' } } // Wrong folder type
       ]
     });
-    
+
     console.log(`🔧 [DEBUG] Found ${assignmentFolders.length} assignment folders to fix`);
-    
+
     let fixedCount = 0;
-    
+
     for (const folder of assignmentFolders) {
       let needsUpdate = false;
       const updateData = {};
-      
+
       // Fix parentFolder -> parentFolderId
       if (folder.parentFolder && !folder.parentFolderId) {
         updateData.parentFolderId = folder.parentFolder;
@@ -7580,27 +7607,27 @@ exports.fixAssignmentFolders = async (req, res) => {
         needsUpdate = true;
         console.log(`🔧 [DEBUG] Fixing parentFolder for folder ${folder._id}`);
       }
-      
+
       // Add system folder flags
       if (!folder.isSystemFolder) {
         updateData.isSystemFolder = true;
         needsUpdate = true;
         console.log(`🔧 [DEBUG] Adding isSystemFolder flag for folder ${folder._id}`);
       }
-      
+
       if (folder.folderType !== 'assignments') {
         updateData.folderType = 'assignments';
         needsUpdate = true;
         console.log(`🔧 [DEBUG] Setting folderType to assignments for folder ${folder._id}`);
       }
-      
+
       if (needsUpdate) {
         await Folder.findByIdAndUpdate(folder._id, updateData);
         fixedCount++;
         console.log(`✅ [DEBUG] Fixed assignment folder ${folder._id}`);
       }
     }
-    
+
     // Fix student assignment folders too
     const studentFolders = await Folder.find({
       name: { $regex: /_/ }, // Names with underscore (student folders)
@@ -7610,34 +7637,34 @@ exports.fixAssignmentFolders = async (req, res) => {
         { folderType: { $ne: 'student_assignments' } }
       ]
     });
-    
+
     console.log(`🔧 [DEBUG] Found ${studentFolders.length} student assignment folders to fix`);
-    
+
     for (const folder of studentFolders) {
       // Check if this is actually a student assignment folder by checking its parent
       const parentFolder = await Folder.findById(folder.parentFolderId || folder.parentFolder);
       if (parentFolder && parentFolder.name === 'Assignments') {
         let needsUpdate = false;
         const updateData = {};
-        
+
         // Fix parentFolder -> parentFolderId
         if (folder.parentFolder && !folder.parentFolderId) {
           updateData.parentFolderId = folder.parentFolder;
           updateData.$unset = { parentFolder: 1 };
           needsUpdate = true;
         }
-        
+
         // Add system folder flags
         if (!folder.isSystemFolder) {
           updateData.isSystemFolder = true;
           needsUpdate = true;
         }
-        
+
         if (folder.folderType !== 'student_assignments') {
           updateData.folderType = 'student_assignments';
           needsUpdate = true;
         }
-        
+
         if (needsUpdate) {
           await Folder.findByIdAndUpdate(folder._id, updateData);
           fixedCount++;
@@ -7645,15 +7672,15 @@ exports.fixAssignmentFolders = async (req, res) => {
         }
       }
     }
-    
+
     console.log(`🎉 [DEBUG] Assignment folder fix complete. Fixed ${fixedCount} folders.`);
-    
+
     res.status(200).json({
       status: 200,
       message: `Assignment folder fix complete. Fixed ${fixedCount} folders.`,
       data: { fixedCount }
     });
-    
+
   } catch (error) {
     console.error('❌ [ERROR] Assignment folder fix failed:', error);
     res.status(500).json({
@@ -7671,22 +7698,22 @@ exports.fixAssignmentFolders = async (req, res) => {
 exports.getAllAssignmentSubmissions = async (req, res) => {
   try {
     const AssignmentSubmission = require("../models/assignmentSubmissionModel");
-    
+
     console.log('🔍 [DEBUG] Fetching all assignment submissions for admin');
-    
+
     const submissions = await AssignmentSubmission.find()
       .populate('student', 'firstName lastName email phone')
       .populate('courseRootFolder', 'name')
       .sort({ createdAt: -1 });
-    
+
     console.log(`✅ [DEBUG] Found ${submissions.length} assignment submissions`);
-    
+
     res.status(200).json({
       status: 200,
       message: "Assignment submissions retrieved successfully",
       data: submissions
     });
-    
+
   } catch (error) {
     console.error("❌ Error fetching assignment submissions:", error);
     res.status(500).json({
@@ -7702,22 +7729,22 @@ exports.getUserAssignmentSubmissions = async (req, res) => {
   try {
     const AssignmentSubmission = require("../models/assignmentSubmissionModel");
     const { userId } = req.params;
-    
+
     console.log(`🔍 [DEBUG] Fetching assignment submissions for user: ${userId}`);
-    
+
     const submissions = await AssignmentSubmission.find({ student: userId })
       .populate('courseRootFolder', 'name')
       .populate('student', 'firstName lastName phone')
       .sort({ createdAt: -1 });
-    
+
     console.log(`✅ [DEBUG] Found ${submissions.length} submissions for user ${userId}`);
-    
+
     res.status(200).json({
       status: 200,
       message: "User assignment submissions retrieved successfully",
       data: submissions
     });
-    
+
   } catch (error) {
     console.error("❌ Error fetching user assignment submissions:", error);
     res.status(500).json({
@@ -7735,9 +7762,9 @@ exports.updateAssignmentReview = async (req, res) => {
     const { submissionId } = req.params;
     const { comments, grade, status } = req.body;
     const adminId = req.user._id;
-    
+
     console.log(`🔍 [DEBUG] Updating assignment review for submission: ${submissionId}`);
-    
+
     const submission = await AssignmentSubmission.findById(submissionId);
     if (!submission) {
       return res.status(404).json({
@@ -7745,7 +7772,7 @@ exports.updateAssignmentReview = async (req, res) => {
         message: "Assignment submission not found"
       });
     }
-    
+
     // Update review information
     submission.adminReview = {
       reviewedBy: adminId,
@@ -7753,27 +7780,27 @@ exports.updateAssignmentReview = async (req, res) => {
       comments: comments || submission.adminReview.comments,
       grade: grade || submission.adminReview.grade
     };
-    
+
     if (status) {
       submission.submissionStatus = status;
     }
-    
+
     await submission.save();
-    
+
     // Populate the updated submission
     const updatedSubmission = await AssignmentSubmission.findById(submissionId)
       .populate('student', 'firstName lastName email')
       .populate('courseRootFolder', 'name')
       .populate('adminReview.reviewedBy', 'firstName lastName');
-    
+
     console.log(`✅ [DEBUG] Assignment review updated successfully`);
-    
+
     res.status(200).json({
       status: 200,
       message: "Assignment review updated successfully",
       data: updatedSubmission
     });
-    
+
   } catch (error) {
     console.error("❌ Error updating assignment review:", error);
     res.status(500).json({
@@ -7788,7 +7815,7 @@ exports.updateAssignmentReview = async (req, res) => {
 exports.fixFolderVisibility = async (req, res) => {
   try {
     console.log('🔧 [ADMIN] Fixing quiz folder visibility...');
-    
+
     // Only allow admin users
     if (req.user.userType !== 'ADMIN') {
       return res.status(403).json({
@@ -7796,14 +7823,14 @@ exports.fixFolderVisibility = async (req, res) => {
         message: 'Access denied. Admin privileges required.'
       });
     }
-    
+
     const QuizFolder = require('../models/quizFolder');
-    
+
     // Find all folders that are currently invisible
     const invisibleFolders = await QuizFolder.find({ isVisible: false });
-    
+
     console.log(`📊 Found ${invisibleFolders.length} invisible folders`);
-    
+
     if (invisibleFolders.length === 0) {
       return res.status(200).json({
         status: 200,
@@ -7814,25 +7841,25 @@ exports.fixFolderVisibility = async (req, res) => {
         }
       });
     }
-    
+
     // Show which folders will be updated
     console.log('📁 Folders to be made visible:');
     invisibleFolders.forEach((folder, index) => {
       console.log(`   ${index + 1}. "${folder.name}" (ID: ${folder._id})`);
     });
-    
+
     // Update all invisible folders to be visible
     const result = await QuizFolder.updateMany(
       { isVisible: false },
       { $set: { isVisible: true } }
     );
-    
+
     console.log(`✅ SUCCESS: Updated ${result.modifiedCount} folders to be visible`);
-    
+
     // Verify the update
     const stillInvisible = await QuizFolder.find({ isVisible: false });
     const totalFolders = await QuizFolder.countDocuments();
-    
+
     res.status(200).json({
       status: 200,
       message: `Successfully updated ${result.modifiedCount} folders to be visible`,
@@ -7843,7 +7870,7 @@ exports.fixFolderVisibility = async (req, res) => {
         updatedFolders: invisibleFolders.map(f => ({ id: f._id, name: f.name }))
       }
     });
-    
+
   } catch (error) {
     console.error('❌ Error fixing folder visibility:', error);
     res.status(500).json({
@@ -7858,7 +7885,7 @@ exports.fixFolderVisibility = async (req, res) => {
 exports.cleanupIncompleteScorecards = async (req, res) => {
   try {
     console.log('🧹 [ADMIN] Starting cleanup of incomplete scorecards...');
-    
+
     // Check if user is admin
     if (req.user.userType !== 'ADMIN') {
       return res.status(403).json({
@@ -7869,14 +7896,14 @@ exports.cleanupIncompleteScorecards = async (req, res) => {
 
     const Scorecard = require('../models/scorecardModel');
     const { finishQuizHelper } = require('../utils/scoreUtils');
-    
+
     const currentTime = new Date();
-    
+
     // Find all incomplete scorecards
-    const incompleteScorecards = await Scorecard.find({ 
-      completed: false 
+    const incompleteScorecards = await Scorecard.find({
+      completed: false
     }).populate('quizId', 'quizName').populate('userId', 'name email');
-    
+
     if (incompleteScorecards.length === 0) {
       return res.status(200).json({
         status: 200,
@@ -7886,7 +7913,7 @@ exports.cleanupIncompleteScorecards = async (req, res) => {
     }
 
     console.log(`📊 [ADMIN] Found ${incompleteScorecards.length} incomplete scorecards`);
-    
+
     let expiredCount = 0;
     let activeCount = 0;
     let processedCount = 0;
@@ -7896,13 +7923,13 @@ exports.cleanupIncompleteScorecards = async (req, res) => {
     for (const scorecard of incompleteScorecards) {
       try {
         const isExpired = scorecard.expectedEndTime && currentTime > scorecard.expectedEndTime;
-        
+
         if (isExpired) {
           console.log(`🕐 [ADMIN] Auto-submitting expired scorecard ${scorecard._id} (User: ${scorecard.userId?.name || 'Unknown'})`);
           await finishQuizHelper(scorecard);
           expiredCount++;
           processedCount++;
-          
+
           processedScorecards.push({
             scorecardId: scorecard._id,
             userId: scorecard.userId?._id,
@@ -7913,10 +7940,10 @@ exports.cleanupIncompleteScorecards = async (req, res) => {
           });
         } else {
           activeCount++;
-          const timeRemaining = scorecard.expectedEndTime ? 
-            Math.max(0, Math.ceil((scorecard.expectedEndTime - currentTime) / (1000 * 60))) : 
+          const timeRemaining = scorecard.expectedEndTime ?
+            Math.max(0, Math.ceil((scorecard.expectedEndTime - currentTime) / (1000 * 60))) :
             'Unknown';
-          
+
           processedScorecards.push({
             scorecardId: scorecard._id,
             userId: scorecard.userId?._id,

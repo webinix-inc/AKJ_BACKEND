@@ -35,6 +35,7 @@ const notificationSchema = new mongoose.Schema(
         "COURSE_COMPLETION",
         "NEW_COURSE_AVAILABLE",
         "TO EVERYONE",
+        "ADMIN_ALERT"
       ],
       required: true,
     },
@@ -46,6 +47,9 @@ const notificationSchema = new mongoose.Schema(
     metadata: {
       landingScreen: String,
       imageUrl: String,
+      orderId: String,
+      amount: mongoose.Schema.Types.Mixed,
+      userId: mongoose.Schema.Types.ObjectId,
     },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
