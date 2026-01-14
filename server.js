@@ -21,7 +21,7 @@ const rateLimit = require("express-rate-limit");
 const path = require("path");
 const http = require("http");
 const socketIO = require("socket.io");
-const orderRoutes = require("./routes/bookOrder.route");
+// const orderRoutes = require("./routes/bookOrder.route");
 
 const allowedOrigins = [
   //  LOCAL DEVELOPMENT - All common ports and protocols
@@ -41,7 +41,7 @@ const allowedOrigins = [
   "https://43.205.125.7",
   "https://52.66.125.129",
   "https://akj-backend.onrender.com",
-  
+
   // added by Himanshu
   "http://172.31.44.181", // New Users Frontend
   "http://172.31.35.192", // New Admin Frontend
@@ -52,7 +52,7 @@ const allowedOrigins = [
   "http://13.201.132.140",
   "https://3.111.34.85",
   "https://13.201.132.140",
-  
+
   // 🚀 FIX: Add production frontend URLs
   "http://3.110.88.52", // User Frontend (Production)
   "http://13.203.104.199", // Admin Frontend (Production)
@@ -74,27 +74,27 @@ const io = socketIO(server, {
       return callback(null, true);
     },
     methods: ["GET", "POST"],
-    credentials: true
+    credentials: true,
   },
   // 🚀 PERFORMANCE OPTIMIZATIONS
-  pingTimeout: 60000,           // 60 seconds (increased from default 20s)
-  pingInterval: 25000,          // 25 seconds (default)
-  upgradeTimeout: 30000,        // 30 seconds for upgrade timeout
-  maxHttpBufferSize: 1e6,       // 1MB limit for message size
-  allowEIO3: true,              // Allow Engine.IO v3 clients
+  pingTimeout: 60000, // 60 seconds (increased from default 20s)
+  pingInterval: 25000, // 25 seconds (default)
+  upgradeTimeout: 30000, // 30 seconds for upgrade timeout
+  maxHttpBufferSize: 1e6, // 1MB limit for message size
+  allowEIO3: true, // Allow Engine.IO v3 clients
   // 🚀 CONNECTION MANAGEMENT
-  maxConnections: 5000,         // Maximum concurrent connections
+  maxConnections: 5000, // Maximum concurrent connections
   // 🚀 COMPRESSION & MEMORY
-  compression: true,            // Enable compression for messages
+  compression: true, // Enable compression for messages
   cleanupEmptyChildNamespaces: true, // Memory optimization
   // 🚀 TRANSPORT OPTIMIZATION
-  transports: ['websocket', 'polling'], // Prefer websocket
+  transports: ["websocket", "polling"], // Prefer websocket
   allowUpgrades: true,
   perMessageDeflate: {
-    threshold: 1024,            // Only compress messages > 1KB
-    concurrencyLimit: 10,       // Limit concurrent compressions
-    memLevel: 7,                // Memory usage level
-  }
+    threshold: 1024, // Only compress messages > 1KB
+    concurrencyLimit: 10, // Limit concurrent compressions
+    memLevel: 7, // Memory usage level
+  },
 });
 const {
   startCourseExpiryCron,
@@ -105,32 +105,34 @@ const { logger, apiLogger } = require("./utils/logger");
 const { performanceMonitor } = require("./middlewares/performanceMonitor");
 
 // 🚀 SECURITY: Add security headers for production with image embedding support
-app.use(helmet({
-  contentSecurityPolicy: false, // Disable if causes issues with frontend
-  crossOriginEmbedderPolicy: false, // Allow embedding cross-origin resources
-  crossOriginResourcePolicy: { policy: "cross-origin" } // Allow cross-origin resource sharing
-}));
+app.use(
+  helmet({
+    contentSecurityPolicy: false, // Disable if causes issues with frontend
+    crossOriginEmbedderPolicy: false, // Allow embedding cross-origin resources
+    crossOriginResourcePolicy: { policy: "cross-origin" }, // Allow cross-origin resource sharing
+  })
+);
 
 // 🏥 HEALTH CHECK ENDPOINT for Docker and monitoring
-app.get('/health', (req, res) => {
+app.get("/health", (req, res) => {
   const healthCheck = {
     uptime: process.uptime(),
-    message: 'OK',
+    message: "OK",
     timestamp: new Date().toISOString(),
-    status: 'healthy',
-    version: process.env.npm_package_version || '1.0.0',
-    environment: process.env.NODE_ENV || 'development',
+    status: "healthy",
+    version: process.env.npm_package_version || "1.0.0",
+    environment: process.env.NODE_ENV || "development",
     memory: {
-      used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + ' MB',
-      total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024) + ' MB'
-    }
+      used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + " MB",
+      total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024) + " MB",
+    },
   };
 
   try {
     res.status(200).json(healthCheck);
   } catch (error) {
     healthCheck.message = error.message;
-    healthCheck.status = 'error';
+    healthCheck.status = "error";
     res.status(503).json(healthCheck);
   }
 });
@@ -138,30 +140,35 @@ app.get('/health', (req, res) => {
 // 🚀 RATE LIMITING: Protect against abuse and DoS attacks
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === 'production' ? 1000 : 10000, // Higher limit for development
-  message: 'Too many requests from this IP, please try again later.',
+  max: process.env.NODE_ENV === "production" ? 1000 : 10000, // Higher limit for development
+  message: "Too many requests from this IP, please try again later.",
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => {
     // Skip rate limiting for health checks and in development mode
-    const isDevelopment = process.env.NODE_ENV !== 'production';
-    const isHealthCheck = req.path === '/health' || req.path === '/';
-    const isLocalhost = req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1';
+    const isDevelopment = process.env.NODE_ENV !== "production";
+    const isHealthCheck = req.path === "/health" || req.path === "/";
+    const isLocalhost =
+      req.ip === "127.0.0.1" ||
+      req.ip === "::1" ||
+      req.ip === "::ffff:127.0.0.1";
 
     return isHealthCheck || (isDevelopment && isLocalhost);
-  }
+  },
 });
-app.use('/api/', limiter);
+app.use("/api/", limiter);
 
 // 🚀 OPTIMIZED COMPRESSION: Better balance between compression and CPU
-app.use(compression({
-  level: 6,           // Balance between compression ratio and CPU usage
-  threshold: 1000,    // Only compress files larger than 1KB
-  filter: (req, res) => {
-    if (req.headers['x-no-compression']) return false;
-    return compression.filter(req, res);
-  }
-}));
+app.use(
+  compression({
+    level: 6, // Balance between compression ratio and CPU usage
+    threshold: 1000, // Only compress files larger than 1KB
+    filter: (req, res) => {
+      if (req.headers["x-no-compression"]) return false;
+      return compression.filter(req, res);
+    },
+  })
+);
 
 // Add API logging middleware
 app.use(apiLogger);
@@ -175,26 +182,35 @@ app.use(bodyParser.urlencoded({ limit: "1gb", extended: true })); // Increased f
 
 // 🚀 PERFORMANCE: Keep-alive connections for better HTTP performance
 app.use((req, res, next) => {
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('Keep-Alive', 'timeout=5, max=1000');
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("Keep-Alive", "timeout=5, max=1000");
   next();
 });
 
 // app.use(express.raw({ type: '/', limit: '10mb' }));
 
-app.use(cors({
-  origin: ["https://akj-user-web.vercel.app",
-    "https://akj-admin-web.vercel.app",
-    "https://akj-backend.onrender.com",
-    "http://localhost:3000",
-    "http://localhost:3001",// 🚀 FIX: Add production frontend URLs
-    "http://13.203.104.199", // Admin Frontend (Production HTTP)],
-  "http://3.110.88.52"], // User Frontend (Production HTTP)],
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "Cache-Control", "Pragma"],
-  credentials: true,
-  optionsSuccessStatus: 204
-}));
+app.use(
+  cors({
+    origin: [
+      "https://akj-user-web.vercel.app",
+      "https://akj-admin-web.vercel.app",
+      "https://akj-backend.onrender.com",
+      "http://localhost:3000",
+      "http://localhost:3001", // 🚀 FIX: Add production frontend URLs
+      "http://13.203.104.199", // Admin Frontend (Production HTTP)],
+      "http://3.110.88.52",
+    ], // User Frontend (Production HTTP)],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "Cache-Control",
+      "Pragma",
+    ],
+    credentials: true,
+    optionsSuccessStatus: 204,
+  })
+);
 
 // Redundant CORS middleware removed - using simplified CORS configuration above
 
@@ -221,13 +237,13 @@ app.get("/api/v1/performance/metrics", (req, res) => {
     res.json({
       success: true,
       data: metrics,
-      message: "Performance metrics retrieved successfully"
+      message: "Performance metrics retrieved successfully",
     });
   } catch (error) {
-    console.error('Error getting performance metrics:', error);
+    console.error("Error getting performance metrics:", error);
     res.status(500).json({
       success: false,
-      message: "Failed to retrieve performance metrics"
+      message: "Failed to retrieve performance metrics",
     });
   }
 });
@@ -240,15 +256,16 @@ app.get("/api/v1/health", (req, res) => {
     uptime: Math.round(process.uptime()),
     memory: {
       used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
-      total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024)
+      total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
     },
     database: {
-      status: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+      status:
+        mongoose.connection.readyState === 1 ? "connected" : "disconnected",
       readyState: mongoose.connection.readyState,
       host: mongoose.connection.host || "unknown",
-      name: mongoose.connection.name || "unknown"
+      name: mongoose.connection.name || "unknown",
     },
-    connectedUsers: connectedUsers || 0
+    connectedUsers: connectedUsers || 0,
   };
 
   res.json(health);
@@ -260,7 +277,7 @@ app.get("/api/v1/health", (req, res) => {
 mongoose.Promise = global.Promise;
 mongoose.set("strictQuery", true);
 // 🚀 MONGOOSE OPTIMIZATIONS: Disable buffering for better error handling
-mongoose.set('bufferCommands', false);
+mongoose.set("bufferCommands", false);
 
 // MongoDB connection options optimized for 2000+ concurrent users with improved timeout handling
 const mongooseOptions = {
@@ -277,37 +294,43 @@ const mongooseOptions = {
 };
 
 // 🔧 FIX: Add connection event listeners for better monitoring
-mongoose.connection.on('connected', () => {
-  console.log('✅ MongoDB connected successfully');
+mongoose.connection.on("connected", () => {
+  console.log("✅ MongoDB connected successfully");
 });
 
-mongoose.connection.on('error', (err) => {
-  console.error('❌ MongoDB connection error:', err);
+mongoose.connection.on("error", (err) => {
+  console.error("❌ MongoDB connection error:", err);
 });
 
-mongoose.connection.on('disconnected', () => {
-  console.log('⚠️ MongoDB disconnected');
+mongoose.connection.on("disconnected", () => {
+  console.log("⚠️ MongoDB disconnected");
 });
 
-mongoose.connection.on('reconnected', () => {
-  console.log('🔄 MongoDB reconnected');
+mongoose.connection.on("reconnected", () => {
+  console.log("🔄 MongoDB reconnected");
 });
 
 // 🔧 FIX: Handle process termination gracefully
-process.on('SIGINT', async () => {
+process.on("SIGINT", async () => {
   try {
     await mongoose.connection.close();
-    console.log('🛑 MongoDB connection closed through app termination');
+    console.log("🛑 MongoDB connection closed through app termination");
     process.exit(0);
   } catch (error) {
-    console.error('❌ Error closing MongoDB connection:', error);
+    console.error("❌ Error closing MongoDB connection:", error);
     process.exit(1);
   }
 });
 
 // Connect to MongoDB with improved error handling and reconnection logic
 console.log("🔌 Attempting MongoDB connection...");
-console.log(`🔗 Database URL: ${process.env.DB_URL ? process.env.DB_URL.replace(/\/\/.*@/, '//***:***@') : 'NOT SET'}`);
+console.log(
+  `🔗 Database URL: ${
+    process.env.DB_URL
+      ? process.env.DB_URL.replace(/\/\/.*@/, "//***:***@")
+      : "NOT SET"
+  }`
+);
 
 mongoose
   .connect(process.env.DB_URL, mongooseOptions)
@@ -382,7 +405,7 @@ mongoose
     require("./routes/faq.route")(app);
     console.log("🎫 Loading coupon routes...");
     require("./routes/coupon.route")(app);
-    
+
     console.log("📞 Loading enquiry routes...");
     require("./routes/enquiry.route")(app);
     console.log("🏆 Loading achiever routes...");
@@ -393,7 +416,7 @@ mongoose
     require("./routes/notification.route")(app);
     console.log("🎥 Loading live class routes...");
     require("./routes/liveClassRoutes.route")(app);
-    require("./routes/bookOrder.route")(app);
+    // require("./routes/bookOrder.route")(app);
     require("./routes/course.route")(app);
     require("./routes/questionRoutes")(app);
     require("./routes/quizRoutes")(app);
@@ -403,23 +426,23 @@ mongoose
     require("./routes/importantLink.route")(app);
 
     // 🔧 TEMPORARY FIX: Add important links route directly for debugging
-    const ImportantLink = require('./models/importantLinksModel');
-    app.get('/api/v1/admin/importantLinks', async (req, res) => {
+    const ImportantLink = require("./models/importantLinksModel");
+    app.get("/api/v1/admin/importantLinks", async (req, res) => {
       try {
-        console.log('🔍 Direct route: Fetching important links...');
+        console.log("🔍 Direct route: Fetching important links...");
         const links = await ImportantLink.find().maxTimeMS(5000);
         console.log(`✅ Direct route: Found ${links.length} links`);
         res.status(200).json({
           status: 200,
           message: "Links fetched successfully",
-          links: links
+          links: links,
         });
       } catch (error) {
-        console.error('❌ Direct route error:', error);
+        console.error("❌ Direct route error:", error);
         res.status(500).json({
           status: 500,
-          message: 'Failed to fetch links',
-          error: error.message
+          message: "Failed to fetch links",
+          error: error.message,
         });
       }
     });
@@ -435,23 +458,27 @@ mongoose
     require("./routes/authEnhanced.route")(app);
     // Test routes for development and debugging
     require("./routes/testRoutes.route")(app);
-    console.log('✅ All API routes loaded successfully');
+    console.log("✅ All API routes loaded successfully");
 
     // 🗂️ Initialize Master Folder System AFTER MongoDB connection
     // Wait a bit more to ensure connection is fully ready
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise((resolve) => setTimeout(resolve, 1000));
 
     // Verify connection is ready
     if (mongoose.connection.readyState === 1) {
       try {
-        const { initializeMasterFolderSystem } = require('./services/masterFolderService');
+        const {
+          initializeMasterFolderSystem,
+        } = require("./services/masterFolderService");
         await initializeMasterFolderSystem();
-        console.log('🗂️ Master Folder System initialized successfully');
+        console.log("🗂️ Master Folder System initialized successfully");
       } catch (error) {
-        console.error('❌ Failed to initialize Master Folder System:', error);
+        console.error("❌ Failed to initialize Master Folder System:", error);
       }
     } else {
-      console.error('❌ MongoDB connection not ready for Master Folder initialization');
+      console.error(
+        "❌ MongoDB connection not ready for Master Folder initialization"
+      );
     }
   })
   .catch((error) => {
@@ -460,7 +487,7 @@ mongoose
       name: error.name,
       message: error.message,
       code: error.code,
-      codeName: error.codeName
+      codeName: error.codeName,
     });
 
     // 🔧 FIX: Attempt to reconnect after a delay
@@ -485,22 +512,30 @@ const PORT = process.env.PORT || 8890; // 🚀 FIX: Match frontend configuration
 let connectedUsers = 0;
 let maxConcurrentUsers = 0;
 
-io.on('connection', (socket) => {
+io.on("connection", (socket) => {
   connectedUsers++;
   maxConcurrentUsers = Math.max(maxConcurrentUsers, connectedUsers);
 
   // 🚀 UPDATE PERFORMANCE MONITOR
   performanceMonitor.updateSocketMetrics(connectedUsers);
 
-  console.log(`👤 User connected. Current: ${connectedUsers}, Peak: ${maxConcurrentUsers}`);
+  console.log(
+    `👤 User connected. Current: ${connectedUsers}, Peak: ${maxConcurrentUsers}`
+  );
 
   // Monitor memory usage when user count is high
   if (connectedUsers > 1000) {
     const memUsage = process.memoryUsage();
-    console.log(`⚠️ HIGH LOAD: ${connectedUsers} users, Memory: ${(memUsage.heapUsed / 1024 / 1024).toFixed(2)}MB`);
+    console.log(
+      `⚠️ HIGH LOAD: ${connectedUsers} users, Memory: ${(
+        memUsage.heapUsed /
+        1024 /
+        1024
+      ).toFixed(2)}MB`
+    );
   }
 
-  socket.on('disconnect', () => {
+  socket.on("disconnect", () => {
     connectedUsers--;
     // 🚀 UPDATE PERFORMANCE MONITOR
     performanceMonitor.updateSocketMetrics(connectedUsers);
@@ -508,8 +543,8 @@ io.on('connection', (socket) => {
   });
 
   // Add error handling
-  socket.on('error', (error) => {
-    console.error('Socket error:', error);
+  socket.on("error", (error) => {
+    console.error("Socket error:", error);
   });
 });
 
@@ -518,11 +553,20 @@ setInterval(() => {
   const activeSockets = io.sockets.sockets.size;
   const memUsage = process.memoryUsage();
 
-  console.log(`📊 Socket Stats: Active: ${activeSockets}, Connected: ${connectedUsers}, Memory: ${(memUsage.heapUsed / 1024 / 1024).toFixed(2)}MB`);
+  // console.log(
+  //   `📊 Socket Stats: Active: ${activeSockets}, Connected: ${connectedUsers}, Memory: ${(
+  //     memUsage.heapUsed /
+  //     1024 /
+  //     1024
+  //   ).toFixed(2)}MB`
+  // );
 
   // Alert if memory usage is high
-  if (memUsage.heapUsed > 500 * 1024 * 1024) { // 500MB
-    console.warn(`🚨 HIGH MEMORY USAGE: ${(memUsage.heapUsed / 1024 / 1024).toFixed(2)}MB`);
+  if (memUsage.heapUsed > 500 * 1024 * 1024) {
+    // 500MB
+    // console.warn(
+    //   `🚨 HIGH MEMORY USAGE: ${(memUsage.heapUsed / 1024 / 1024).toFixed(2)}MB`
+    // );
   }
 }, 30000);
 
@@ -538,15 +582,19 @@ server.listen(PORT, () => {
   console.log(`🌐 Server URL: http://localhost:${PORT}`);
   console.log(`📡 Port: ${PORT}`);
   console.log(`🕐 Started at: ${new Date().toISOString()}`);
-  console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`💾 Memory Usage: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`);
+  console.log(`🔧 Environment: ${process.env.NODE_ENV || "development"}`);
+  console.log(
+    `💾 Memory Usage: ${Math.round(
+      process.memoryUsage().heapUsed / 1024 / 1024
+    )}MB`
+  );
   console.log("🚀 ================================");
   console.log("✅ READY TO ACCEPT CONNECTIONS");
   console.log("🚀 ================================");
 });
 
 // Add global error handlers
-process.on('uncaughtException', (error) => {
+process.on("uncaughtException", (error) => {
   console.error("💥 ================================");
   console.error("💥 UNCAUGHT EXCEPTION");
   console.error("💥 ================================");
@@ -556,7 +604,7 @@ process.on('uncaughtException', (error) => {
   process.exit(1);
 });
 
-process.on('unhandledRejection', (reason, promise) => {
+process.on("unhandledRejection", (reason, promise) => {
   console.error("💥 ================================");
   console.error("💥 UNHANDLED PROMISE REJECTION");
   console.error("💥 ================================");
@@ -574,22 +622,22 @@ console.log("✅ Course expiry cron started");
 
 // 🔥 NEW: Start course access control jobs
 scheduleCourseAccessCheck();
-console.log('✅ Course access control system initialized');
+console.log("✅ Course access control system initialized");
 console.log("🔄 All background services started successfully");
 
 // 🗂️ Master Folder System initialization moved to MongoDB connection handler
 
 // Graceful shutdown handling
-process.on('SIGTERM', () => {
-  console.log('🛑 Received SIGTERM signal, shutting down gracefully...');
-  const { cancelScheduledJobs } = require('./jobs/courseAccessJob');
+process.on("SIGTERM", () => {
+  console.log("🛑 Received SIGTERM signal, shutting down gracefully...");
+  const { cancelScheduledJobs } = require("./jobs/courseAccessJob");
   cancelScheduledJobs();
   process.exit(0);
 });
 
-process.on('SIGINT', () => {
-  console.log('🛑 Received SIGINT signal, shutting down gracefully...');
-  const { cancelScheduledJobs } = require('./jobs/courseAccessJob');
+process.on("SIGINT", () => {
+  console.log("🛑 Received SIGINT signal, shutting down gracefully...");
+  const { cancelScheduledJobs } = require("./jobs/courseAccessJob");
   cancelScheduledJobs();
   process.exit(0);
 });

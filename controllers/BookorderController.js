@@ -1,4 +1,5 @@
 const BookOrder = require("../models/bookorderModel");
+const User = require("../models/userModel");
 
 const Razorpay = require("razorpay");
 const crypto = require("crypto");
@@ -12,13 +13,14 @@ const generateReceipt = () => `book_rcpt_${Date.now()}`;
 const generateTrackingNumber = () =>
   `BOOK-TN-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-
 exports.createBookOrder = async (req, res) => {
   try {
     const { amount, currency } = req.body;
 
     if (!amount || !currency) {
-      return res.status(400).json({ success: false, message: "Amount and currency are required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Amount and currency are required" });
     }
 
     const order = await razorpay.orders.create({
@@ -28,7 +30,9 @@ exports.createBookOrder = async (req, res) => {
     });
 
     if (!order || !order.id) {
-      return res.status(500).json({ success: false, message: "Razorpay order creation failed" });
+      return res
+        .status(500)
+        .json({ success: false, message: "Razorpay order creation failed" });
     }
 
     res.status(200).json({ success: true, data: order });
@@ -40,14 +44,22 @@ exports.createBookOrder = async (req, res) => {
 
 exports.placeOrder = async (req, res) => {
   try {
-    const {
-      transactionId,
-      orderId,
-      user,
-      book,
-      quantity,
-      totalAmount
-    } = req.body;
+    const { transactionId, orderId, user, book, quantity, totalAmount } =
+      req.body;
+
+    console.log(
+      "🔍 Order data received over the placeOrder api controller in bookorderController.js:",
+      req.body
+    );
+
+    // Get authenticated user from middleware
+    const authenticatedUser = req.user;
+    if (!authenticatedUser) {
+      return res.status(401).json({
+        success: false,
+        message: "User not authenticated",
+      });
+    }
 
     // ✅ Validate required fields
     if (
@@ -74,10 +86,18 @@ exports.placeOrder = async (req, res) => {
       });
     }
 
+    // Normalize user data: use authenticated user's phone to ensure consistency
+    // This fixes the phone format mismatch issue (e.g., '918791270662' vs '8791270662')
+    const normalizedUser = {
+      ...user,
+      phone: authenticatedUser.phone, // Use phone from authenticated user (with country code)
+    };
+
     const newOrder = new BookOrder({
       transactionId,
-      orderId, // ✅ this matches schema
-      user,
+      orderId,
+      userId: authenticatedUser._id, // Link order to authenticated user
+      user: normalizedUser, // Use normalized user data with correct phone
       book,
       quantity,
       totalAmount,
@@ -95,11 +115,10 @@ exports.placeOrder = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to save order",
+      error: err.message,
     });
   }
 };
-
-
 
 // exports.placeOrder = async (req, res) => {
 //   try {
@@ -199,16 +218,76 @@ exports.placeOrder = async (req, res) => {
 // Get all orders
 exports.getAllOrders = async (req, res) => {
   try {
-    const orders = await BookOrder.find();
+    const orders = await BookOrder.find().sort({ createdAt: -1 });
     res.status(200).json({
       success: true,
+      message: "Orders fetched successfully.",
       data: orders,
+      count: orders.length,
     });
   } catch (err) {
     console.error("Error fetching orders:", err);
     res.status(500).json({
       success: false,
       message: "Failed to fetch orders.",
+      error: err.message,
+    });
+  }
+};
+
+// Get orders for the authenticated user
+exports.getOrdersForUser = async (req, res) => {
+  try {
+    // Get user from auth middleware (set by authJwt.verifyToken)
+    const user = req.user;
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        message: "User not identified from token",
+      });
+    }
+
+    const userId = user._id || user.id;
+    const userPhone = user.phone;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID not found in token",
+      });
+    }
+
+    // Primary query: by userId (most reliable, works for new orders)
+    // Fallback query: by phone (for backward compatibility with old orders)
+    let orders = await BookOrder.find({ userId }).sort({ createdAt: -1 });
+
+    // If no orders found by userId, try phone as fallback (for legacy orders)
+    if (orders.length === 0 && userPhone) {
+      orders = await BookOrder.find({ "user.phone": userPhone }).sort({
+        createdAt: -1,
+      });
+    }
+
+    if (!orders || orders.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No orders found for this user",
+        data: [],
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Orders fetched successfully",
+      data: orders,
+      count: orders.length,
+    });
+  } catch (err) {
+    console.error("Error fetching user orders:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch user orders.",
       error: err.message,
     });
   }
@@ -270,6 +349,83 @@ exports.updateOrderStatus = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to update order.",
+      error: err.message,
+    });
+  }
+};
+
+// Get orders by user email
+exports.getOrdersByUser = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID (email) is required.",
+      });
+    }
+
+    // Query orders by user email
+    const orders = await BookOrder.find({ "user.email": userId }).sort({
+      createdAt: -1,
+    });
+
+    if (!orders || orders.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No orders found for this user.",
+        data: [],
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Orders fetched successfully.",
+      data: orders,
+      count: orders.length,
+    });
+  } catch (err) {
+    console.error("Error fetching user orders:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch user orders.",
+      error: err.message,
+    });
+  }
+};
+
+// Delete an order by orderId
+exports.deleteOrder = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+
+    if (!orderId) {
+      return res.status(400).json({
+        success: false,
+        message: "Order ID is required.",
+      });
+    }
+
+    const deletedOrder = await BookOrder.findOneAndDelete({ orderId });
+
+    if (!deletedOrder) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found.",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Order deleted successfully.",
+      data: deletedOrder,
+    });
+  } catch (err) {
+    console.error("Error deleting order:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete order.",
       error: err.message,
     });
   }

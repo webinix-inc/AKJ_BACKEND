@@ -3,6 +3,11 @@ const mongoose = require("mongoose");
 const orderSchema = new mongoose.Schema({
   transactionId: { type: String, required: true },
   orderId: { type: String, required: true, unique: true },
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+    required: true,
+  },
   user: {
     firstName: { type: String, required: true },
     lastName: { type: String, required: true },
@@ -26,4 +31,6 @@ const orderSchema = new mongoose.Schema({
 });
 
 // Export the model
-module.exports = mongoose.models.BookPaymentOrder || mongoose.model("BookPaymentOrder", orderSchema);
+module.exports =
+  mongoose.models.BookPaymentOrder ||
+  mongoose.model("BookPaymentOrder", orderSchema);

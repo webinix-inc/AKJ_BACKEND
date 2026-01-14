@@ -10,20 +10,20 @@ const User = require("../models/userModel");
 // ============================================================================
 
 // Admin credentials - MODIFY THESE VALUES
-// const ADMIN_CREDENTIALS = {
-//   firstName: "AKJ",
-//   lastName: "Classes",
-//   email: "akjacademy@admin.com", // Change this to your email
-//   phone: "9823456332", // Change this to your phone (10 digits)
-//   password: "AKJAcademy@22", // Change this to your desired password
-// };
 const ADMIN_CREDENTIALS = {
   firstName: "AKJ",
   lastName: "Classes",
-  email: "admin@ex.com", // Change this to your email
+  email: "akjacademy@admin.com", // Change this to your email
   phone: "9823456332", // Change this to your phone (10 digits)
-  password: "123456", // Change this to your desired password
+  password: "AKJAcademy@22", // Change this to your desired password
 };
+// const ADMIN_CREDENTIALS = {
+//   firstName: "AKJ",
+//   lastName: "Classes",
+//   email: "admin@ex.com", // Change this to your email
+//   phone: "9823456332", // Change this to your phone (10 digits)
+//   password: "AKJ", // Change this to your desired password
+// };
 
 // Connect to MongoDB
 const connectDB = async () => {

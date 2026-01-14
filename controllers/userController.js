@@ -31,6 +31,7 @@ const { addUser, updateUser } = require("../configs/merithub.config");
 // const nodemailer = require('nodemailer');
 const { redisClient } = require("../configs/redis");
 const { logger } = require("../utils/logger");
+const { invalidateCache } = require("../middlewares/cacheMiddleware");
 
 const reffralCode = async () => {
   var digits = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -42,10 +43,16 @@ const reffralCode = async () => {
 };
 
 // Function to send automatic welcome message when user logs in
-const sendWelcomeMessage = async (userId, userName = "Student", isNewUser = false) => {
+const sendWelcomeMessage = async (
+  userId,
+  userName = "Student",
+  isNewUser = false
+) => {
   try {
     // Find admin user to send welcome message from
-    const adminUser = await User.findOne({ userType: "ADMIN" }).select("_id firstName lastName");
+    const adminUser = await User.findOne({ userType: "ADMIN" }).select(
+      "_id firstName lastName"
+    );
     if (!adminUser) {
       console.log("No admin user found for welcome message");
       return;
@@ -56,12 +63,12 @@ const sendWelcomeMessage = async (userId, userName = "Student", isNewUser = fals
       sender: adminUser._id,
       receiver: userId,
       isBroadcast: false,
-      content: { $regex: /welcome|Welcome/i }
+      content: { $regex: /welcome|Welcome/i },
     });
 
     // Only send welcome message if it doesn't exist
     if (!existingWelcome) {
-      const welcomeContent = isNewUser 
+      const welcomeContent = isNewUser
         ? `🎉 Welcome to AKJ Academy, ${userName}! 
 
 We're excited to have you join our learning community! Here's what you can do:
@@ -84,8 +91,8 @@ Need any help with your courses or have questions? Just message us here!
 Happy learning! 🚀`;
 
       const welcomeMessage = new Message({
-        sender: adminUser._id,  // FROM admin
-        receiver: userId,      // TO user
+        sender: adminUser._id, // FROM admin
+        receiver: userId, // TO user
         content: welcomeContent,
         attachments: [],
         isRead: false,
@@ -95,8 +102,10 @@ Happy learning! 🚀`;
       });
 
       await welcomeMessage.save();
-      console.log(`✅ Welcome message created: Admin ${adminUser._id} → User ${userId}`);
-      
+      console.log(
+        `✅ Welcome message created: Admin ${adminUser._id} → User ${userId}`
+      );
+
       // Emit socket event for real-time delivery if socket is available
       if (global.io) {
         global.io.to(userId.toString()).emit("message", {
@@ -106,7 +115,7 @@ Happy learning! 🚀`;
           receiver: userId,
           createdAt: welcomeMessage.createdAt,
           attachments: [],
-          isBroadcast: false
+          isBroadcast: false,
         });
         console.log(`🔔 Welcome message emitted to user ${userId}`);
       }
@@ -178,12 +187,7 @@ const generateOTP = () => {
 
 exports.signup = async (req, res) => {
   try {
-    const {
-      firstName,
-      lastName,
-      phone,
-      email,       
-    } = req.body;
+    const { firstName, lastName, phone, email } = req.body;
 
     if (!phone || phone.trim() === "") {
       return res
@@ -226,7 +230,7 @@ exports.signup = async (req, res) => {
       logger.userActivity(
         user._id,
         `${user.firstName} ${user.lastName}`,
-        'REGISTRATION_ATTEMPT',
+        "REGISTRATION_ATTEMPT",
         `Failed - User already exists, Email: ${email}, Phone: ${phone}, IP: ${req.ip}`
       );
       return res
@@ -250,7 +254,7 @@ exports.signup = async (req, res) => {
     logger.userActivity(
       newUser._id,
       `${newUser.firstName} ${newUser.lastName}`,
-      'REGISTRATION',
+      "REGISTRATION",
       `Email: ${newUser.email}, Phone: ${newUser.phone}, IP: ${req.ip}`
     );
 
@@ -261,7 +265,11 @@ exports.signup = async (req, res) => {
     });
   } catch (error) {
     // 🚀 LOG USER REGISTRATION ERROR
-    logger.error(error, 'USER_REGISTRATION', `Email: ${email}, Phone: ${phone}`);
+    logger.error(
+      error,
+      "USER_REGISTRATION",
+      `Email: ${email}, Phone: ${phone}`
+    );
     return res
       .status(500)
       .json({ status: 500, message: "Error creating user", error });
@@ -352,7 +360,7 @@ exports.socialLogin = async (req, res) => {
     });
     if (user) {
       // Existing user - no welcome message needed (already sent during registration)
-      
+
       jwt.sign(
         { id: user._id, userType: user.userType },
         authConfig.secret,
@@ -381,8 +389,12 @@ exports.socialLogin = async (req, res) => {
       });
       if (newUser) {
         // New user - send welcome message
-        await sendWelcomeMessage(newUser._id, newUser.firstName || firstName, true);
-        
+        await sendWelcomeMessage(
+          newUser._id,
+          newUser.firstName || firstName,
+          true
+        );
+
         jwt.sign({ id: newUser._id }, authConfig.secret, (err, token) => {
           if (err) {
             return res.status(401).send("Invalid Credentials");
@@ -400,7 +412,9 @@ exports.socialLogin = async (req, res) => {
     }
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ status: 500, message: "Internal server error" });
+    return res
+      .status(500)
+      .json({ status: 500, message: "Internal server error" });
   }
 };
 
@@ -481,13 +495,15 @@ exports.logoutUser = async (req, res) => {
         ? { "activeTokens.webToken": null }
         : { "activeTokens.mobileToken": null };
 
-    const user = await User.findOneAndUpdate({ _id: userId }, updateQuery, { new: true });
+    const user = await User.findOneAndUpdate({ _id: userId }, updateQuery, {
+      new: true,
+    });
 
     // 🚀 LOG USER LOGOUT SUCCESS
     logger.userActivity(
       userId,
-      user.firstName || user.email || user.phone || 'Unknown',
-      'LOGOUT',
+      user.firstName || user.email || user.phone || "Unknown",
+      "LOGOUT",
       `Device: ${deviceType}, IP: ${req.ip}`
     );
 
@@ -497,7 +513,11 @@ exports.logoutUser = async (req, res) => {
     });
   } catch (error) {
     // 🚀 LOG USER LOGOUT ERROR
-    logger.error(error, 'USER_LOGOUT', `UserID: ${userId}, Device: ${deviceType}`);
+    logger.error(
+      error,
+      "USER_LOGOUT",
+      `UserID: ${userId}, Device: ${deviceType}`
+    );
     return res.status(500).json({
       status: 500,
       message: "Server error",
@@ -567,7 +587,9 @@ exports.signupWithPhone = async (req, res) => {
 
     // Prepare user details for MeritHub
     // Prepare user details for MeritHub API (following MeritHub specification)
-    const userFullName = `${newUser.firstName || 'Student'} ${newUser.lastName || ''}`.trim();
+    const userFullName = `${newUser.firstName || "Student"} ${
+      newUser.lastName || ""
+    }`.trim();
     const userDetailsForMeritHub = {
       name: userFullName || `Student_${newUser._id}`, // Use actual user name
       title: "Student", // Meaningful title for students
@@ -685,15 +707,15 @@ exports.verifyOtp = async (req, res) => {
         isValidOTP = true;
         // Clean up database OTP
         await User.findByIdAndUpdate(user._id, {
-          $unset: { otp: 1, otpExpiration: 1 }
+          $unset: { otp: 1, otpExpiration: 1 },
         });
       }
     }
 
     if (!isValidOTP) {
-      return res.status(400).json({ 
-        status: 400, 
-        message: "Invalid or expired OTP" 
+      return res.status(400).json({
+        status: 400,
+        message: "Invalid or expired OTP",
       });
     }
 
@@ -719,16 +741,16 @@ exports.verifyOtp = async (req, res) => {
       completeProfile: updated.completeProfile,
     };
 
-    return res.status(200).send({ 
-      status: 200, 
-      message: "logged in successfully", 
-      data: obj 
+    return res.status(200).send({
+      status: 200,
+      message: "logged in successfully",
+      data: obj,
     });
   } catch (err) {
     console.log(err.message);
-    return res.status(500).send({ 
-      status: 500, 
-      error: "internal server error: " + err.message 
+    return res.status(500).send({
+      status: 500,
+      error: "internal server error: " + err.message,
     });
   }
 };
@@ -790,10 +812,10 @@ exports.login = async (req, res) => {
 
     // Log user login activity
     logger.userActivity(
-      user._id, 
-      user.firstName || user.email || user.phone, 
-      'LOGIN', 
-      `Login method: ${otp ? 'OTP' : 'PASSWORD'}, IP: ${req.ip}`
+      user._id,
+      user.firstName || user.email || user.phone,
+      "LOGIN",
+      `Login method: ${otp ? "OTP" : "PASSWORD"}, IP: ${req.ip}`
     );
 
     // last Login can be used
@@ -816,7 +838,7 @@ exports.login = async (req, res) => {
       data: responseObj,
     });
   } catch (err) {
-    logger.error(err, 'USER_LOGIN', identifier);
+    logger.error(err, "USER_LOGIN", identifier);
     return res.status(500).json({
       message: "Internal server error",
       error: err.message,
@@ -838,48 +860,75 @@ exports.getProfile = async (req, res) => {
     }
 
     // 🔧 FIX: Use individual user links from User.liveClasses array (NOT LiveClass collection)
-    console.log(`🔍 [PROFILE] Fetching individual live classes for user ${user._id}`);
-    console.log(`✅ [PROFILE] Using User.liveClasses array with individual user links`);
+    console.log(
+      `🔍 [PROFILE] Fetching individual live classes for user ${user._id}`
+    );
+    console.log(
+      `✅ [PROFILE] Using User.liveClasses array with individual user links`
+    );
 
     // Filter out past classes (older than 2 hours) unless they're currently live
     const now = new Date();
-    const activeLiveClasses = (user.liveClasses || []).filter(liveClass => {
+    const activeLiveClasses = (user.liveClasses || []).filter((liveClass) => {
       const startTime = new Date(liveClass.startTime);
       const timeDiff = now - startTime;
       const twoHours = 2 * 60 * 60 * 1000;
-      
+
       // Keep if: not started yet, currently live, or ended less than 2 hours ago
       return timeDiff < twoHours || liveClass.status === "lv";
     });
 
-    console.log(`✅ [PROFILE] Found ${activeLiveClasses.length} active individual live classes for user profile`);
+    console.log(
+      `✅ [PROFILE] Found ${activeLiveClasses.length} active individual live classes for user profile`
+    );
 
-      // 🔍 DEBUG: Log what's in the database for live classes
-      console.log(`🔍 [PROFILE_DEBUG] Active live classes from DB:`, activeLiveClasses.length);
-      activeLiveClasses.forEach((lc, index) => {
-        console.log(`🔍 [PROFILE_DEBUG] Live Class ${index + 1}:`);
-        console.log(`   Title: ${lc.title}`);
-        console.log(`   lc.participantLink: ${lc.participantLink ? 'Available' : 'Missing'}`);
-        console.log(`   lc.liveLink: ${lc.liveLink ? 'Available' : 'Missing'}`);
-        if (lc.participantLink) {
-          console.log(`   participantLink preview: ${lc.participantLink.substring(0, 50)}...`);
-        }
-        if (lc.liveLink) {
-          console.log(`   liveLink preview: ${lc.liveLink.substring(0, 50)}...`);
-        }
-      });
+    // 🔍 DEBUG: Log what's in the database for live classes
+    console.log(
+      `🔍 [PROFILE_DEBUG] Active live classes from DB:`,
+      activeLiveClasses.length
+    );
+    activeLiveClasses.forEach((lc, index) => {
+      console.log(`🔍 [PROFILE_DEBUG] Live Class ${index + 1}:`);
+      console.log(`   Title: ${lc.title}`);
+      console.log(
+        `   lc.participantLink: ${lc.participantLink ? "Available" : "Missing"}`
+      );
+      console.log(`   lc.liveLink: ${lc.liveLink ? "Available" : "Missing"}`);
+      if (lc.participantLink) {
+        console.log(
+          `   participantLink preview: ${lc.participantLink.substring(
+            0,
+            50
+          )}...`
+        );
+      }
+      if (lc.liveLink) {
+        console.log(`   liveLink preview: ${lc.liveLink.substring(0, 50)}...`);
+      }
+    });
 
-      // Create enhanced user object with individual live classes
-      const userWithIndividualLiveClasses = {
-        ...user.toObject(),
-        liveClasses: activeLiveClasses.map(lc => ({
+    // Create enhanced user object with individual live classes
+    const userObject = user.toObject();
+    
+    // 🔧 FIX: Ensure image field is always included in response (even if null/undefined)
+    // Log image status for debugging
+    console.log("📸 [PROFILE] User image status:", {
+      hasImage: !!userObject.image,
+      imageValue: userObject.image || "null/undefined",
+      imageType: typeof userObject.image
+    });
+    
+    const userWithIndividualLiveClasses = {
+      ...userObject,
+      image: userObject.image || null, // Explicitly include image field
+      liveClasses: activeLiveClasses.map((lc) => ({
         _id: lc._id,
         classId: lc.classId,
         title: lc.title,
         startTime: lc.startTime,
         endDate: lc.endDate,
         duration: lc.duration,
-        platform: lc.platform || 'merithub',
+        platform: lc.platform || "merithub",
         status: lc.status,
         // 🔧 FIXED: For students, use participantLink from LiveClass collection
         // This ensures students get participant access, not instructor access
@@ -890,20 +939,28 @@ exports.getProfile = async (req, res) => {
         courseIds: lc.courseIds,
         description: lc.description,
         timeZoneId: lc.timeZoneId,
-        createdAt: lc.createdAt
-      }))
+        createdAt: lc.createdAt,
+      })),
     };
 
-    console.log(`🎯 [PROFILE] Returning ${userWithIndividualLiveClasses.liveClasses.length} live classes with individual user links`);
-    
-    return sendResponse(res, 200, "Profile retrieved successfully", userWithIndividualLiveClasses);
+    console.log(
+      `🎯 [PROFILE] Returning ${userWithIndividualLiveClasses.liveClasses.length} live classes with individual user links`
+    );
+
+    return sendResponse(
+      res,
+      200,
+      "Profile retrieved successfully",
+      userWithIndividualLiveClasses
+    );
   } catch (error) {
-    console.error("❌ [PROFILE] Error fetching profile with individual live classes:", error);
+    console.error(
+      "❌ [PROFILE] Error fetching profile with individual live classes:",
+      error
+    );
     return sendResponse(res, 500, "Server error");
   }
 };
-
-
 
 // Controller to update the current user's profile
 exports.updateProfile = async (req, res) => {
@@ -911,6 +968,22 @@ exports.updateProfile = async (req, res) => {
     const user = await User.findById(req.user._id);
     if (!user) {
       return sendResponse(res, 404, "No data found");
+    }
+
+    // 🔧 FIX: Handle image upload from S3 (multer-s3 provides 'location' or 'key', not 'path')
+    let imageUrl = user.image; // Default to existing image
+    if (req.file) {
+      // multer-s3 provides 'location' (full S3 URL) or 'key' (S3 path)
+      imageUrl = req.file.location || req.file.key || user.image;
+      console.log("📸 [PROFILE_UPDATE] Image uploaded:", {
+        originalName: req.file.originalname,
+        location: req.file.location,
+        key: req.file.key,
+        size: req.file.size,
+        mimetype: req.file.mimetype
+      });
+    } else {
+      console.log("📸 [PROFILE_UPDATE] No image file in request, keeping existing image");
     }
 
     // Create update object dynamically for local database
@@ -925,7 +998,7 @@ exports.updateProfile = async (req, res) => {
       address1: req.body.address1 || user.address1,
       address2: req.body.address2 || user.address2,
       transportation: req.body.transportation || user.transportation,
-      image: req.file?.path || user.image,
+      image: imageUrl, // Use S3 location/key instead of path
       college: req.body.college || user.college,
     };
 
@@ -950,6 +1023,15 @@ exports.updateProfile = async (req, res) => {
     // Respond to the client with success or forward the error if the MeritHub update fails
     if (!merithubUpdate) {
       return sendResponse(res, 500, "Failed to update name on MeritHub");
+    }
+
+    // 🔧 FIX: Invalidate profile cache after successful update
+    try {
+      await invalidateCache("profile:*");
+      console.log("🗑️ [CACHE] User profile cache invalidated after profile update");
+    } catch (cacheError) {
+      // Log cache invalidation error but don't fail the request
+      console.warn("⚠️ [CACHE] Failed to invalidate profile cache:", cacheError.message);
     }
 
     return sendResponse(
@@ -1151,21 +1233,22 @@ exports.updateLocation = async (req, res) => {
 exports.getBanner = async (req, res) => {
   try {
     const Banners = await Banner.find().populate("course");
-    
+
     // TEMPORARY FIX: Use working streaming endpoint until AWS permissions are fixed
-    const processedBanners = Banners.map(banner => {
+    const processedBanners = Banners.map((banner) => {
       const bannerObj = banner.toObject();
-      
+
       // Convert S3 URLs to working streaming endpoint URLs
-      if (bannerObj.image && bannerObj.image.includes('amazonaws.com/')) {
-        const baseURL = process.env.API_BASE_URL || `${req.protocol}://${req.get('host')}`;
+      if (bannerObj.image && bannerObj.image.includes("amazonaws.com/")) {
+        const baseURL =
+          process.env.API_BASE_URL || `${req.protocol}://${req.get("host")}`;
         bannerObj.image = `${baseURL}/api/v1/stream/banner-image/${banner._id}`;
         console.log(`Using streaming URL for banner ${banner._id}`);
       }
-      
+
       return bannerObj;
     });
-    
+
     return res.status(200).json({ status: 200, data: processedBanners });
   } catch (error) {
     console.error(error);
@@ -1187,10 +1270,11 @@ exports.getBannerById = async (req, res) => {
 
     // TEMPORARY FIX: Use working streaming endpoint until AWS permissions are fixed
     const bannerObj = banner.toObject();
-    
+
     // Convert S3 URL to working streaming endpoint URL
-    if (bannerObj.image && bannerObj.image.includes('amazonaws.com/')) {
-      const baseURL = process.env.API_BASE_URL || `${req.protocol}://${req.get('host')}`;
+    if (bannerObj.image && bannerObj.image.includes("amazonaws.com/")) {
+      const baseURL =
+        process.env.API_BASE_URL || `${req.protocol}://${req.get("host")}`;
       bannerObj.image = `${baseURL}/api/v1/stream/banner-image/${banner._id}`;
       console.log(`Using streaming URL for single banner ${banner._id}`);
     }
@@ -1522,45 +1606,51 @@ exports.getAllNotificationsForUser = async (req, res) => {
 exports.sendMessage = async (req, res) => {
   return res.status(410).json({
     status: 410,
-    message: "This endpoint is deprecated. Please use /api/v1/chat/send instead.",
-    redirectTo: "/api/v1/chat/send"
+    message:
+      "This endpoint is deprecated. Please use /api/v1/chat/send instead.",
+    redirectTo: "/api/v1/chat/send",
   });
 };
 // DEPRECATED: Use /api/v1/chat/:requestedUserID instead
 exports.getConversation = async (req, res) => {
   return res.status(410).json({
     status: 410,
-    message: "This endpoint is deprecated. Please use /api/v1/chat/:requestedUserID instead.",
-    redirectTo: "/api/v1/chat/:requestedUserID"
+    message:
+      "This endpoint is deprecated. Please use /api/v1/chat/:requestedUserID instead.",
+    redirectTo: "/api/v1/chat/:requestedUserID",
   });
 };
 // DEPRECATED: Message functionality moved to chatController.js
 exports.updateMessage = async (req, res) => {
   return res.status(410).json({
     status: 410,
-    message: "This endpoint is deprecated. Use chatController for message operations."
+    message:
+      "This endpoint is deprecated. Use chatController for message operations.",
   });
 };
 // DEPRECATED: Message functionality moved to chatController.js
 exports.deleteMessage = async (req, res) => {
   return res.status(410).json({
     status: 410,
-    message: "This endpoint is deprecated. Use chatController for message operations."
+    message:
+      "This endpoint is deprecated. Use chatController for message operations.",
   });
 };
 // DEPRECATED: Use /api/v1/chat/markAsRead/:partnerId instead
 exports.markAsRead = async (req, res) => {
   return res.status(410).json({
     status: 410,
-    message: "This endpoint is deprecated. Use /api/v1/chat/markAsRead/:partnerId instead.",
-    redirectTo: "/api/v1/chat/markAsRead/:partnerId"
+    message:
+      "This endpoint is deprecated. Use /api/v1/chat/markAsRead/:partnerId instead.",
+    redirectTo: "/api/v1/chat/markAsRead/:partnerId",
   });
 };
 // DEPRECATED: Message functionality moved to chatController.js
 exports.getUnreadMessagesCount = async (req, res) => {
   return res.status(410).json({
     status: 410,
-    message: "This endpoint is deprecated. Use chatController for message operations."
+    message:
+      "This endpoint is deprecated. Use chatController for message operations.",
   });
 };
 exports.getAllSchedules = async (req, res) => {
@@ -2217,23 +2307,24 @@ exports.addToCart = async (req, res) => {
           .json({ status: 404, message: "Product not found" });
       }
       item = product;
-      itemType = 'product';
-      itemPrice = product.discountActive ? product.discountPrice : product.originalPrice;
+      itemType = "product";
+      itemPrice = product.discountActive
+        ? product.discountPrice
+        : product.originalPrice;
     } else if (bookId) {
-      const Book = require('../models/Book');
+      const Book = require("../models/Book");
       const book = await Book.findById(bookId);
       if (!book) {
-        return res
-          .status(404)
-          .json({ status: 404, message: "Book not found" });
+        return res.status(404).json({ status: 404, message: "Book not found" });
       }
       item = book;
-      itemType = 'book';
+      itemType = "book";
       itemPrice = book.price;
     } else {
-      return res
-        .status(400)
-        .json({ status: 400, message: "Either productId or bookId is required" });
+      return res.status(400).json({
+        status: 400,
+        message: "Either productId or bookId is required",
+      });
     }
 
     let cart = await Cart.findOne({ user: userId });
@@ -2243,10 +2334,10 @@ exports.addToCart = async (req, res) => {
         quantity,
         price: itemPrice,
         totalAmount: itemPrice * quantity,
-        itemType
+        itemType,
       };
 
-      if (itemType === 'product') {
+      if (itemType === "product") {
         cartItem.product = productId;
         cartItem.vendorId = item.vendorId;
       } else {
@@ -2260,7 +2351,7 @@ exports.addToCart = async (req, res) => {
       });
     } else {
       const existingItemIndex = cart.products.findIndex((cartItem) => {
-        if (itemType === 'product') {
+        if (itemType === "product") {
           return cartItem.product && cartItem.product.toString() === productId;
         } else {
           return cartItem.book && cartItem.book.toString() === bookId;
@@ -2270,16 +2361,17 @@ exports.addToCart = async (req, res) => {
       if (existingItemIndex !== -1) {
         cart.products[existingItemIndex].quantity += quantity;
         cart.products[existingItemIndex].totalAmount =
-          cart.products[existingItemIndex].price * cart.products[existingItemIndex].quantity;
+          cart.products[existingItemIndex].price *
+          cart.products[existingItemIndex].quantity;
       } else {
         const cartItem = {
           quantity,
           price: itemPrice,
           totalAmount: itemPrice * quantity,
-          itemType
+          itemType,
         };
 
-        if (itemType === 'product') {
+        if (itemType === "product") {
           cartItem.product = productId;
           cartItem.vendorId = item.vendorId;
         } else {
@@ -2496,23 +2588,25 @@ exports.updateCartQuantity = async (req, res) => {
           .json({ status: 404, message: "Product not found" });
       }
       item = product;
-      itemType = 'product';
-      itemPrice = product.discountActive === "true" ? product.discountPrice : product.originalPrice;
+      itemType = "product";
+      itemPrice =
+        product.discountActive === "true"
+          ? product.discountPrice
+          : product.originalPrice;
     } else if (bookId) {
-      const Book = require('../models/Book');
+      const Book = require("../models/Book");
       const book = await Book.findById(bookId);
       if (!book) {
-        return res
-          .status(404)
-          .json({ status: 404, message: "Book not found" });
+        return res.status(404).json({ status: 404, message: "Book not found" });
       }
       item = book;
-      itemType = 'book';
+      itemType = "book";
       itemPrice = book.price;
     } else {
-      return res
-        .status(400)
-        .json({ status: 400, message: "Either productId or bookId is required" });
+      return res.status(400).json({
+        status: 400,
+        message: "Either productId or bookId is required",
+      });
     }
 
     const cart = await Cart.findOne({ user: userId });
@@ -2522,7 +2616,7 @@ exports.updateCartQuantity = async (req, res) => {
     }
 
     const cartItemIndex = cart.products.findIndex((cartItem) => {
-      if (itemType === 'product') {
+      if (itemType === "product") {
         return cartItem.product && cartItem.product.toString() === productId;
       } else {
         return cartItem.book && cartItem.book.toString() === bookId;
@@ -2530,9 +2624,12 @@ exports.updateCartQuantity = async (req, res) => {
     });
 
     if (cartItemIndex === -1) {
-      return res
-        .status(404)
-        .json({ status: 404, message: `${itemType === 'book' ? 'Book' : 'Product'} not found in cart` });
+      return res.status(404).json({
+        status: 404,
+        message: `${
+          itemType === "book" ? "Book" : "Product"
+        } not found in cart`,
+      });
     }
 
     cart.products[cartItemIndex].quantity = quantity;
@@ -2560,7 +2657,7 @@ exports.updateCartQuantity = async (req, res) => {
 exports.deleteCartProductById = async (req, res) => {
   try {
     const userId = req.user.id;
-    const productId = req.params.productId;
+    const cartItemId = req.params.productId; // This is actually the cart item's _id
 
     const user = await User.findById(userId);
 
@@ -2574,23 +2671,32 @@ exports.deleteCartProductById = async (req, res) => {
       return res.status(404).json({ status: 404, message: "Cart not found" });
     }
 
+    // Find the cart item by its _id (the cart product entry's MongoDB _id)
     const productIndex = cart.products.findIndex(
-      (item) => item.product.toString() === productId
+      (item) => item._id && item._id.toString() === cartItemId
     );
 
     if (productIndex === -1) {
       return res
         .status(404)
-        .json({ status: 404, message: "Product not found in cart" });
+        .json({ status: 404, message: "Item not found in cart" });
     }
 
+    // Remove the item from the cart
     cart.products.splice(productIndex, 1);
+
+    // Recalculate total amount
+    const totalCartAmount = cart.products.reduce(
+      (total, item) => total + (item.totalAmount || 0),
+      0
+    );
+    cart.totalPaidAmount = totalCartAmount;
 
     await cart.save();
 
     return res.status(200).json({
       status: 200,
-      message: "Cart product deleted successfully",
+      message: "Cart item deleted successfully",
       data: cart,
     });
   } catch (error) {
@@ -3058,9 +3164,9 @@ exports.getUserEnrolledCourses = async (req, res) => {
     const subscriptions = await UserSubscription.find({
       user: userId,
     }).populate("course");
-    
+
     const validSubscriptions = subscriptions.filter((sub) => sub.course);
-    
+
     if (validSubscriptions.length === 0) {
       return res.status(404).json({
         status: 404,
@@ -3070,7 +3176,9 @@ exports.getUserEnrolledCourses = async (req, res) => {
     }
 
     const courses = validSubscriptions.map((sub) => {
-      const courseObj = sub.course?.toObject ? sub.course.toObject() : sub.course;
+      const courseObj = sub.course?.toObject
+        ? sub.course.toObject()
+        : sub.course;
       return {
         ...courseObj,
         unpublishedForPublic: courseObj?.isPublished === false,
@@ -3092,9 +3200,9 @@ exports.getUserEnrolledCourses = async (req, res) => {
 exports.getAllFreeCourses = async (req, res) => {
   try {
     // Only return free courses that are also published
-    const freeCourses = await Course.find({ 
-      courseType: "Free", 
-      isPublished: true 
+    const freeCourses = await Course.find({
+      courseType: "Free",
+      isPublished: true,
     });
 
     if (!freeCourses || freeCourses.length === 0) {
@@ -3142,11 +3250,12 @@ exports.getUserPurchasedCourses = async (req, res) => {
     console.log(`🔍 [DEBUG] Fetching purchased courses for user: ${userId}`);
 
     const user = await User.findById(userId).populate({
-      path: 'purchasedCourses.course',
-      model: 'Course',
-      select: 'title description price courseImage category subCategory isPublished courseType rootFolder'
+      path: "purchasedCourses.course",
+      model: "Course",
+      select:
+        "title description price courseImage category subCategory isPublished courseType rootFolder",
     });
-    
+
     if (!user) {
       console.log(`❌ [DEBUG] User not found: ${userId}`);
       return res
@@ -3155,101 +3264,138 @@ exports.getUserPurchasedCourses = async (req, res) => {
     }
 
     console.log(`🔍 [DEBUG] User found: ${user.firstName} ${user.lastName}`);
-    console.log(`🔍 [DEBUG] Raw purchasedCourses count: ${user.purchasedCourses?.length || 0}`);
-    console.log(`🔍 [DEBUG] Raw purchasedCourses:`, user.purchasedCourses?.map(pc => ({
-      courseId: pc.course?._id || pc.course,
-      courseTitle: pc.course?.title,
-      courseType: pc.course?.courseType,
-      isPublished: pc.course?.isPublished,
-      rootFolder: pc.course?.rootFolder,
-      rootFolderType: typeof pc.course?.rootFolder,
-      assignedByAdmin: pc.assignedByAdmin?.isAssigned,
-      expiresAt: pc.expiresAt
-    })));
-    
+    console.log(
+      `🔍 [DEBUG] Raw purchasedCourses count: ${
+        user.purchasedCourses?.length || 0
+      }`
+    );
+    console.log(
+      `🔍 [DEBUG] Raw purchasedCourses:`,
+      user.purchasedCourses?.map((pc) => ({
+        courseId: pc.course?._id || pc.course,
+        courseTitle: pc.course?.title,
+        courseType: pc.course?.courseType,
+        isPublished: pc.course?.isPublished,
+        rootFolder: pc.course?.rootFolder,
+        rootFolderType: typeof pc.course?.rootFolder,
+        assignedByAdmin: pc.assignedByAdmin?.isAssigned,
+        expiresAt: pc.expiresAt,
+      }))
+    );
+
     // Additional debug: Log courses that have undefined rootFolder
-    const coursesWithoutRootFolder = user.purchasedCourses?.filter(pc => 
-      pc.course && !pc.course.rootFolder
+    const coursesWithoutRootFolder = user.purchasedCourses?.filter(
+      (pc) => pc.course && !pc.course.rootFolder
     );
     if (coursesWithoutRootFolder?.length > 0) {
-      console.log(`🚨 [DEBUG] Courses without rootFolder:`, coursesWithoutRootFolder.map(pc => ({
-        courseId: pc.course._id,
-        courseTitle: pc.course.title,
-        courseType: pc.course.courseType
-      })));
+      console.log(
+        `🚨 [DEBUG] Courses without rootFolder:`,
+        coursesWithoutRootFolder.map((pc) => ({
+          courseId: pc.course._id,
+          courseTitle: pc.course.title,
+          courseType: pc.course.courseType,
+        }))
+      );
     }
 
     // Filter out expired courses and unpublished regular courses, but allow unpublished batch courses
-    const activePurchasedCourses = user.purchasedCourses.filter(pc => {
+    const activePurchasedCourses = user.purchasedCourses.filter((pc) => {
       // Exclude expired courses
       if (pc.expiresAt && pc.expiresAt <= new Date()) {
-        console.log(`🔍 [DEBUG] Filtering out expired course: ${pc.course?.title}`);
+        console.log(
+          `🔍 [DEBUG] Filtering out expired course: ${pc.course?.title}`
+        );
         return false;
       }
-      
+
       // Exclude courses that don't exist
       if (!pc.course) {
-        console.log(`🔍 [DEBUG] Filtering out course with no data: ${pc.course}`);
+        console.log(
+          `🔍 [DEBUG] Filtering out course with no data: ${pc.course}`
+        );
         return false;
       }
-      
-      console.log(`🔍 [DEBUG] Including course for user access: ${pc.course.title} (published: ${pc.course.isPublished})`);
+
+      console.log(
+        `🔍 [DEBUG] Including course for user access: ${pc.course.title} (published: ${pc.course.isPublished})`
+      );
       return true;
     });
 
-    console.log(`🔍 [DEBUG] Active purchased courses count after filtering: ${activePurchasedCourses.length}`);
+    console.log(
+      `🔍 [DEBUG] Active purchased courses count after filtering: ${activePurchasedCourses.length}`
+    );
 
     // Generate pre-signed URLs for course images (same as getAllPublishedCoursesForUser)
-    const { generatePresignedUrl } = require('../configs/aws.config');
-    const processedCourses = await Promise.all(activePurchasedCourses.map(async (pc) => {
-      const courseObj = pc.course.toObject();
-      
-      // Process course images to use pre-signed URLs
-      if (courseObj.courseImage && courseObj.courseImage.length > 0) {
-        courseObj.courseImage = await Promise.all(courseObj.courseImage.map(async (imageUrl) => {
-          if (imageUrl && imageUrl.includes('amazonaws.com/')) {
-            try {
-              const s3Key = imageUrl.split('amazonaws.com/')[1];
-              const bucketName = process.env.S3_BUCKET || 'wakadclass';
-              
-              console.log(`🔗 [PRESIGN] Generating pre-signed URL for purchased course ${courseObj._id} image`);
-              
-              // Generate pre-signed URL with longer expiration (24 hours)
-              const presignedUrl = await generatePresignedUrl(bucketName, s3Key, 86400);
-              
-              console.log(`✅ [PRESIGN] Generated pre-signed URL for purchased course ${courseObj._id}`);
-              return presignedUrl;
-              
-            } catch (error) {
-              console.error(`❌ [PRESIGN] Failed to generate pre-signed URL for purchased course ${courseObj._id}:`, error);
-              // Keep original URL as fallback
-              return imageUrl;
-            }
-          }
-          return imageUrl;
-        }));
-      }
-      
-      return {
-        ...courseObj,
-        unpublishedForPublic: courseObj.isPublished === false,
-        purchaseInfo: {
-          purchasedAt: pc.assignedByAdmin?.assignedAt || pc.purchasedAt,
-          expiresAt: pc.expiresAt,
-          assignedByAdmin: pc.assignedByAdmin?.isAssigned || false,
-          assignedBy: pc.assignedByAdmin?.assignedBy
-        }
-      };
-    }));
+    const { generatePresignedUrl } = require("../configs/aws.config");
+    const processedCourses = await Promise.all(
+      activePurchasedCourses.map(async (pc) => {
+        const courseObj = pc.course.toObject();
 
-    console.log(`🔍 [DEBUG] Final response - courses count: ${processedCourses.length}`);
-    console.log(`🔍 [DEBUG] Final courses:`, processedCourses.map(c => ({
-      id: c._id,
-      title: c.title,
-      courseType: c.courseType,
-      isPublished: c.isPublished,
-      hasImages: c.courseImage && c.courseImage.length > 0
-    })));
+        // Process course images to use pre-signed URLs
+        if (courseObj.courseImage && courseObj.courseImage.length > 0) {
+          courseObj.courseImage = await Promise.all(
+            courseObj.courseImage.map(async (imageUrl) => {
+              if (imageUrl && imageUrl.includes("amazonaws.com/")) {
+                try {
+                  const s3Key = imageUrl.split("amazonaws.com/")[1];
+                  const bucketName = process.env.S3_BUCKET || "wakadclass";
+
+                  console.log(
+                    `🔗 [PRESIGN] Generating pre-signed URL for purchased course ${courseObj._id} image`
+                  );
+
+                  // Generate pre-signed URL with longer expiration (24 hours)
+                  const presignedUrl = await generatePresignedUrl(
+                    bucketName,
+                    s3Key,
+                    86400
+                  );
+
+                  console.log(
+                    `✅ [PRESIGN] Generated pre-signed URL for purchased course ${courseObj._id}`
+                  );
+                  return presignedUrl;
+                } catch (error) {
+                  console.error(
+                    `❌ [PRESIGN] Failed to generate pre-signed URL for purchased course ${courseObj._id}:`,
+                    error
+                  );
+                  // Keep original URL as fallback
+                  return imageUrl;
+                }
+              }
+              return imageUrl;
+            })
+          );
+        }
+
+        return {
+          ...courseObj,
+          unpublishedForPublic: courseObj.isPublished === false,
+          purchaseInfo: {
+            purchasedAt: pc.assignedByAdmin?.assignedAt || pc.purchasedAt,
+            expiresAt: pc.expiresAt,
+            assignedByAdmin: pc.assignedByAdmin?.isAssigned || false,
+            assignedBy: pc.assignedByAdmin?.assignedBy,
+          },
+        };
+      })
+    );
+
+    console.log(
+      `🔍 [DEBUG] Final response - courses count: ${processedCourses.length}`
+    );
+    console.log(
+      `🔍 [DEBUG] Final courses:`,
+      processedCourses.map((c) => ({
+        id: c._id,
+        title: c.title,
+        courseType: c.courseType,
+        isPublished: c.isPublished,
+        hasImages: c.courseImage && c.courseImage.length > 0,
+      }))
+    );
 
     return res.status(200).json({
       status: 200,
@@ -4563,62 +4709,65 @@ exports.submitAssignment = async (req, res) => {
     const AssignmentSubmission = require("../models/assignmentSubmissionModel");
     const Folder = require("../models/folderModel");
     const File = require("../models/fileModel");
-    const multer = require('multer');
-    const path = require('path');
-    
+    const multer = require("multer");
+    const path = require("path");
+
     const userId = req.user._id;
-    const { courseId, assignmentTitle, assignmentDescription, studentNotes } = req.body;
-    
-    console.log(`🔍 [DEBUG] Assignment submission for user ${userId}, courseRootFolder ${courseId}`);
-    
+    const { courseId, assignmentTitle, assignmentDescription, studentNotes } =
+      req.body;
+
+    console.log(
+      `🔍 [DEBUG] Assignment submission for user ${userId}, courseRootFolder ${courseId}`
+    );
+
     // Validate required fields
     if (!courseId || !assignmentTitle) {
       return res.status(400).json({
         status: 400,
-        message: "Course ID and assignment title are required"
+        message: "Course ID and assignment title are required",
       });
     }
-    
+
     // Check if user has access to the course
     const User = require("../models/userModel");
     const user = await User.findById(userId);
-    
+
     if (!user) {
       return res.status(404).json({
         status: 404,
-        message: "User not found"
+        message: "User not found",
       });
     }
-    
+
     // Find the course by rootFolder ID
     const Course = require("../models/courseModel");
     const course = await Course.findOne({ rootFolder: courseId });
-    
+
     if (!course) {
       return res.status(404).json({
         status: 404,
-        message: "Course not found"
+        message: "Course not found",
       });
     }
-    
+
     // Check if user has access to this course
     const hasAccess = user.purchasedCourses.some(
-      pc => pc.course.toString() === course._id.toString()
+      (pc) => pc.course.toString() === course._id.toString()
     );
-    
+
     if (!hasAccess) {
       return res.status(403).json({
         status: 403,
-        message: "You don't have access to this course"
+        message: "You don't have access to this course",
       });
     }
-    
+
     // Create or find Assignment folder in course structure
-    let assignmentFolder = await Folder.findOne({ 
-      name: "Assignments", 
-      parentFolderId: courseId 
+    let assignmentFolder = await Folder.findOne({
+      name: "Assignments",
+      parentFolderId: courseId,
     });
-    
+
     if (!assignmentFolder) {
       // Create Assignment folder
       assignmentFolder = new Folder({
@@ -4627,10 +4776,10 @@ exports.submitAssignment = async (req, res) => {
         files: [],
         folders: [],
         isSystemFolder: true,
-        folderType: 'assignments'
+        folderType: "assignments",
       });
       await assignmentFolder.save();
-      
+
       // Add to parent folder
       const parentFolder = await Folder.findById(courseId);
       if (parentFolder) {
@@ -4638,14 +4787,16 @@ exports.submitAssignment = async (req, res) => {
         await parentFolder.save();
       }
     }
-    
+
     // Create student-specific folder inside Assignments
-    const studentFolderName = `${user.firstName || 'Student'}_${user.phone || userId}`;
-    let studentFolder = await Folder.findOne({ 
-      name: studentFolderName, 
-      parentFolderId: assignmentFolder._id 
+    const studentFolderName = `${user.firstName || "Student"}_${
+      user.phone || userId
+    }`;
+    let studentFolder = await Folder.findOne({
+      name: studentFolderName,
+      parentFolderId: assignmentFolder._id,
     });
-    
+
     if (!studentFolder) {
       studentFolder = new Folder({
         name: studentFolderName,
@@ -4653,85 +4804,88 @@ exports.submitAssignment = async (req, res) => {
         files: [],
         folders: [],
         isSystemFolder: true,
-        folderType: 'student_assignments'
+        folderType: "student_assignments",
       });
       await studentFolder.save();
-      
+
       // Add to assignment folder
       assignmentFolder.folders.push(studentFolder._id);
       await assignmentFolder.save();
     }
-    
+
     // Process uploaded files and save to student folder
     const submittedFiles = [];
-    
+
     if (req.files && req.files.length > 0) {
       for (const file of req.files) {
         const fileType = path.extname(file.originalname).toLowerCase();
-        let fileTypeCategory = 'other';
-        
-        if (['.jpg', '.jpeg', '.png', '.gif', '.bmp'].includes(fileType)) {
-          fileTypeCategory = 'image';
-        } else if (fileType === '.pdf') {
-          fileTypeCategory = 'pdf';
-        } else if (['.doc', '.docx'].includes(fileType)) {
-          fileTypeCategory = 'document';
+        let fileTypeCategory = "other";
+
+        if ([".jpg", ".jpeg", ".png", ".gif", ".bmp"].includes(fileType)) {
+          fileTypeCategory = "image";
+        } else if (fileType === ".pdf") {
+          fileTypeCategory = "pdf";
+        } else if ([".doc", ".docx"].includes(fileType)) {
+          fileTypeCategory = "document";
         }
-        
+
         // Create File model instance
         const fileDoc = new File({
           name: file.originalname,
           url: file.location, // AWS S3 URL (multerS3 provides this)
           type: fileTypeCategory,
           isViewable: true,
-          isDownloadable: true
+          isDownloadable: true,
         });
-        
+
         await fileDoc.save();
-        
+
         // Add file to student folder
         studentFolder.files.push(fileDoc._id);
-        
+
         submittedFiles.push({
           fileId: fileDoc._id, // Add the File model ID for streaming
           fileName: file.originalname,
           fileUrl: file.location,
           fileType: fileTypeCategory,
           fileSize: file.size,
-          uploadedAt: new Date()
+          uploadedAt: new Date(),
         });
       }
-      
+
       await studentFolder.save();
     }
-    
+
     // Create assignment submission record
     const assignmentSubmission = new AssignmentSubmission({
       student: userId,
       courseRootFolder: courseId,
       assignmentTitle: assignmentTitle.trim(),
-      assignmentDescription: assignmentDescription ? assignmentDescription.trim() : '',
+      assignmentDescription: assignmentDescription
+        ? assignmentDescription.trim()
+        : "",
       submittedFiles: submittedFiles,
-      studentNotes: studentNotes ? studentNotes.trim() : '',
-      submissionStatus: 'submitted'
+      studentNotes: studentNotes ? studentNotes.trim() : "",
+      submissionStatus: "submitted",
     });
-    
+
     await assignmentSubmission.save();
-    
-    console.log(`✅ [DEBUG] Assignment submitted successfully: ${assignmentSubmission._id}`);
-    
+
+    console.log(
+      `✅ [DEBUG] Assignment submitted successfully: ${assignmentSubmission._id}`
+    );
+
     res.status(201).json({
       status: 201,
       message: "Assignment submitted successfully",
-      data: assignmentSubmission
+      data: assignmentSubmission,
     });
-    
   } catch (error) {
     console.error("❌ Error submitting assignment:", error);
     res.status(500).json({
       status: 500,
       message: "Failed to submit assignment",
-      error: error.message
+      error: error.message,
     });
   }
 };
@@ -4741,35 +4895,37 @@ exports.getUserAssignments = async (req, res) => {
   try {
     const AssignmentSubmission = require("../models/assignmentSubmissionModel");
     const userId = req.user._id;
-    
+
     console.log(`🔍 [DEBUG] Fetching assignments for user: ${userId}`);
-    
+
     const assignments = await AssignmentSubmission.find({ student: userId })
-      .populate('courseRootFolder', 'name')
-      .populate('adminReview.reviewedBy', 'firstName lastName')
+      .populate("courseRootFolder", "name")
+      .populate("adminReview.reviewedBy", "firstName lastName")
       .sort({ createdAt: -1 });
-    
+
     console.log(`✅ [DEBUG] Found ${assignments.length} assignments for user`);
-    console.log(`🔍 [DEBUG] Assignment details:`, assignments.map(a => ({
-      id: a._id,
-      title: a.assignmentTitle,
-      courseRootFolder: a.courseRootFolder,
-      submittedFiles: a.submittedFiles.length,
-      createdAt: a.createdAt
-    })));
-    
+    console.log(
+      `🔍 [DEBUG] Assignment details:`,
+      assignments.map((a) => ({
+        id: a._id,
+        title: a.assignmentTitle,
+        courseRootFolder: a.courseRootFolder,
+        submittedFiles: a.submittedFiles.length,
+        createdAt: a.createdAt,
+      }))
+    );
+
     res.status(200).json({
       status: 200,
       message: "User assignments retrieved successfully",
-      data: assignments
+      data: assignments,
     });
-    
   } catch (error) {
     console.error("❌ Error fetching user assignments:", error);
     res.status(500).json({
       status: 500,
       message: "Failed to fetch user assignments",
-      error: error.message
+      error: error.message,
     });
   }
 };

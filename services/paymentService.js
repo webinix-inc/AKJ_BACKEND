@@ -31,6 +31,7 @@ const Installment = require("../models/installmentModel");
 const LiveClass = require("../models/LiveClass");
 const Message = require("../models/messageModel");
 const { addUsersToClass } = require("../configs/merithub.config");
+const { invalidateCache } = require("../middlewares/cacheMiddleware");
 
 // Initialize Razorpay instance
 const razorpay = new Razorpay({
@@ -457,6 +458,20 @@ const verifyPaymentSignatureLogic = async (signatureData) => {
       throw new Error(`Enrollment verification failed: ${verificationError.message}`);
     }
 
+    // 🔥 CRITICAL: Invalidate Redis cache for user profile after enrollment
+    try {
+      const userIdStr = order.userId.toString();
+      // Invalidate user profile cache (matches cache key pattern: profile:cache:/api/v1/user/getProfile:...:user:${userId})
+      await invalidateCache(`profile:*user:${userIdStr}*`);
+      await invalidateCache(`profile:*${userIdStr}*`);
+      // Also invalidate any cached user data
+      await invalidateCache(`*user:${userIdStr}*`);
+      console.log(`🗑️ [CACHE] Invalidated Redis cache for user ${userIdStr} after enrollment`);
+    } catch (cacheError) {
+      console.error("⚠️ [CACHE] Error invalidating cache (non-critical):", cacheError.message);
+      // Don't throw - cache invalidation failure shouldn't block payment success
+    }
+
     // 🔥 SEND PAYMENT RECEIPT MESSAGE TO STUDENT'S CHAT
     try {
       console.log("💬 Attempting to send payment receipt message...", {
@@ -707,8 +722,8 @@ const addCourseToUserLogic = async (userId, courseId, paymentMode, installmentDe
       user.purchasedCourses.push(newCourse);
       await user.save();
       
-      // 🔥 CRITICAL: Verify the course was actually saved
-      const savedUser = await User.findById(userId).select('purchasedCourses');
+      // 🔥 CRITICAL: Verify the course was actually saved (fresh read for consistency)
+      const savedUser = await User.findById(userId).select('purchasedCourses').lean();
       const savedCourse = savedUser.purchasedCourses.find(
         (c) => c.course.toString() === courseId.toString()
       );
@@ -717,6 +732,17 @@ const addCourseToUserLogic = async (userId, courseId, paymentMode, installmentDe
         throw new Error("Failed to save course to user's purchasedCourses");
       }
       console.log("✅ Verified: Course successfully saved to user's purchasedCourses");
+      
+      // 🔥 CRITICAL: Invalidate Redis cache for user profile after new enrollment
+      try {
+        const userIdStr = userId.toString();
+        await invalidateCache(`profile:*user:${userIdStr}*`);
+        await invalidateCache(`profile:*${userIdStr}*`);
+        await invalidateCache(`*user:${userIdStr}*`);
+        console.log(`🗑️ [CACHE] Invalidated Redis cache for user ${userIdStr} after new enrollment`);
+      } catch (cacheError) {
+        console.error("⚠️ [CACHE] Error invalidating cache (non-critical):", cacheError.message);
+      }
     } else {
       // Course already exists - update for subsequent installment payments
       const purchasedCourse = user.purchasedCourses[courseIndex];
@@ -794,8 +820,8 @@ const addCourseToUserLogic = async (userId, courseId, paymentMode, installmentDe
       await user.save();
       console.log(`💳 Updated course payment for user ${userId}, course ${courseId}, new total: ₹${purchasedCourse.amountPaid}`);
       
-      // 🔥 CRITICAL: Verify the course update was actually saved
-      const savedUser = await User.findById(userId).select('purchasedCourses');
+      // 🔥 CRITICAL: Verify the course update was actually saved (fresh read for consistency)
+      const savedUser = await User.findById(userId).select('purchasedCourses').lean();
       const savedCourse = savedUser.purchasedCourses.find(
         (c) => c.course.toString() === courseId.toString()
       );
@@ -804,6 +830,17 @@ const addCourseToUserLogic = async (userId, courseId, paymentMode, installmentDe
         throw new Error("Failed to update course in user's purchasedCourses");
       }
       console.log("✅ Verified: Course successfully updated in user's purchasedCourses");
+      
+      // 🔥 CRITICAL: Invalidate Redis cache for user profile after payment update
+      try {
+        const userIdStr = userId.toString();
+        await invalidateCache(`profile:*user:${userIdStr}*`);
+        await invalidateCache(`profile:*${userIdStr}*`);
+        await invalidateCache(`*user:${userIdStr}*`);
+        console.log(`🗑️ [CACHE] Invalidated Redis cache for user ${userIdStr} after payment update`);
+      } catch (cacheError) {
+        console.error("⚠️ [CACHE] Error invalidating cache (non-critical):", cacheError.message);
+      }
     }
 
     // 🔥 REMOVED: Duplicate installment payment update logic
@@ -1106,6 +1143,17 @@ const handlePaymentCapturedLogic = async (paymentDetails) => {
     } : null;
     
     await addCourseToUserLogic(userId, courseId, paymentMode, installmentDetailsWithPlanType, paymentDetails, order_id);
+
+    // 🔥 CRITICAL: Invalidate Redis cache for user profile after webhook enrollment
+    try {
+      const userIdStr = userId.toString();
+      await invalidateCache(`profile:*user:${userIdStr}*`);
+      await invalidateCache(`profile:*${userIdStr}*`);
+      await invalidateCache(`*user:${userIdStr}*`);
+      console.log(`🗑️ [CACHE] Invalidated Redis cache for user ${userIdStr} after webhook enrollment`);
+    } catch (cacheError) {
+      console.error("⚠️ [CACHE] Error invalidating cache (non-critical):", cacheError.message);
+    }
 
     // 🔥 SEND PAYMENT RECEIPT MESSAGE TO STUDENT'S CHAT
     try {
