@@ -1,30 +1,44 @@
 module.exports = (io) => {
   console.log("Notification system started");
-  // console.log("io", io);
   const connectedUsers = new Map();
 
   io.on("connection", (socket) => {
-    console.log("Client connected to notification system:", socket.id);
+    // console.log("Client connected to notification system:", socket.id);
 
     // User joins their personal room
-    // socket.on("joinNotificationRoom", (userId) => {
-    //   socket.join(`notification:${userId}`);
-    //   connectedUsers.set(userId, socket.id);
-    //   console.log(`User ${userId} joined notification room`);
-    // });
+    socket.on("joinNotificationRoom", (userId) => {
+      if (!userId) return;
 
-    // Listen for broadcastNotification event
+      const userRoom = `notification:${userId}`;
+      socket.join(userRoom);
+      connectedUsers.set(userId, socket.id);
+
+      // Auto-join global broadcast room
+      socket.join("notification:global");
+
+      console.log(`User ${userId} joined ${userRoom} and global room`);
+    });
+
+    // Join specific course rooms for updates
+    socket.on("joinCourseRooms", (courseIds) => {
+      if (Array.isArray(courseIds)) {
+        courseIds.forEach(courseId => {
+          const roomName = `course:${courseId}`;
+          socket.join(roomName);
+          console.log(`Socket ${socket.id} joined course room: ${roomName}`);
+        });
+      }
+    });
+
+    // Listen for broadcastNotification event (Legacy support or internal broadcast)
     socket.on("broadcastNotification", ({ userIds, notification }) => {
-      console.log(
-        "Broadcasting notification:",
-        notification,
-        "to userIds:",
-        userIds
-      );
+      console.log("Broadcasting notification via socket event:", notification.title);
 
-      userIds.forEach((userId) => {
-        io.to(`notification:${userId}`).emit("notification", notification);
-      });
+      if (userIds && Array.isArray(userIds)) {
+        userIds.forEach((userId) => {
+          io.to(`notification:${userId}`).emit("notification", notification);
+        });
+      }
     });
 
     // Handle disconnect
@@ -36,7 +50,7 @@ module.exports = (io) => {
           break;
         }
       }
-      console.log("Client disconnected from notification system:", socket.id);
+      // console.log("Client disconnected from notification system:", socket.id);
     });
   });
 };

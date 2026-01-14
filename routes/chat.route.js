@@ -1,35 +1,65 @@
 const chatController = require("../controllers/chatController");
 const authJwt = require("../middlewares/authJwt");
 const { chatAttachments } = require("../middlewares/fileUpload");
+const { chatRateLimiter, chatFetchRateLimiter } = require("../middlewares/rateLimiter");
 
 const express = require("express");
 const router = express.Router();
 
 module.exports = (app) => {
+  // Send message with rate limiting
   app.post(
     "/api/v1/chat/send",
-    [authJwt.verifyToken, chatAttachments],
+    [authJwt.verifyToken, chatRateLimiter, chatAttachments],
     chatController.sendMessage
   );
+
+  // Get users based on roles with rate limiting
   app.get(
     "/api/v1/chat/getUsersBasedOnRoles",
-    [authJwt.verifyToken],
+    [authJwt.verifyToken, chatFetchRateLimiter],
     chatController.getChatTabUsers
   );
+
+  // Get users with messages with rate limiting
   app.get(
     "/api/v1/chat/users/withMessages",
-    [authJwt.verifyToken],
+    [authJwt.verifyToken, chatFetchRateLimiter],
     chatController.getUsersWithMessages
   );
 
-  app.get("/api/v1/chat/markAsRead/:partnerId", [authJwt.verifyToken], chatController.markMessageAsRead);
+  // Mark messages as read
+  app.get(
+    "/api/v1/chat/markAsRead/:partnerId",
+    [authJwt.verifyToken],
+    chatController.markMessageAsRead
+  );
 
-  app.get("/api/v1/chat/getUserDataOfGroup/:groupId", [authJwt.verifyToken], chatController.getUserDataOfGroup);
+  // Get group user data
+  app.get(
+    "/api/v1/chat/getUserDataOfGroup/:groupId",
+    [authJwt.verifyToken, chatFetchRateLimiter],
+    chatController.getUserDataOfGroup
+  );
 
-  // New routes
-  app.get("/api/v1/chat/groups", [authJwt.verifyToken], chatController.getGroupsForUser);
-  
-  app.get("/api/v1/chat/:requestedUserID", [authJwt.verifyToken], chatController.specificUserMessages);
+  // Get groups for user
+  app.get(
+    "/api/v1/chat/groups",
+    [authJwt.verifyToken, chatFetchRateLimiter],
+    chatController.getGroupsForUser
+  );
 
-  app.put("/api/v1/admin/chat/chat-access/:requestedUserId", [authJwt.verifyToken], chatController.chatAccess);
+  // Get messages for specific user with rate limiting
+  app.get(
+    "/api/v1/chat/:requestedUserID",
+    [authJwt.verifyToken, chatFetchRateLimiter],
+    chatController.specificUserMessages
+  );
+
+  // Admin chat access control
+  app.put(
+    "/api/v1/admin/chat/chat-access/:requestedUserId",
+    [authJwt.verifyToken],
+    chatController.chatAccess
+  );
 };

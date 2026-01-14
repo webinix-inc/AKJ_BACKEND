@@ -3,6 +3,27 @@ const Message = require("../models/messageModel");
 const User = require("../models/userModel");
 const mongoose = require("mongoose");
 const Group = require("../models/groupModel");
+const { getSignedFileUrl } = require("../utils/s3Signer");
+
+// Helper to sign attachments in a message
+const signMessageAttachments = async (message) => {
+  if (!message || !message.attachments || message.attachments.length === 0) {
+    return message;
+  }
+
+  const signedAttachments = await Promise.all(
+    message.attachments.map(async (att) => {
+      // Create a shallow copy to avoid mutating if it's a frozen object
+      const newAtt = { ...att };
+      if (newAtt.url) {
+        newAtt.url = await getSignedFileUrl(newAtt.url);
+      }
+      return newAtt;
+    })
+  );
+
+  return { ...message, attachments: signedAttachments };
+};
 
 // Retrieve cached data
 exports.getCachedData = async (key) => {
@@ -114,17 +135,33 @@ exports.sendMessage = async (req, res) => {
       return res.status(413).json({ error: "Payload too large" });
     }
 
+    // Sanitize message content (XSS prevention)
+    const sanitizeHtml = (str) => {
+      if (!str) return "";
+      return str
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#x27;")
+        .replace(/\//g, "&#x2F;");
+    };
+
+    const sanitizedMessage = message ? sanitizeHtml(message.trim()) : "";
+
     // Find the receiver
     const receiver = await User.findById(
       new mongoose.Types.ObjectId(receiverId)
     ).select("firstName userEmail userType");
     if (!receiver) {
       return res.status(404).json({ error: "Receiver not found" });
-    } // Initialize message data with required fields
+    }
+
+    // Initialize message data with required fields
     const messageData = {
       sender: new mongoose.Types.ObjectId(authenticatedUserId),
       receiver: new mongoose.Types.ObjectId(receiverId),
-      content: message || "", // Set empty string if no message
+      content: sanitizedMessage, // Use sanitized message
       isBroadcast: false,
       attachments: [], // Initialize empty attachments array
     };
@@ -136,8 +173,8 @@ exports.sendMessage = async (req, res) => {
         type: file.mimetype.startsWith("image/")
           ? "image"
           : file.mimetype.startsWith("video/")
-          ? "video"
-          : "document",
+            ? "video"
+            : "document",
         url: file.location,
         filename: file.originalname,
         size: file.size,
@@ -159,37 +196,17 @@ exports.sendMessage = async (req, res) => {
       savedMessage
     );
 
-    // Emit message to receiver if socket.io is available
-    if (global.io) {
-      console.log("🔔 Emitting message to receiver:", receiverId);
-      console.log("📤 Message data:", {
-        _id: savedMessage._id,
-        sender: savedMessage.sender,
-        receiver: savedMessage.receiver,
-        content: savedMessage.content,
-        attachments: savedMessage.attachments,
-        createdAt: savedMessage.createdAt
-      });
-      global.io.to(receiverId.toString()).emit("message", {
-        _id: savedMessage._id,
-        sender: savedMessage.sender,
-        receiver: savedMessage.receiver,
-        content: savedMessage.content,
-        attachments: savedMessage.attachments,
-        createdAt: savedMessage.createdAt,
-        timestamp: savedMessage.timestamp,
-        isRead: savedMessage.isRead,
-        isBroadcast: savedMessage.isBroadcast
-      });
-      console.log("✅ Message emitted successfully");
-    } else {
-      console.warn("❌ Socket.io not initialized");
-    }
+    // Socket emission is handled by the frontend socket.emit("message", ...)
+    // which triggers the socket handler. No need to emit here to avoid duplicates.
+    // The socket handler in sockets/chat.js handles broadcasting to the receiver.
+
+    // Sign the message for response
+    const signedMessage = await signMessageAttachments(savedMessage.toObject());
 
     res.status(201).json({
       status: 201,
       message: "Message sent successfully",
-      data: savedMessage,
+      data: signedMessage,
     });
   } catch (error) {
     console.error("Error sending message:", error);
@@ -222,7 +239,7 @@ exports.specificUserMessages = async (req, res) => {
 
     const cacheKey = exports.getCacheKey(senderId, requestedUserID);
     let messages;
-    
+
     // For ADMIN users, don't use cache to ensure we get all messages from any admin
     // For regular users, use cache for performance
     let cachedMessages = null;
@@ -237,7 +254,7 @@ exports.specificUserMessages = async (req, res) => {
       // For regular users: Only include messages between current user and requested user
       let matchCondition;
       let adminObjectIds = null; // Declare outside if block for debug use
-      
+
       if (userType === "ADMIN") {
         // Get all admin IDs
         const adminIds = await User.find({ userType: "ADMIN" })
@@ -245,11 +262,11 @@ exports.specificUserMessages = async (req, res) => {
           .lean();
         adminObjectIds = adminIds.map((a) => new mongoose.Types.ObjectId(a._id));
         const requestedUserObjectId = new mongoose.Types.ObjectId(requestedUserID);
-        
+
         console.log(`[specificUserMessages] ADMIN query - Admin IDs: ${adminObjectIds.length}, Student ID: ${requestedUserObjectId}`);
         console.log(`[specificUserMessages] Admin ObjectIds:`, adminObjectIds.map(id => id.toString()));
         console.log(`[specificUserMessages] Requested User ObjectId:`, requestedUserObjectId.toString());
-        
+
         matchCondition = {
           $or: [
             // Messages from any admin to the student
@@ -258,7 +275,7 @@ exports.specificUserMessages = async (req, res) => {
             { sender: requestedUserObjectId, receiver: { $in: adminObjectIds } },
           ],
         };
-        
+
         // Log match condition in a readable format
         console.log(`[specificUserMessages] Match condition:`, {
           $or: [
@@ -273,13 +290,38 @@ exports.specificUserMessages = async (req, res) => {
           ]
         });
       } else {
-        // For non-admin users, use original logic
-        matchCondition = {
-          $or: [
-            { sender: requestedUserID, receiver: senderId },
-            { sender: senderId, receiver: requestedUserID },
-          ],
-        };
+        // For non-admin users, check if they're requesting messages with an admin
+        const senderObjectId = new mongoose.Types.ObjectId(senderId);
+        const requestedUserObjectId = new mongoose.Types.ObjectId(requestedUserID);
+
+        // Check if the requested user is an admin
+        const requestedUser = await User.findById(requestedUserID).select("userType").lean();
+
+        if (requestedUser?.userType === "ADMIN") {
+          // If requesting messages with an admin, get ALL admin messages (consolidated view)
+          const adminIds = await User.find({ userType: "ADMIN" })
+            .select("_id")
+            .lean();
+          const adminObjectIds = adminIds.map((a) => new mongoose.Types.ObjectId(a._id));
+
+          matchCondition = {
+            $or: [
+              // Messages from any admin to this user
+              { sender: { $in: adminObjectIds }, receiver: senderObjectId },
+              // Messages from this user to any admin
+              { sender: senderObjectId, receiver: { $in: adminObjectIds } },
+            ],
+          };
+          console.log(`[specificUserMessages] Non-admin requesting admin chat - consolidating all admin messages`);
+        } else {
+          // Regular user-to-user chat
+          matchCondition = {
+            $or: [
+              { sender: requestedUserObjectId, receiver: senderObjectId },
+              { sender: senderObjectId, receiver: requestedUserObjectId },
+            ],
+          };
+        }
       }
 
       if (cursor) {
@@ -296,10 +338,11 @@ exports.specificUserMessages = async (req, res) => {
 
       messages = await Message.find(matchCondition)
         .sort({ createdAt: -1 })
-        .limit(parseInt(limit, 10));
+        .limit(parseInt(limit, 10))
+        .lean();
 
       console.log(`[specificUserMessages] Found ${messages.length} messages for userType: ${userType}, requestedUserID: ${requestedUserID}`);
-      
+
       // Debug: Log first few message IDs and sender/receiver to verify query
       if (messages.length > 0) {
         console.log(`[specificUserMessages] Sample messages:`, messages.slice(0, 3).map(msg => ({
@@ -311,12 +354,12 @@ exports.specificUserMessages = async (req, res) => {
       } else if (userType === "ADMIN") {
         // If no messages found for admin, let's debug why
         console.log(`[specificUserMessages] DEBUG: No messages found, checking database directly...`);
-        
+
         // Check if message exists with this receiver
         const testMessage = await Message.findOne({
           receiver: new mongoose.Types.ObjectId(requestedUserID)
         }).sort({ createdAt: -1 });
-        
+
         if (testMessage) {
           console.log(`[specificUserMessages] DEBUG: Found a message with this receiver:`, {
             _id: testMessage._id.toString(),
@@ -325,7 +368,7 @@ exports.specificUserMessages = async (req, res) => {
             senderIsAdmin: adminObjectIds?.some(id => id.toString() === testMessage.sender.toString()),
             contentPreview: testMessage.content?.substring(0, 100)
           });
-          
+
           // Try to find messages with the exact query we're using
           const directQuery = {
             $or: [
@@ -347,14 +390,17 @@ exports.specificUserMessages = async (req, res) => {
     }
 
 
-    const formattedMessages = messages.map((msg) => ({
-      _id: msg._id.toString(),
-      content: msg.content,
-      sender: msg.sender,
-      receiver: msg.receiver,
-      isBroadcast: msg.isBroadcast,
-      createdAt: msg.createdAt,
-      attachments: msg.attachments || [],
+    const formattedMessages = await Promise.all(messages.map(async (msg) => {
+      const signedMsg = await signMessageAttachments(msg);
+      return {
+        _id: signedMsg._id.toString(),
+        content: signedMsg.content,
+        sender: signedMsg.sender,
+        receiver: signedMsg.receiver,
+        isBroadcast: signedMsg.isBroadcast,
+        createdAt: signedMsg.createdAt,
+        attachments: signedMsg.attachments || [],
+      };
     }));
 
     const nextCursor =
@@ -523,7 +569,7 @@ exports.getUsersWithMessages = async (req, res) => {
     // Build match stage: for ADMIN, include messages sent by any admin to students
     let matchStage;
     let adminObjectIds = null; // Declare outside if block for use in aggregation pipeline
-    
+
     if (userType === "ADMIN") {
       const adminIds = await User.find({ userType: "ADMIN" })
         .select("_id")
@@ -552,7 +598,7 @@ exports.getUsersWithMessages = async (req, res) => {
 
     // Build aggregation pipeline
     let aggregationPipeline = [matchStage, { $sort: { createdAt: -1 } }];
-    
+
     // For ADMIN users, add a stage to identify the student (non-admin) partner
     if (userType === "ADMIN" && adminObjectIds && adminObjectIds.length > 0) {
       // Create an array of conditions to check if sender is an admin
@@ -561,7 +607,7 @@ exports.getUsersWithMessages = async (req, res) => {
       const adminCheckConditions = adminObjectIds.map(adminId => ({
         $eq: ["$sender", adminId]
       }));
-      
+
       aggregationPipeline.push({
         $addFields: {
           // Check if sender is an admin by using $or with multiple $eq checks
@@ -570,7 +616,7 @@ exports.getUsersWithMessages = async (req, res) => {
           },
         },
       });
-      
+
       aggregationPipeline.push({
         $addFields: {
           // Identify which field is the student (the one that's NOT an admin)
@@ -583,7 +629,7 @@ exports.getUsersWithMessages = async (req, res) => {
           },
         },
       });
-      
+
       aggregationPipeline.push({
         $group: {
           _id: "$studentPartner",
@@ -594,26 +640,66 @@ exports.getUsersWithMessages = async (req, res) => {
         },
       });
     } else {
-      // For non-admin users, use original logic
+      // For non-admin users, consolidate all admin conversations into one "AKJ Classes" entry
+      // First, get all admin IDs to identify admin conversation partners
+      const adminIds = await User.find({ userType: "ADMIN" })
+        .select("_id")
+        .lean();
+      adminObjectIds = adminIds.map((a) => new mongoose.Types.ObjectId(a._id));
+
+      // Create conditions to check if the conversation partner is an admin
+      const adminCheckConditions = adminObjectIds.map(adminId => ({
+        $eq: ["$conversationPartner", adminId]
+      }));
+
       aggregationPipeline.push({
-        $group: {
-          _id: {
+        $addFields: {
+          // First determine who the conversation partner is (not the current user)
+          conversationPartner: {
             $cond: {
               if: { $eq: ["$sender", new mongoose.Types.ObjectId(userID)] },
               then: "$receiver",
-              else: "$sender",
-            },
-          },
+              else: "$sender"
+            }
+          }
+        }
+      });
+
+      aggregationPipeline.push({
+        $addFields: {
+          // Check if conversation partner is an admin
+          isPartnerAdmin: adminObjectIds.length > 0 ? { $or: adminCheckConditions } : false
+        }
+      });
+
+      aggregationPipeline.push({
+        $addFields: {
+          // If partner is admin, use a consolidated "ADMIN" key, otherwise use actual partner ID
+          groupKey: {
+            $cond: {
+              if: "$isPartnerAdmin",
+              then: "ADMIN_CONSOLIDATED",
+              else: "$conversationPartner"
+            }
+          }
+        }
+      });
+
+      aggregationPipeline.push({
+        $group: {
+          _id: "$groupKey",
           lastMessageTime: { $first: "$createdAt" },
           lastMessage: { $first: "$content" },
           lastMessageAttachments: { $first: "$attachments" },
           lastMessageSender: { $first: "$sender" },
-        },
+          // Keep track of one admin ID for reference (to get admin info later)
+          adminPartnerId: { $first: { $cond: { if: "$isPartnerAdmin", then: "$conversationPartner", else: null } } }
+        }
       });
     }
-    
+
     aggregationPipeline.push({ $sort: { lastMessageTime: -1 } });
-    
+
     const messagePartners = await Message.aggregate(aggregationPipeline);
 
     if (messagePartners.length > 0) {
@@ -631,92 +717,194 @@ exports.getUsersWithMessages = async (req, res) => {
     // If we have message partners, process them
     if (messagePartners.length > 0) {
       console.log("[getUsersWithMessages] Creating base query for User.find");
-      // First find all users who have messages
-      let baseQuery = {
-        _id: {
-          $in: messagePartners.map((partner) => partner._id),
-        },
-      };
 
-      let allMessageUsers = await User.find(baseQuery).lean();
+      // For non-admin users, handle the consolidated admin entry separately
+      if (userType !== "ADMIN") {
+        // Find the consolidated admin entry if it exists
+        const consolidatedAdminEntry = messagePartners.find(p => p._id === "ADMIN_CONSOLIDATED");
+        const otherPartners = messagePartners.filter(p => p._id !== "ADMIN_CONSOLIDATED");
 
-      if (allMessageUsers.length > 0) {
-        console.log("[getUsersWithMessages] First matched user:", {
-          id: allMessageUsers[0]._id,
-          name: allMessageUsers[0].firstName,
-        });
-      } else {
-        console.log(
-          "[getUsersWithMessages] No users found matching message partners"
+        // Get non-admin user partners
+        let baseQuery = {
+          _id: {
+            $in: otherPartners.map((partner) => partner._id).filter(id => id),
+          },
+        };
+
+        let allMessageUsers = await User.find(baseQuery).lean();
+
+        // For chat, we want to show all users you've messaged with
+        let filteredUsers = allMessageUsers.filter(
+          (user) => user._id.toString() !== userID
         );
-      }
 
-      // For chat, we want to show all users you've messaged with, regardless of type
-      let filteredUsers = allMessageUsers;
+        // If there's a consolidated admin entry, add a virtual "AKJ Classes" admin user
+        if (consolidatedAdminEntry) {
+          // Get the first admin to use as a reference for the consolidated entry
+          const firstAdmin = await User.findOne({ userType: "ADMIN" }).select("image").lean();
 
-      // Remove current user if present
-      const beforeFilter = filteredUsers.length;
-      filteredUsers = filteredUsers.filter(
-        (user) => user._id.toString() !== userID
-      );
+          const virtualAdminUser = {
+            _id: consolidatedAdminEntry.adminPartnerId || "ADMIN_CONSOLIDATED",
+            firstName: "AKJ Classes",
+            lastName: "",
+            userType: "ADMIN",
+            image: firstAdmin?.image || null,
+            isConsolidatedAdmin: true, // Flag to identify this is the consolidated admin
+          };
+          filteredUsers.unshift(virtualAdminUser);
+        }
 
-      const userLastMessageMap = new Map(
-        messagePartners.map((partner) => [
-          partner._id?.toString(),
-          {
+        // Build message details map
+        const userLastMessageMap = new Map();
+        if (consolidatedAdminEntry) {
+          userLastMessageMap.set(consolidatedAdminEntry.adminPartnerId?.toString() || "ADMIN_CONSOLIDATED", {
+            lastMessageTime: consolidatedAdminEntry.lastMessageTime,
+            lastMessage: consolidatedAdminEntry.lastMessage,
+            lastMessageAttachments: consolidatedAdminEntry.lastMessageAttachments || [],
+            lastMessageSender: consolidatedAdminEntry.lastMessageSender,
+          });
+        }
+        otherPartners.forEach((partner) => {
+          userLastMessageMap.set(partner._id?.toString(), {
             lastMessageTime: partner.lastMessageTime,
             lastMessage: partner.lastMessage,
             lastMessageAttachments: partner.lastMessageAttachments || [],
             lastMessageSender: partner.lastMessageSender,
-          },
-        ])
-      );
-
-      const unreadCounts = await Promise.all(
-        filteredUsers.map(async (user) => {
-          const count = await Message.countDocuments({
-            sender: user._id,
-            receiver: new mongoose.Types.ObjectId(userID),
-            isRead: false,
           });
-          return [user._id.toString(), count];
-        })
-      );
-      const unreadCountMap = new Map(unreadCounts);
+        });
 
-      enrichedUsers = filteredUsers.map((user) => {
-        const messageDetails = userLastMessageMap.get(user._id.toString());
-        const unreadCount = unreadCountMap.get(user._id.toString()) || 0;
-        totalUnreadMessages += unreadCount;
+        // Calculate unread counts
+        const unreadCounts = await Promise.all(
+          filteredUsers.map(async (user) => {
+            if (user.isConsolidatedAdmin) {
+              // For consolidated admin, count unread from ALL admins
+              const count = await Message.countDocuments({
+                sender: { $in: adminObjectIds },
+                receiver: new mongoose.Types.ObjectId(userID),
+                isRead: false,
+              });
+              return [user._id.toString(), count];
+            } else {
+              const count = await Message.countDocuments({
+                sender: user._id,
+                receiver: new mongoose.Types.ObjectId(userID),
+                isRead: false,
+              });
+              return [user._id.toString(), count];
+            }
+          })
+        );
+        const unreadCountMap = new Map(unreadCounts);
 
-        return {
-          firstName: user.firstName,
-          lastName: user.lastName, // Include lastName for full name display
-          email: user.email || user.userEmail, // Support both field names
-          phone: user.phone, // Include phone for display
-          userType: user.userType, // Use individual user's userType, not requesting user's
-          image: user.image,
-          lastMessageTime: messageDetails?.lastMessageTime,
-          lastMessage: messageDetails?.lastMessage,
-          lastMessageAttachments: messageDetails?.lastMessageAttachments || [],
-          isLastMessageSentByMe:
-            messageDetails?.lastMessageSender.toString() === userID,
-          unreadCount: unreadCountMap.get(user._id.toString()) || 0,
-          // Include _id for compatibility with expected response
-          _id: user._id,
+        enrichedUsers = filteredUsers.map((user) => {
+          const messageDetails = userLastMessageMap.get(user._id.toString());
+          const unreadCount = unreadCountMap.get(user._id.toString()) || 0;
+          totalUnreadMessages += unreadCount;
+
+          return {
+            _id: user._id,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            userEmail: user.userEmail,
+            phone: user.phone,
+            userName: user.userName,
+            image: user.image,
+            userType: user.userType,
+            lastMessageTime: messageDetails?.lastMessageTime,
+            lastMessage: messageDetails?.lastMessageAttachments?.length > 0
+              ? "📎 Attachment"
+              : messageDetails?.lastMessage ?? "No messages yet",
+            unreadCount,
+            isConsolidatedAdmin: user.isConsolidatedAdmin || false,
+          };
+        });
+      } else {
+        // Original logic for ADMIN users
+        let baseQuery = {
+          _id: {
+            $in: messagePartners.map((partner) => partner._id),
+          },
         };
-      });
 
-      // Sorting users based on their last message time
-      enrichedUsers.sort((a, b) => {
-        const timeA = a.lastMessageTime || 0;
-        const timeB = b.lastMessageTime || 0;
-        return timeB - timeA;
-      });
-      console.log(
-        `[getUsersWithMessages] Sorted ${enrichedUsers.length} enriched users by message time`
-      );
-    }
+        let allMessageUsers = await User.find(baseQuery).lean();
+
+        if (allMessageUsers.length > 0) {
+          console.log("[getUsersWithMessages] First matched user:", {
+            id: allMessageUsers[0]._id,
+            name: allMessageUsers[0].firstName,
+          });
+        } else {
+          console.log(
+            "[getUsersWithMessages] No users found matching message partners"
+          );
+        }
+
+        // For chat, we want to show all users you've messaged with, regardless of type
+        let filteredUsers = allMessageUsers;
+
+        // Remove current user if present
+        filteredUsers = filteredUsers.filter(
+          (user) => user._id.toString() !== userID
+        );
+
+        const userLastMessageMap = new Map(
+          messagePartners.map((partner) => [
+            partner._id?.toString(),
+            {
+              lastMessageTime: partner.lastMessageTime,
+              lastMessage: partner.lastMessage,
+              lastMessageAttachments: partner.lastMessageAttachments || [],
+              lastMessageSender: partner.lastMessageSender,
+            },
+          ])
+        );
+
+        const unreadCounts = await Promise.all(
+          filteredUsers.map(async (user) => {
+            const count = await Message.countDocuments({
+              sender: user._id,
+              receiver: new mongoose.Types.ObjectId(userID),
+              isRead: false,
+            });
+            return [user._id.toString(), count];
+          })
+        );
+        const unreadCountMap = new Map(unreadCounts);
+
+        enrichedUsers = filteredUsers.map((user) => {
+          const messageDetails = userLastMessageMap.get(user._id.toString());
+          const unreadCount = unreadCountMap.get(user._id.toString()) || 0;
+          totalUnreadMessages += unreadCount;
+
+          return {
+            firstName: user.firstName,
+            lastName: user.lastName, // Include lastName for full name display
+            email: user.email || user.userEmail, // Support both field names
+            phone: user.phone, // Include phone for display
+            userType: user.userType, // Use individual user's userType, not requesting user's
+            image: user.image,
+            lastMessageTime: messageDetails?.lastMessageTime,
+            lastMessage: messageDetails?.lastMessage,
+            lastMessageAttachments: messageDetails?.lastMessageAttachments || [],
+            isLastMessageSentByMe:
+              messageDetails?.lastMessageSender.toString() === userID,
+            unreadCount: unreadCountMap.get(user._id.toString()) || 0,
+            // Include _id for compatibility with expected response
+            _id: user._id,
+          };
+        });
+
+        // Sorting users based on their last message time
+        enrichedUsers.sort((a, b) => {
+          const timeA = a.lastMessageTime || 0;
+          const timeB = b.lastMessageTime || 0;
+          return timeB - timeA;
+        });
+        console.log(
+          `[getUsersWithMessages] Sorted ${enrichedUsers.length} enriched users by message time`
+        );
+      } // End of else block (ADMIN users)
+    } // End of if (messagePartners.length > 0)
 
     // Applying pagination
     const paginatedUsers = enrichedUsers.slice(
