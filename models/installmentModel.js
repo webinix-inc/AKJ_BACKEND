@@ -14,16 +14,21 @@ const installmentSchema = new mongoose.Schema({
     type: Number,
     required: true,
   },
+  validityId: {
+    type: mongoose.Schema.Types.ObjectId,
+    // required: false // Optional for backward compatibility
+  },
+  // @deprecated - Moved to UserInstallment model. Do not use for new records.
   userPayments: [
     {
       userId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
-        required: true,
+        // required: true, // Removed required to allow empty array for new plans
       },
-      installmentIndex: { type: Number, required: true },
+      installmentIndex: { type: Number },
       isPaid: { type: Boolean, default: false },
-      paidAmount: { type: Number, required: true },
+      paidAmount: { type: Number },
       paymentDate: { type: Date },
     },
   ],

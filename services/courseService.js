@@ -81,43 +81,43 @@ const createCourseLogic = async (courseData, files) => {
       session.endSession();
       throw new Error("Course title cannot be empty.");
     }
-    
+
     console.log(`🔍 Checking for duplicate course with title: "${normalizedTitle}"`);
-    
+
     // 🔥 CRITICAL: Check for duplicate BEFORE creating any course data
     // Use case-insensitive regex to match titles regardless of case
     // Escape special regex characters in the title to prevent regex injection
     const escapedTitle = normalizedTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const titleRegex = new RegExp(`^\\s*${escapedTitle}\\s*$`, 'i');
-    
+
     // Check for duplicate within transaction to ensure isolation
     // Use readConcern to ensure we see the latest committed data
-    const existingCourse = await Course.findOne({ 
+    const existingCourse = await Course.findOne({
       title: { $regex: titleRegex }
     }).session(session);
-    
+
     if (existingCourse) {
       // Double-check with exact normalized comparison to avoid false positives
       const existingTitleNormalized = (existingCourse.title || '').trim().toLowerCase();
       const newTitleNormalized = normalizedTitle.toLowerCase();
-      
+
       if (existingTitleNormalized === newTitleNormalized) {
         console.error(`❌ Duplicate course found:`, {
           existingTitle: existingCourse.title,
           existingId: existingCourse._id,
           newTitle: normalizedTitle
         });
-        
+
         // 🔥 CRITICAL: Abort transaction immediately before throwing error
         if (session.inTransaction()) {
           await session.abortTransaction();
         }
         session.endSession();
-        
+
         throw new Error("Course with this title already exists.");
       }
     }
-    
+
     console.log(`✅ No duplicate found for title: "${normalizedTitle}"`);
 
     // Validate subCategory and get category ID
@@ -202,7 +202,7 @@ const createCourseLogic = async (courseData, files) => {
     // Automatically create a root folder for the course (within transaction)
     try {
       const Folder = require('../models/folderModel');
-      
+
       // Check if course already has a root folder
       if (course.rootFolder) {
         console.log("ℹ️ Course already has a root folder, skipping creation");
@@ -215,11 +215,11 @@ const createCourseLogic = async (courseData, files) => {
           parentFolderId: null
         });
         await newFolder.save({ session });
-        
+
         // Update course with rootFolder (within transaction)
         course.rootFolder = newFolder._id;
         await course.save({ session });
-        
+
         // Auto-initialize Live Videos folder for course root folders
         try {
           const { initializeLiveVideosFolder } = require('../utils/folderUtils');
@@ -229,7 +229,7 @@ const createCourseLogic = async (courseData, files) => {
           console.error('❌ Failed to create Live Videos folder:', liveVideosError);
           // Don't fail the main course creation if Live Videos folder fails
         }
-        
+
         console.log("✅ Root folder created and linked to course");
       }
     } catch (folderError) {
@@ -241,7 +241,7 @@ const createCourseLogic = async (courseData, files) => {
     // Commit the transaction
     await session.commitTransaction();
     session.endSession();
-    
+
     console.log("🎉 Course creation completed successfully");
     return course;
   } catch (error) {
@@ -291,7 +291,7 @@ const updateCourseLogic = async (courseId, updateData, files) => {
     if (!course) {
       throw new Error("Course not found");
     }
-    
+
     console.log("📋 Current course title:", course.title);
 
     // Handle description - can be HTML string or array
@@ -311,8 +311,8 @@ const updateCourseLogic = async (courseId, updateData, files) => {
       } else {
         descriptionArray = [String(description)];
       }
-      console.log('📝 Processed description:', { 
-        original: typeof description, 
+      console.log('📝 Processed description:', {
+        original: typeof description,
         processed: descriptionArray.length + ' items',
         isHTML: description.includes('<') && description.includes('>')
       });
@@ -349,7 +349,7 @@ const updateCourseLogic = async (courseId, updateData, files) => {
     // Only validate uniqueness if title is being changed
     if (title && title.trim() && title.trim() !== course.title) {
       console.log("🔍 Checking title uniqueness - title is being changed");
-      const existingCourse = await Course.findOne({ 
+      const existingCourse = await Course.findOne({
         title: title.trim(),
         _id: { $ne: courseId } // Exclude current course
       });
@@ -364,20 +364,20 @@ const updateCourseLogic = async (courseId, updateData, files) => {
 
     // Handle file uploads
     console.log('🔍 Course Update - Files received:', files ? Object.keys(files) : 'No files');
-    
+
     if (files) {
       if (files["courseImage"]) {
         console.log('📸 Updating course images:', files["courseImage"].length, 'files');
         files["courseImage"].forEach((file, index) => {
           console.log(`   ${index + 1}. ${file.originalname} -> ${file.location}`);
         });
-        
+
         course.courseImage = files["courseImage"].map((file) => file.location);
         console.log('✅ Course images updated in memory');
       } else {
         console.log('📸 No courseImage files in request');
       }
-      
+
       if (files["courseNotes"]) {
         course.courseNotes = files["courseNotes"].map((file) => file.location);
       }
@@ -393,7 +393,7 @@ const updateCourseLogic = async (courseId, updateData, files) => {
 
     // Prepare update data object
     const updateFields = {};
-    
+
     // 🔥 CRITICAL: Include title in updateFields if provided and not empty
     // This ensures title updates even if it's the same value (for consistency)
     if (title !== undefined && title !== null && String(title).trim() !== '') {
@@ -404,7 +404,7 @@ const updateCourseLogic = async (courseId, updateData, files) => {
     } else {
       console.log('ℹ️ No title provided in update request');
     }
-    
+
     if (descriptionArray) updateFields.description = descriptionArray;
     if (subject) updateFields.subject = subject;
     if (price !== undefined) updateFields.price = price;
@@ -416,12 +416,12 @@ const updateCourseLogic = async (courseId, updateData, files) => {
     if (lessons) updateFields.lessons = lessons;
     if (weeks) updateFields.weeks = weeks;
     if (approvalStatus) updateFields.approvalStatus = approvalStatus;
-    
+
     // Handle courseType - allow any value since enum validation is disabled
     if (courseType) {
       updateFields.courseType = courseType;
     }
-    
+
     // Handle file updates
     if (files) {
       if (files["courseImage"]) {
@@ -444,8 +444,8 @@ const updateCourseLogic = async (courseId, updateData, files) => {
     const updatedCourse = await Course.findByIdAndUpdate(
       courseId,
       { $set: updateFields },
-      { 
-        new: true, 
+      {
+        new: true,
         runValidators: false, // Skip validation to avoid courseType enum issues
         populate: [
           { path: 'category', select: 'name' },
@@ -453,23 +453,23 @@ const updateCourseLogic = async (courseId, updateData, files) => {
         ]
       }
     );
-    
+
     if (!updatedCourse) {
       throw new Error("Course not found or update failed");
     }
-    
+
     console.log('💾 Course updated successfully in database');
     console.log('📸 Final course images:', updatedCourse.courseImage);
 
     // 🔥 CRITICAL: Update installment plans if course pricing changed
     if (price || discount) {
       console.log("💰 Course pricing changed, checking for subscription to update installment plans...");
-      
+
       try {
         const subscription = await Subscription.findOne({ course: courseId });
         if (subscription && subscription.validities && subscription.validities.length > 0) {
           console.log("📊 Found subscription, updating installment plans...");
-          
+
           await installmentService.updateExistingInstallmentPlans(
             courseId,
             subscription,
@@ -646,7 +646,7 @@ const getCourseWithDetails = async (courseId) => {
       .populate("teacher")
       .populate("faqs")
       .populate("rootFolder");
-    
+
     return course;
   } catch (error) {
     console.error("Error getting course with details:", error);
@@ -668,6 +668,24 @@ const toggleCoursePublishStatus = async (courseId, isPublished) => {
     const course = await Course.findById(courseId);
     if (!course) {
       throw new Error("Course not found.");
+    }
+
+    // Debug logging
+    console.log(`Checking publish requirements for course: ${course.title} (${course._id})`);
+    console.log(`Course Type: '${course.courseType}'`);
+
+    const isBatch = course.courseType && course.courseType.toLowerCase() === "batch";
+
+    // If trying to publish, check if any subscriptions exist (Skipping for Batches)
+    if (isPublished && !isBatch) {
+      const Subscription = require("../models/subscriptionModel");
+      const subCount = await Subscription.countDocuments({ course: courseId });
+
+      console.log(`Subscription count: ${subCount}`);
+
+      if (subCount === 0) {
+        throw new Error("Cannot publish course without any active subscription plans. Please add a subscription plan first.");
+      }
     }
 
     // Update the isPublished field using findByIdAndUpdate to avoid validation
@@ -697,7 +715,7 @@ const addTeacherToCourse = async (courseId, teacherId) => {
 
     // Note: Teacher validation should be done in the controller or a separate service
     // For now, we'll assume the teacher validation is handled elsewhere
-    
+
     // Update teacher using findByIdAndUpdate to avoid validation
     const updatedCourse = await Course.findByIdAndUpdate(
       courseId,

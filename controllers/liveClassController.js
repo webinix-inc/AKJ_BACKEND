@@ -85,10 +85,10 @@ const processAttendanceData = async (payload) => {
     // Process each attendance record
     for (const attendanceRecord of attendance) {
       try {
-        const { 
-          userId: merithubUserId, 
-          startTime, 
-          endTime, 
+        const {
+          userId: merithubUserId,
+          startTime,
+          endTime,
           totalTime, // in seconds
           role,
           userType,
@@ -289,7 +289,7 @@ const sendAttendanceMessage = async (adminId, userId, liveClass, attendanceData)
     };
 
     // Use totalTimeSeconds if available for more accurate duration
-    const displayDuration = attendanceData.totalTimeSeconds 
+    const displayDuration = attendanceData.totalTimeSeconds
       ? formatDurationFromSeconds(attendanceData.totalTimeSeconds)
       : formatDuration(duration);
 
@@ -460,7 +460,7 @@ const createLiveClass = async (req, res) => {
   console.log('🎬 ============================================');
   console.log('📅 Timestamp:', new Date().toISOString());
   console.log('📤 Request Body:', JSON.stringify(req.body, null, 2));
-  
+
   try {
     const {
       userId,
@@ -487,7 +487,7 @@ const createLiveClass = async (req, res) => {
 
     // Validate required fields
     console.log('✅ [VALIDATION] Starting field validation...');
-    
+
     if (!title || title.trim() === "") {
       console.log('❌ [VALIDATION] Title validation failed');
       return res.status(400).json({
@@ -515,7 +515,7 @@ const createLiveClass = async (req, res) => {
     // Validate platform-specific requirements
     console.log('🔍 [PLATFORM] Validating platform-specific requirements...');
     console.log('   Platform:', platform);
-    
+
     if (platform === "zoom") {
       console.log('🔍 [ZOOM] Validating Zoom requirements...');
       if (!zoomMeetingLink || zoomMeetingLink.trim() === "") {
@@ -541,7 +541,7 @@ const createLiveClass = async (req, res) => {
     console.log('🕐 [TIME] Validating start time...');
     const classStartTime = new Date(startTime);
     console.log('   Parsed start time:', classStartTime);
-    
+
     if (isNaN(classStartTime.getTime())) {
       console.log('❌ [TIME] Invalid start time format');
       return res.status(400).json({
@@ -554,7 +554,7 @@ const createLiveClass = async (req, res) => {
     console.log('   Current time:', now);
     console.log('   Time difference (ms):', timeDifference);
     console.log('   Time difference (minutes):', Math.round(timeDifference / 60000));
-    
+
     // Allow immediate classes (within 1 minute) or future scheduled classes
     if (timeDifference < -60000) { // More than 1 minute in the past
       console.log('❌ [TIME] Start time is too far in the past');
@@ -644,7 +644,7 @@ const createLiveClass = async (req, res) => {
     console.log('\n💾 [DATABASE] Creating live class in database...');
     const liveClass = new LiveClass(liveClassDetails);
     console.log('📋 [DATABASE] Live class object created');
-    
+
     console.log('💾 [DATABASE] Saving live class to database...');
     await liveClass.save();
     console.log('✅ [DATABASE] Live class saved successfully with ID:', liveClass._id);
@@ -712,11 +712,11 @@ const createLiveClass = async (req, res) => {
 
     } else {
       console.log('🔍 [MERITHUB] Processing MeritHub platform...');
-      
+
       // MeritHub logic - get user's MeritHub token for class creation
       console.log('👤 [MERITHUB] Looking up instructor in database...');
       console.log('   Searching for merithubUserId:', userId);
-      
+
       const instructor = await User.findOne({ merithubUserId: userId });
       if (!instructor) {
         console.log('❌ [MERITHUB] Instructor not found in database');
@@ -733,12 +733,12 @@ const createLiveClass = async (req, res) => {
       // Note: scheduleLiveClass uses service account token, not user token
       // The userToken parameter is accepted but not used in the implementation
       const apiResponse = await scheduleLiveClass(userId, liveClassDetails, null);
-      
+
       console.log('📥 [MERITHUB] Received API response');
       console.log('   Response type:', typeof apiResponse);
       console.log('   Has classId:', !!(apiResponse && apiResponse.classId));
       console.log('   Has commonLinks:', !!(apiResponse && apiResponse.commonLinks));
-      
+
       if (!apiResponse || !apiResponse.classId || !apiResponse.commonLinks) {
         console.log('❌ [MERITHUB] Invalid API response structure');
         console.log('   Full response:', apiResponse);
@@ -832,30 +832,30 @@ const createLiveClass = async (req, res) => {
       console.log('💡 [MERITHUB DOCS] All users should use the hostLink to open the classroom');
       console.log('💡 [MERITHUB DOCS] Do not use commonLinks to open the classroom');
       await liveClass.save();
-      
+
       console.log('🚨 [DEBUG] CHECKPOINT: liveClass.save() completed successfully!');
 
       // Find users associated with any of the course IDs
       console.log('\n👥 [USER_SEARCH] Finding users for live class...');
       console.log('🔍 [USER_SEARCH] Searching for users with purchased courses:', courseIds);
-      
+
       const users = await User.find({
         "purchasedCourses.course": { $in: courseIds },
       });
-      
+
       console.log(`📊 [USER_SEARCH] Database query completed`);
       console.log(`   Total users found: ${users.length}`);
-      
+
       // 🔧 FIX: Filter out users without merithubUserId and log details
       console.log('🔍 [USER_FILTER] Filtering users with merithubUserId...');
       const usersWithMerithubId = users.filter(user => user.merithubUserId);
       const merithubUserIds = usersWithMerithubId.map((user) => user.merithubUserId);
-      
+
       console.log(`📊 [USER_FILTER] Filtering results:`);
       console.log(`   Total users found: ${users.length}`);
       console.log(`   Users with merithubUserId: ${usersWithMerithubId.length}`);
       console.log(`   Users missing merithubUserId: ${users.length - usersWithMerithubId.length}`);
-      
+
       if (usersWithMerithubId.length > 0) {
         console.log(`👥 [USER_LIST] Users eligible for live class:`);
         usersWithMerithubId.forEach((user, index) => {
@@ -984,7 +984,7 @@ const createLiveClass = async (req, res) => {
       console.log(`   Platform: ${liveClass.platform}`);
       console.log(`   Users processed: ${merithubUserIds ? merithubUserIds.length : 0}`);
       console.log(`   Response sent to client: SUCCESS`);
-      
+
       res.status(201).json({
         message: "Live class scheduled successfully",
         liveClass,
@@ -1001,7 +1001,7 @@ const createLiveClass = async (req, res) => {
         "An unexpected error occurred while scheduling the live class.",
     });
   }
-  
+
   console.log('\n🎬 ============================================');
   console.log('🎬 LIVE CLASS CREATION ENDED');
   console.log('🎬 ============================================');
@@ -1174,6 +1174,7 @@ const editLiveClass = async (req, res) => {
       startTime: inputDetails.startTime || existingClass.startTime,
       duration: inputDetails.duration || existingClass.duration,
       platform: inputDetails.platform || existingClass.platform,
+      courseIds: inputDetails.courseIds || existingClass.courseIds,
     };
 
     // Platform-specific updates
@@ -1485,7 +1486,7 @@ const checkClassStatus = async (req, res) => {
         const duration = liveClass.duration || 60;
         const endTime = new Date(startTime.getTime() + duration * 60 * 1000);
         const timeSinceEnd = now - endTime;
-        
+
         // If class has passed its end time, mark as completed immediately
         if (timeSinceEnd > 0 && liveClass.status !== "lv") {
           console.log(`⏰ [STATUS CHECK] Class has passed its end time (${Math.round(timeSinceEnd / 60000)} minutes ago) - marking as completed`);
@@ -1499,11 +1500,11 @@ const checkClassStatus = async (req, res) => {
             classData: { ...liveClass.toObject(), status: "completed" }
           });
         }
-        
+
         // Try to get status from MeritHub - try direct classId query first, then instructor query
         let meritHubStatus = null;
         let statusError = null;
-        
+
         try {
           // First try: Query directly by classId (more reliable)
           console.log(`📊 [STATUS CHECK] Attempting direct classId query: ${liveClass.classId}`);
@@ -1512,7 +1513,7 @@ const checkClassStatus = async (req, res) => {
         } catch (directError) {
           console.log(`⚠️ [STATUS CHECK] Direct classId query failed: ${directError.message}`);
           statusError = directError;
-          
+
           // Fallback: Try instructor query if we have instructor ID
           if (liveClass.merithubInstructorId) {
             try {
@@ -1525,7 +1526,7 @@ const checkClassStatus = async (req, res) => {
             }
           }
         }
-        
+
         if (!meritHubStatus) {
           console.log(`❌ [STATUS CHECK] Both query methods failed - checking if class exists in MeritHub`);
           // If both queries failed, the class might not exist in MeritHub
@@ -1546,7 +1547,7 @@ const checkClassStatus = async (req, res) => {
           // If we can't determine status, throw the error to be caught by outer catch
           throw statusError || new Error('Failed to get class status from MeritHub');
         }
-        
+
         console.log(`📊 [STATUS CHECK] MeritHub status response:`, JSON.stringify(meritHubStatus, null, 2));
 
         const classesArray = Array.isArray(meritHubStatus.classes) ? meritHubStatus.classes : [];
@@ -1556,7 +1557,7 @@ const checkClassStatus = async (req, res) => {
           meritHubStatus.status === "live" ||
           activeMeritHubStatus === "lv" ||
           activeMeritHubStatus === "live";
-        
+
         // Trust MeritHub's response: if it returns empty classes array, check if class exists
         if (classesArray.length === 0) {
           console.log(`⚠️ [STATUS CHECK] MeritHub returned empty classes array`);
@@ -1576,12 +1577,12 @@ const checkClassStatus = async (req, res) => {
             console.log(`⚠️ [STATUS CHECK] Class has valid classId (${liveClass.classId}) but MeritHub returns empty`);
             console.log(`⚠️ [STATUS CHECK] This means the class does NOT exist in MeritHub`);
             console.log(`✅ [STATUS CHECK] Allowing deletion - class can be removed and recreated if needed`);
-            
+
             // Mark as error/completed so it can be deleted
             await LiveClass.findByIdAndUpdate(liveClass._id, {
               status: "completed"
             });
-            
+
             return res.json({
               status: "completed",
               canDelete: true,
@@ -1619,16 +1620,16 @@ const checkClassStatus = async (req, res) => {
             classData: { ...liveClass.toObject(), status: "completed" }
           });
         }
-        
+
         // Check if MeritHub status explicitly indicates completion
         if (meritHubStatus.status === "cp" || meritHubStatus.status === "completed" || meritHubStatus.status === "ended") {
           console.log(`🗑️ [STATUS CHECK] MeritHub status indicates class is completed: ${meritHubStatus.status}`);
-          
+
           // Update database status to "completed"
           await LiveClass.findByIdAndUpdate(liveClass._id, {
             status: "completed"
           });
-          
+
           return res.json({
             status: "completed",
             canDelete: true,
@@ -1639,7 +1640,7 @@ const checkClassStatus = async (req, res) => {
         }
 
         // (second empty-array block removed; handled above)
-        
+
         // Check if MeritHub status object itself indicates completion
         // Sometimes MeritHub might return status in a different format
         if (meritHubStatus.status === "cp" || meritHubStatus.status === "completed" || meritHubStatus.status === "ended") {
@@ -1682,8 +1683,8 @@ const checkClassStatus = async (req, res) => {
         // Check if MeritHub status indicates completion
         // MeritHub might return status in different formats, check for completion indicators
         const meritHubStatusStr = JSON.stringify(meritHubStatus).toLowerCase();
-        if (meritHubStatusStr.includes('completed') || meritHubStatusStr.includes('ended') || 
-            meritHubStatusStr.includes('finished') || meritHubStatus.status === 'cp') {
+        if (meritHubStatusStr.includes('completed') || meritHubStatusStr.includes('ended') ||
+          meritHubStatusStr.includes('finished') || meritHubStatus.status === 'cp') {
           console.log(`🗑️ [STATUS CHECK] MeritHub status indicates class is completed`);
           return res.json({
             status: "completed",
@@ -1712,7 +1713,7 @@ const checkClassStatus = async (req, res) => {
               classData: liveClass
             });
           }
-          
+
           // If class has passed start time by more than duration, it's likely completed
           if (timeSinceStart > duration * 60 * 1000 && !isMeritHubLive) {
             console.log(`🗑️ [STATUS CHECK] Class has passed start time by more than duration and is not live - marking as completed`);
@@ -1768,24 +1769,24 @@ const checkClassStatus = async (req, res) => {
             classData: liveClass
           });
         }
-        
+
         // IMPORTANT: Explicitly handle "up" (upcoming) status - always allow delete/edit
         const currentStatus = meritHubStatus.status || liveClass.status || "scheduled";
         const isUpcoming = currentStatus === "up" || currentStatus === "scheduled";
-        
+
         // Only disable delete/edit when class is ACTUALLY live, not just when scheduled time passes
         // If status is "up" or "scheduled", always allow delete/edit
         // This allows admin to delete/edit classes even after scheduled time if they haven't started yet
         const canDeleteEdit = !isMeritHubLive && (isUpcoming || currentStatus !== "lv" && currentStatus !== "live");
-        
+
         console.log(`📊 [STATUS CHECK] Status: ${currentStatus}, isMeritHubLive: ${isMeritHubLive}, canDeleteEdit: ${canDeleteEdit}`);
-        
+
         return res.json({
           status: currentStatus,
           canDelete: canDeleteEdit, // Allow deletion if class is not live
           canEdit: canDeleteEdit, // Allow edit if class is not live
           message: canDeleteEdit
-            ? "Class can be deleted or edited" 
+            ? "Class can be deleted or edited"
             : "Class is currently live and cannot be deleted or edited",
           meritHubStatus,
           classData: liveClass
@@ -1793,12 +1794,12 @@ const checkClassStatus = async (req, res) => {
 
       } catch (statusError) {
         console.log(`⚠️ [STATUS CHECK] Could not get MeritHub status: ${statusError.message}`);
-        
+
         // Check if error message indicates class is completed
         const errorMessage = statusError.message?.toLowerCase() || '';
-        if (errorMessage.includes('already completed') || 
-            errorMessage.includes('session is already completed') ||
-            errorMessage.includes('completed') && errorMessage.includes('session')) {
+        if (errorMessage.includes('already completed') ||
+          errorMessage.includes('session is already completed') ||
+          errorMessage.includes('completed') && errorMessage.includes('session')) {
           console.log(`✅ [STATUS CHECK] MeritHub error indicates class is completed - marking as completed`);
           await LiveClass.findByIdAndUpdate(liveClass._id, {
             status: "completed"
@@ -1810,14 +1811,14 @@ const checkClassStatus = async (req, res) => {
             classData: { ...liveClass.toObject(), status: "completed" }
           });
         }
-        
+
         // If class has passed its end time, mark as completed even if API fails
         const nowCheck = new Date();
         const startTimeCheck = new Date(liveClass.startTime);
         const durationCheck = liveClass.duration || 60;
         const endTimeCheck = new Date(startTimeCheck.getTime() + durationCheck * 60 * 1000);
         const timeSinceEndCheck = nowCheck - endTimeCheck;
-        
+
         if (timeSinceEndCheck > 0 && liveClass.status !== "lv") {
           console.log(`⏰ [STATUS CHECK] Class has passed end time and MeritHub API failed - marking as completed`);
           await LiveClass.findByIdAndUpdate(liveClass._id, {
@@ -1830,7 +1831,7 @@ const checkClassStatus = async (req, res) => {
             classData: { ...liveClass.toObject(), status: "completed" }
           });
         }
-        
+
         // Fall back to our database status
       }
     }
@@ -1869,24 +1870,24 @@ const checkClassStatus = async (req, res) => {
         classData: liveClass
       });
     }
-    
+
     // IMPORTANT: Explicitly handle "up" (upcoming) status - always allow delete/edit
     const currentStatusFinal = liveClass.status || "scheduled";
     const isUpcomingFinal = currentStatusFinal === "up" || currentStatusFinal === "scheduled";
-    
+
     // Only disable delete/edit when class is ACTUALLY live, not just when scheduled time passes
     // If status is "up" or "scheduled", always allow delete/edit
     // This allows admin to delete/edit classes even after scheduled time if they haven't started yet
     const canDeleteEditFinal = isUpcomingFinal || (currentStatusFinal !== "lv" && currentStatusFinal !== "live");
-    
+
     console.log(`📊 [STATUS CHECK FALLBACK] Status: ${currentStatusFinal}, isUpcoming: ${isUpcomingFinal}, canDeleteEdit: ${canDeleteEditFinal}`);
-    
+
     return res.json({
       status: currentStatusFinal,
       canDelete: canDeleteEditFinal, // Allow deletion if class is not live
       canEdit: canDeleteEditFinal, // Allow edit if class is not live
       message: canDeleteEditFinal
-        ? "Class can be deleted or edited" 
+        ? "Class can be deleted or edited"
         : "Class is currently live and cannot be deleted or edited",
       classData: liveClass
     });
@@ -1966,23 +1967,23 @@ const handleMeritHubStatusPing = async (req, res) => {
     } else if (payload.requestType === "attendance") {
       console.log("📊 [ATTENDANCE] Attendance data received. Processing attendance...");
       console.log("📊 [ATTENDANCE] Attendance details:", JSON.stringify(payload.attendance, null, 2));
-      
+
       await processAttendanceData(payload);
     } else if (payload.requestType === "recording") {
       console.log("📹 [RECORDING] Recording data received. Processing recording...");
       console.log("📹 [RECORDING] Recording details:", JSON.stringify(payload, null, 2));
-      
+
       await processRecordingData(payload);
     } else if (payload.requestType === "classFiles") {
       console.log("📁 [FILES] Class files data received. Processing files...");
       console.log("📁 [FILES] Files details:", JSON.stringify(payload.Files, null, 2));
-      
+
       // TODO: Handle class files if needed
       // You can store file URLs in the LiveClass model or create a separate model
     } else if (payload.requestType === "chats") {
       console.log("💬 [CHATS] Chat data received. Processing chats...");
       console.log("💬 [CHATS] Chat details:", JSON.stringify(payload.chats, null, 2));
-      
+
       // TODO: Handle chat data if needed
       // You can store chat JSON links in the LiveClass model or create a separate model
     } else {
@@ -2150,14 +2151,14 @@ const addUserToLiveClass = async (req, res) => {
     if (existingClassInfo?.liveLink) {
       console.log(`✅ [ADD_USER_TO_CLASS] User already has access to this class`);
       console.log(`🔗 [ADD_USER_TO_CLASS] Existing link: ${existingClassInfo.liveLink}`);
-      
+
       // Ensure the link has iframe parameter
       let existingLink = existingClassInfo.liveLink;
       if (!existingLink.includes('iframe=true')) {
         const separator = existingLink.includes('?') ? '&' : '?';
         existingLink = `${existingLink}${separator}iframe=true`;
       }
-      
+
       return res.status(200).json({
         message: "User already has access to this class",
         individualUserLink: existingLink,
@@ -2181,7 +2182,7 @@ const addUserToLiveClass = async (req, res) => {
     // Extract commonParticipantLink from the stored participantLink URL
     // Format: https://live.merithub.com/info/room/${CLIENT_ID}/${commonParticipantLink}
     let commonParticipantLink = null;
-    
+
     if (liveClass.participantLink) {
       // Extract the link part from the full URL
       const urlParts = liveClass.participantLink.split('/');

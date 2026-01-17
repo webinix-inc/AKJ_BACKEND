@@ -12,8 +12,7 @@ const validitySchema = new mongoose.Schema(
     discount: {
       type: Number,
     },
-  },
-  { _id: false }
+  }
 );
 
 const featureSchema = new mongoose.Schema(

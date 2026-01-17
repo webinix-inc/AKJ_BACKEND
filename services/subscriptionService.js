@@ -107,7 +107,7 @@ const createSubscriptionLogic = async (subscriptionData) => {
     // Calculate and update course pricing based on validities
     if (validities && validities.length > 0) {
       const pricingResult = calculateLowestPrice(validities);
-      
+
       courseData.price = pricingResult.lowestDiscountedPrice;
       courseData.discount = pricingResult.correspondingDiscount;
       courseData.oldPrice = pricingResult.basePrice;
@@ -147,11 +147,71 @@ const createSubscriptionLogic = async (subscriptionData) => {
 // ============================================================================
 // 🔄 UPDATE SUBSCRIPTION BUSINESS LOGIC
 // ============================================================================
+
+// Helper to ensure default "Full Payment" installment exists for every validity
+const ensureDefaultInstallments = async (subscription) => {
+  try {
+    if (!subscription || !subscription.validities || !subscription.course) return;
+
+    // Populate course if it's not already populated, to get the _id
+    const courseId = subscription.course._id || subscription.course;
+
+    for (const validity of subscription.validities) {
+      const planType = `${validity.validity} months`; // e.g. "12 months"
+
+      // Check if an installment plan already exists for this course & validity type
+      const existingInstallment = await Installment.findOne({
+        courseId: courseId,
+        planType: { $regex: new RegExp(`^${planType}$`, "i") } // Case insensitive check
+      });
+
+      if (!existingInstallment) {
+        // Create default 1-payment installment
+
+        // 1. Calculate Base Discounted Price
+        const discount = validity.discount || 0;
+        const discountAmount = (validity.price * discount) / 100;
+        const baseDiscountedPrice = validity.price - discountAmount;
+
+        // 2. Calculate Taxes & Fees
+        const gstPercent = subscription.gst || 0;
+        const handlingPercent = subscription.internetHandling || 0;
+
+        const gstAmount = (baseDiscountedPrice * gstPercent) / 100;
+        const handlingAmount = (baseDiscountedPrice * handlingPercent) / 100;
+
+        // 3. Final Total
+        const finalPrice = Math.floor(baseDiscountedPrice + gstAmount + handlingAmount);
+
+        const newInstallment = new Installment({
+          courseId: courseId,
+          planType: planType,
+          numberOfInstallments: 1,
+          totalAmount: finalPrice, // REQUIRED FIELD
+          installments: [
+            {
+              amount: finalPrice,
+              dueDate: "Immediate", // REQUIRED STRING
+              isPaid: false
+            }
+          ]
+        });
+
+        await newInstallment.save();
+        console.log(`Auto-created default installment for: ${planType} for course ${courseId} (Price: ${finalPrice} incl. ${gstPercent}% GST & ${handlingPercent}% Handling)`);
+      }
+    }
+  } catch (error) {
+    console.error("Error ensuring default installments:", error);
+    // Don't block the main flow if this fails
+  }
+};
+
 const updateSubscriptionLogic = async (subscriptionId, updateData) => {
   try {
     // Fetch the current subscription to compare changes, particularly for validities
     const currentSubscription = await Subscription.findById(subscriptionId).populate("course");
-    
+
     if (!currentSubscription) {
       throw new Error("Subscription not found");
     }
@@ -196,10 +256,15 @@ const updateSubscriptionLogic = async (subscriptionId, updateData) => {
         for (const validity of removedValidities) {
           const associatedInstallments = await Installment.find({
             courseId: resolvedCourseId,
-            planType: `${validity.validity} months`,
+            planType: { $regex: new RegExp(`^${validity.validity} months$`, "i") },
           });
           if (associatedInstallments.length > 0) {
-            throw new Error(`Cannot remove validity of ${validity.validity} months as there are existing installments linked to it.`);
+            // Instead of blocking, we auto-delete the linked installment plan
+            console.log(`🗑️ Auto-deleting installment plan for removed validity: ${validity.validity} months`);
+            await Installment.deleteMany({
+              courseId: resolvedCourseId,
+              planType: { $regex: new RegExp(`^${validity.validity} months$`, "i") },
+            });
           }
         }
       }
@@ -221,8 +286,8 @@ const updateSubscriptionLogic = async (subscriptionId, updateData) => {
     }
 
     // Validate Internet Handling Charges, if being updated
-    if (updateData.internetHandling !== undefined && 
-        (typeof updateData.internetHandling !== "number" || updateData.internetHandling < 0)) {
+    if (updateData.internetHandling !== undefined &&
+      (typeof updateData.internetHandling !== "number" || updateData.internetHandling < 0)) {
       throw new Error("Internet Handling Charges must be a non-negative number");
     }
 
@@ -232,10 +297,27 @@ const updateSubscriptionLogic = async (subscriptionId, updateData) => {
     // Re-fetch the subscription to include populated course data
     const updatedSubscription = await Subscription.findById(subscriptionId).populate("course");
 
+    // 🔥 CHECK: If course changed, check if previous course needs unpublishing
+    if (updateData.course && resolvedCourseId && currentSubscription.course) {
+      const oldCourseId = currentSubscription.course._id || currentSubscription.course;
+      // Compare strictly (strings)
+      if (oldCourseId.toString() !== resolvedCourseId.toString()) {
+        const remainingCount = await Subscription.countDocuments({ course: oldCourseId });
+        if (remainingCount === 0) {
+          console.log(`📉 Auto-unpublishing PREVIOUS course ${oldCourseId} as its last subscription was moved.`);
+          await Course.findByIdAndUpdate(oldCourseId, { isPublished: false });
+        }
+
+        // Optional: Clean up installments on old course? 
+        // The prompt didn't strictly ask, but it's good practice. 
+        // For now, we stick to the requested behavior (unpublishing).
+      }
+    }
+
     // 🔥 CRITICAL: Update existing installment plans when validities change
     if (updateData.validities) {
       console.log("📊 Updating existing installment plans due to validity changes...");
-      
+
       try {
         // Create subscription object for the service call
         const subscriptionForUpdate = {
@@ -244,7 +326,7 @@ const updateSubscriptionLogic = async (subscriptionId, updateData) => {
           gst: updateData.gst !== undefined ? updateData.gst : currentSubscription.gst,
           internetHandling: updateData.internetHandling !== undefined ? updateData.internetHandling : currentSubscription.internetHandling
         };
-        
+
         if (resolvedCourseId) {
           await installmentService.updateExistingInstallmentPlans(
             resolvedCourseId,
@@ -265,6 +347,9 @@ const updateSubscriptionLogic = async (subscriptionId, updateData) => {
       throw new Error("Subscription not found after update");
     }
 
+    // 🔥 AUTO-ENSURE: Create default installments for any NEW validities added during update
+    await ensureDefaultInstallments(updatedSubscription);
+
     return updatedSubscription;
   } catch (error) {
     console.error("Error in updateSubscriptionLogic:", error.message);
@@ -283,6 +368,21 @@ const deleteSubscriptionLogic = async (subscriptionId) => {
       throw new Error("Subscription not found");
     }
 
+    // Check if course is published and if this is the last subscription
+    const courseId = subscription.course;
+    const Course = require("../models/courseModel");
+    const course = await Course.findById(courseId);
+
+    if (course && course.isPublished) {
+      const subCount = await Subscription.countDocuments({ course: courseId });
+      // If this is the last subscription, auto-unpublish the course
+      if (subCount <= 1) {
+        console.log(`📉 Auto-unpublishing course ${courseId} as its last subscription plan is being deleted.`);
+        course.isPublished = false;
+        await course.save();
+      }
+    }
+
     // Delete the subscription
     const deletedSubscription = await Subscription.findByIdAndDelete(subscriptionId);
     if (!deletedSubscription) {
@@ -290,11 +390,10 @@ const deleteSubscriptionLogic = async (subscriptionId) => {
     }
 
     // Delete related installments based on the course ID of the deleted subscription
-    const { course } = deletedSubscription;
-    await installmentService.deleteInstallmentsForCourse(course);
+    await installmentService.deleteInstallmentsForCourse(courseId);
 
     console.log(`✅ Subscription ${subscriptionId} and related installments deleted successfully`);
-    
+
     return {
       subscription: deletedSubscription,
       message: "Subscription and related installments deleted successfully"
@@ -393,7 +492,7 @@ const getSubscriptionWithInstallments = async (subscriptionId) => {
     }
 
     const installments = await Installment.find({ courseId: subscription.course._id });
-    
+
     return {
       subscription,
       installments,

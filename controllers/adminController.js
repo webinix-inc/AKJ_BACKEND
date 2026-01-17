@@ -1200,8 +1200,15 @@ exports.createSubscription = async (req, res) => {
 
 exports.getAllSubscriptions = async (req, res) => {
   try {
-    const subscriptions = await Subscription.find().populate("course");
-    console.log("All subscriptions ny Himanshu -> ", subscriptions);
+    const filter = {};
+    if (req.query.courseId) {
+      filter.course = req.query.courseId;
+    }
+
+    // 🔥 OPTIMIZED: Filter by courseId if provided
+    const subscriptions = await Subscription.find(filter).populate("course");
+    // console.log("All subscriptions ny Himanshu -> ", subscriptions); // Removed verbose log
+
     return res.status(200).json({
       status: 200,
       message: "Subscriptions retrieved successfully",
@@ -1957,8 +1964,20 @@ exports.getAllCourses = async (req, res) => {
       .populate("subjects")
       .populate("rootFolder")
       .populate("category", "name")
-      .populate("faqs");
-    return res.status(200).json({ status: 200, data: courses });
+      .populate("faqs")
+      .sort({ createdAt: -1 });
+
+    // Fetch subscription counts for each course
+    const Subscription = require("../models/subscriptionModel");
+    const coursesWithSubs = await Promise.all(courses.map(async (course) => {
+      const subCount = await Subscription.countDocuments({ course: course._id });
+      return {
+        ...course.toObject(),
+        subscriptionCount: subCount
+      };
+    }));
+
+    return res.status(200).json({ status: 200, data: coursesWithSubs });
   } catch (error) {
     console.error(error);
     return res
@@ -6179,94 +6198,8 @@ exports.createCourse = async (req, res) => {
  * Toggle publish status of a course
  * Route: PATCH /api/v1/admin/courses/:id/toggle-publish
  */
-exports.togglePublishCourse = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { isPublished } = req.body; // Get desired state from request body
-
-    console.log("🔄 Setting publish status for course:", id, "to:", isPublished);
-
-    // Validate if id is a valid ObjectId
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        status: 400,
-        message: "Invalid course ID",
-        data: null,
-      });
-    }
-
-    // Find the course
-    const course = await Course.findById(id);
-    if (!course) {
-      return res.status(404).json({
-        status: 404,
-        message: "Course not found",
-        data: null,
-      });
-    }
-
-    // 🔧 FIX: Handle invalid courseType values using utility
-    try {
-      await fixInvalidCourseType(id);
-    } catch (fixError) {
-      console.warn(`⚠️ Could not fix courseType for course ${id}:`, fixError.message);
-      // Continue with the publish toggle even if courseType fix fails
-    }
-
-    // Set the publish status to desired state
-    console.log("🔍 Current isPublished value:", course.isPublished, typeof course.isPublished);
-
-    // If no desired state provided, toggle the current state
-    let newStatus;
-    if (isPublished !== undefined) {
-      // Use the desired state from request
-      newStatus = isPublished === true || isPublished === 'true';
-    } else {
-      // Fallback to toggle behavior
-      const isCurrentlyPublished = course.isPublished === true;
-      newStatus = !isCurrentlyPublished;
-    }
-
-    // Use findByIdAndUpdate to avoid full model validation
-    console.log("🔄 New isPublished value:", newStatus, typeof newStatus);
-
-    const updatedCourse = await Course.findByIdAndUpdate(
-      id,
-      { isPublished: newStatus },
-      {
-        new: true, // Return updated document
-        runValidators: false // Skip validation to avoid courseType enum issues
-      }
-    );
-
-    if (!updatedCourse) {
-      return res.status(404).json({
-        status: 404,
-        message: "Course not found or could not be updated",
-        data: null,
-      });
-    }
-
-    console.log(`✅ Course "${updatedCourse.title}" ${updatedCourse.isPublished ? 'published' : 'unpublished'} successfully`);
-
-    return res.status(200).json({
-      status: 200,
-      message: `Course ${updatedCourse.isPublished ? 'published' : 'unpublished'} successfully`,
-      data: {
-        courseId: updatedCourse._id,
-        title: updatedCourse.title,
-        isPublished: updatedCourse.isPublished,
-      },
-    });
-  } catch (error) {
-    console.error("❌ Error toggling course publish status:", error);
-    return res.status(500).json({
-      status: 500,
-      message: "Server error while updating course publish status",
-      data: error.message,
-    });
-  }
-};
+// Duplicate togglePublishCourse removed. Correct version at line 2165 uses courseService.
+// (Orphan code removed)
 
 /**
  * Get all published courses (for public/user access)

@@ -213,17 +213,28 @@ const chatAttachmentUpload = multer({
       "image/png",
       "image/gif",
       "image/webp",
+      "image/svg+xml",
+      "image/bmp",
+      "image/tiff",
       // Videos
       "video/mp4",
       "video/webm",
       "video/quicktime",
+      "video/x-msvideo", 
+      "video/x-ms-wmv", 
+      "video/x-flv", 
+      "video/3gpp", 
+      "video/x-matroska",
       // Documents
       "application/pdf",
       "application/msword",
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
       "application/vnd.ms-excel",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
+      "application/vnd.ms-powerpoint", // .ppt
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation", // .pptx
       "text/plain",
+      "text/csv",
     ];
 
     if (allowedMimeTypes.includes(file.mimetype)) {
