@@ -23,15 +23,15 @@ exports.createQuiz = async (req, res) => {
   console.log("Creating quiz - Request body:", req.body);
   console.log("Creating quiz - Folder ID:", req.params.folderId);
   console.log("Creating quiz - User:", req.user?._id);
-  
+
   try {
     const { quizName, duration, category, isFreeTest } = req.body;
     const { folderId } = req.params;
-    
+
     // Validate input
     if (!quizName || !duration || !category) {
       console.log("Missing required fields:", { quizName, duration, category });
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
         message: "All fields are required",
         missingFields: {
@@ -45,9 +45,9 @@ exports.createQuiz = async (req, res) => {
     // Validate folderId
     if (!folderId || !mongoose.Types.ObjectId.isValid(folderId)) {
       console.log("Invalid folder ID:", folderId);
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        message: "Invalid folder ID provided" 
+        message: "Invalid folder ID provided"
       });
     }
 
@@ -55,9 +55,9 @@ exports.createQuiz = async (req, res) => {
     const quizExists = await Quiz.findOne({ quizName }).lean();
     if (quizExists) {
       console.log("Quiz already exists:", quizName);
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        message: "Quiz with this name already exists" 
+        message: "Quiz with this name already exists"
       });
     }
 
@@ -65,9 +65,9 @@ exports.createQuiz = async (req, res) => {
     const folder = await QuizFolder.findById(folderId);
     if (!folder) {
       console.log("Folder not found:", folderId);
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
-        message: "Folder not found" 
+        message: "Folder not found"
       });
     }
 
@@ -103,16 +103,16 @@ exports.createQuiz = async (req, res) => {
       .populate('creatorId', 'firstName lastName')
       .lean();
 
-    res.status(201).json({ 
+    res.status(201).json({
       success: true,
-      message: "Quiz created successfully", 
+      message: "Quiz created successfully",
       quiz: populatedQuiz,
       folderId: folderId
     });
-    
+
   } catch (error) {
     console.error("Error creating quiz:", error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
       message: "Internal server error while creating quiz",
       error: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
@@ -129,9 +129,9 @@ exports.fetchQuizzesByFolder = async (req, res) => {
     // Validate folderId
     if (!folderId || !mongoose.Types.ObjectId.isValid(folderId)) {
       console.log("Invalid folder ID:", folderId);
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        message: "Invalid folder ID provided" 
+        message: "Invalid folder ID provided"
       });
     }
 
@@ -145,12 +145,12 @@ exports.fetchQuizzesByFolder = async (req, res) => {
         }
       })
       .lean();
-      
+
     if (!folder) {
       console.log("Folder not found:", folderId);
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
-        message: "Folder not found" 
+        message: "Folder not found"
       });
     }
 
@@ -163,10 +163,10 @@ exports.fetchQuizzesByFolder = async (req, res) => {
       quizzes: folder.quizzes || [],
       folderName: folder.name
     });
-    
+
   } catch (error) {
     console.error("Error fetching quizzes by folder ID:", error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
       message: "Internal server error while fetching quizzes",
       error: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
@@ -186,16 +186,16 @@ exports.fetchAllQuizzes = async (req, res) => {
 exports.fetchFreeTests = async (req, res) => {
   try {
     console.log("Fetching free tests...");
-    const quizzes = await Quiz.find({ 
+    const quizzes = await Quiz.find({
       isFreeTest: true,
-      isActive: true 
+      isActive: true
     })
-    .populate("questions")
-    .select("quizName duration category quizTotalMarks questions isActive createdAt")
-    .lean();
-    
+      .populate("questions")
+      .select("quizName duration category quizTotalMarks questions isActive createdAt")
+      .lean();
+
     console.log(`Found ${quizzes.length} free tests`);
-    
+
     // Format the response with question count
     const formattedQuizzes = quizzes.map(quiz => ({
       _id: quiz._id,
@@ -206,15 +206,15 @@ exports.fetchFreeTests = async (req, res) => {
       questionCount: quiz.questions ? quiz.questions.length : 0,
       createdAt: quiz.createdAt,
     }));
-    
-    res.status(200).json({ 
+
+    res.status(200).json({
       success: true,
       message: "Free tests retrieved successfully",
-      tests: formattedQuizzes 
+      tests: formattedQuizzes
     });
   } catch (error) {
     console.error("Error fetching free tests:", error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
       message: "Internal server error",
       error: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
@@ -297,6 +297,14 @@ exports.toggleQuizActive = async (req, res) => {
 
     if (!quiz) {
       return res.status(404).json({ message: "Quiz not found" });
+    }
+
+    // 🔧 FIX: Invalidate cache after quiz status toggle
+    try {
+      const { invalidateCache } = require('../middlewares/cacheMiddleware');
+      await invalidateCache(`quiz:cache:*`);
+    } catch (cacheError) {
+      console.error(`⚠️ [DEBUG] Cache invalidation failed:`, cacheError);
     }
 
     const action = isActive ? "activated" : "deactivated";
@@ -515,10 +523,29 @@ exports.updateQuizAvailability = async (req, res) => {
 
     await quiz.save();
 
+    // 🔧 FIX: Invalidate cache after updating availability
+    try {
+      const { invalidateCache } = require('../middlewares/cacheMiddleware');
+      await invalidateCache(`quiz:cache:*`);
+    } catch (cacheError) {
+      console.error(`⚠️ [DEBUG] Cache invalidation failed:`, cacheError);
+    }
+
+    console.log(`✅ [DEBUG] Quiz availability updated. isActive: ${quiz.isActive}`);
+
     res.status(200).json({
       message: "Quiz availability updated successfully",
-      quiz: {
+      updatedAvailability: { // 🔧 FIX: Match frontend expectation
+        availabilityType: quiz.availabilityType,
+        isActive: quiz.isActive, // 🔧 FIX: Include isActive status
+        scheduledStartDate: quiz.scheduledStartDate,
+        scheduledStartTime: quiz.scheduledStartTime,
+        scheduledEndDate: quiz.scheduledEndDate,
+        scheduledEndTime: quiz.scheduledEndTime,
+      },
+      quiz: { // Keep for backward compatibility
         id: quiz._id,
+        isActive: quiz.isActive, // 🔧 FIX: Add isActive here too
         availabilityType: quiz.availabilityType,
         scheduledStartDate: quiz.scheduledStartDate,
         scheduledStartTime: quiz.scheduledStartTime,
@@ -538,7 +565,7 @@ exports.getQuizAvailability = async (req, res) => {
   try {
     const { quizId } = req.params;
     const quiz = await Quiz.findById(quizId).select(
-      "availabilityType scheduledStartDate scheduledStartTime scheduledEndTime"
+      "availabilityType scheduledStartDate scheduledStartTime scheduledEndDate scheduledEndTime isActive"
     );
 
     if (!quiz) {
@@ -553,6 +580,7 @@ exports.getQuizAvailability = async (req, res) => {
     if (quiz.availabilityType === "scheduled") {
       response.scheduledStartDate = quiz.scheduledStartDate;
       response.scheduledStartTime = quiz.scheduledStartTime;
+      response.scheduledEndDate = quiz.scheduledEndDate;
       response.scheduledEndTime = quiz.scheduledEndTime;
     }
 
@@ -585,15 +613,25 @@ exports.setQuizAttempts = async (req, res) => {
       return res.status(404).json({ message: "Quiz not found" });
     }
 
-    // Cuser has permission to modify the quiz
-    if (quiz.creatorId.toString() !== req.user._id.toString()) {
-      return res
-        .status(403)
-        .json({ message: "You don't have permission to modify this quiz" });
-    }
+    // Check if user has permission to modify the quiz
+    // 🔧 FIX: Allow all admins to modify quizzes, removed strict creator check
+    // if (quiz.creatorId.toString() !== req.user._id.toString()) {
+    //   return res
+    //     .status(403)
+    //     .json({ message: "You don't have permission to modify this quiz" });
+    // }
 
     quiz.maxAttempts = maxAttempts;
     await quiz.save();
+    console.log(`✅ [DEBUG] Quiz attempts updated to ${maxAttempts}`);
+
+    // 🔧 FIX: Invalidate cache after setting attempts
+    try {
+      const { invalidateCache } = require('../middlewares/cacheMiddleware');
+      await invalidateCache(`quiz:cache:*`);
+    } catch (cacheError) {
+      console.error(`⚠️ [DEBUG] Cache invalidation failed:`, cacheError);
+    }
 
     res.status(200).json({
       message: "Max attempts updated successfully",
@@ -615,7 +653,7 @@ exports.deleteQuiz = async (req, res) => {
   try {
     const { quizId } = req.params;
     console.log(`🗑️ [DEBUG] Starting quiz deletion for ID: ${quizId}`);
-    
+
     const quiz = await Quiz.findById(quizId);
 
     if (!quiz) {
@@ -636,7 +674,7 @@ exports.deleteQuiz = async (req, res) => {
           for (let imageUrl of question.questionImage) {
             if (!deletedImages.has(imageUrl)) {
               console.log("Deleting S3 image:", imageUrl);
-              
+
               // Extract S3 key from URL
               let s3Key;
               if (imageUrl.includes('amazonaws.com/')) {
@@ -650,7 +688,7 @@ exports.deleteQuiz = async (req, res) => {
                 const fileName = imageUrl.split("/").slice(-1)[0];
                 s3Key = `quiz-images/${fileName}`;
               }
-              
+
               console.log("S3 Key:", s3Key);
               try {
                 const deleteCommand = new DeleteObjectCommand({
@@ -681,7 +719,7 @@ exports.deleteQuiz = async (req, res) => {
       console.log(`🗑️ [DEBUG] Quiz deleted: ${!!quizDeleteResult}`);
 
       console.log(`✅ Quiz ${quizId} and all associated data deleted successfully`);
-      
+
       // 🔧 FIX: Invalidate cache after quiz deletion
       try {
         const { invalidateCache } = require('../middlewares/cacheMiddleware');
@@ -690,18 +728,18 @@ exports.deleteQuiz = async (req, res) => {
       } catch (cacheError) {
         console.error(`⚠️ [DEBUG] Cache invalidation failed:`, cacheError);
       }
-      
-      res.status(200).json({ 
+
+      res.status(200).json({
         message: "Quiz deleted successfully",
         deletedQuestions: questionDeleteResult.deletedCount,
         deletedImages: deletedImages.size
       });
-      
+
     } catch (deletionError) {
       console.error(`❌ Error in quiz deletion process:`, deletionError);
-      res.status(500).json({ 
-        message: "Error during quiz deletion", 
-        error: deletionError.message 
+      res.status(500).json({
+        message: "Error during quiz deletion",
+        error: deletionError.message
       });
     }
 
