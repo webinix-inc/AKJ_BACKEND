@@ -1,0 +1,1 @@
+FAILURE: cannot create a new collection -- already using 501 collections of 500

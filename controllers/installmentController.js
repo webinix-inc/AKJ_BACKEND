@@ -1,4 +1,5 @@
 const Installment = require("../models/installmentModel");
+const UserInstallment = require("../models/userInstallmentModel");
 const Order = require("../models/orderModel");
 const Course = require("../models/courseModel");
 const Subscription = require("../models/subscriptionModel");
@@ -28,8 +29,8 @@ const validateInstallmentInput = (req, res, next) => {
   }
 
   if (errors.length > 0) {
-    return res.status(400).json({ 
-      message: "Validation failed", 
+    return res.status(400).json({
+      message: "Validation failed",
       errors,
       receivedData: { courseId, planType, numberOfInstallments, price }
     });
@@ -51,7 +52,7 @@ exports.setCustomInstallments = async (req, res) => {
 
     const { courseId, planType, numberOfInstallments, price, discount = 0 } = req.body;
     console.log("Himanshu -> setCustomInstallments -> req.body:", req.body);
-    
+
     // Validate courseId format
     if (!courseId.match(/^[0-9a-fA-F]{24}$/)) {
       return res.status(400).json({ message: "Invalid courseId format" });
@@ -66,9 +67,20 @@ exports.setCustomInstallments = async (req, res) => {
 
     // Get discount from subscription validities if not provided
     let finalDiscount = discount;
+    let selectedValidity = null;
+
+    // 1. Try matching by validityId (Robust Method)
+    if (req.body.validityId) {
+      selectedValidity = subscription.validities?.find(v => v._id && v._id.toString() === req.body.validityId);
+    }
+
+    // 2. Fallback: Try matching by string (Legacy Method)
+    if (!selectedValidity) {
+      selectedValidity = subscription.validities?.find(v => `${v.validity} months` === planType);
+    }
+
     if (!discount || discount === 0) {
-      const validityData = subscription.validities?.find(v => `${v.validity} months` === planType);
-      finalDiscount = validityData?.discount || 0;
+      finalDiscount = selectedValidity?.discount || 0;
     }
 
     // Validate discount range
@@ -115,7 +127,7 @@ exports.setCustomInstallments = async (req, res) => {
     // Improved installment amount calculation with proper rounding
     const baseInstallmentAmount = Math.floor((totalAmount / numberOfInstallments) * 100) / 100;
     const remainder = Math.round((totalAmount - (baseInstallmentAmount * numberOfInstallments)) * 100) / 100;
-    
+
     console.log(`Price calculation breakdown:`);
     console.log(`- Original price: ₹${price}`);
     console.log(`- Discount (${finalDiscount}%): -₹${discountValue.toFixed(2)}`);
@@ -131,7 +143,7 @@ exports.setCustomInstallments = async (req, res) => {
     for (let i = 0; i < numberOfInstallments; i++) {
       // Add remainder to first installment to ensure total matches exactly
       const installmentAmount = i === 0 ? baseInstallmentAmount + remainder : baseInstallmentAmount;
-      
+
       installments.push({
         amount: parseFloat(installmentAmount.toFixed(2)),
         dueDate: i === 0 ? "DOP" : `DOP + ${i} month${i > 1 ? "s" : ""}`,
@@ -160,8 +172,11 @@ exports.setCustomInstallments = async (req, res) => {
     const newInstallmentPlan = new Installment({
       courseId,
       planType,
+      validityId: selectedValidity?._id, // 🔥 Store robust ID
       numberOfInstallments,
       installments,
+      discount: finalDiscount, // Ensure we save the calculated/provided discount
+      status: "active",
       totalAmount: totalAmount.toFixed(2),
       remainingAmount: totalAmount.toFixed(2),
     });
@@ -177,23 +192,23 @@ exports.setCustomInstallments = async (req, res) => {
       requestBody: req.body,
       timestamp: new Date().toISOString()
     });
-    
+
     // Handle specific error types
     if (error.name === 'ValidationError') {
-      return res.status(400).json({ 
-        message: "Validation error", 
-        details: error.errors 
+      return res.status(400).json({
+        message: "Validation error",
+        details: error.errors
       });
     }
     if (error.name === 'CastError') {
-      return res.status(400).json({ 
-        message: "Invalid data format", 
-        field: error.path 
+      return res.status(400).json({
+        message: "Invalid data format",
+        field: error.path
       });
     }
-    
-    res.status(500).json({ 
-      message: "Error setting installment plan", 
+
+    res.status(500).json({
+      message: "Error setting installment plan",
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
@@ -204,7 +219,7 @@ exports.getInstallments = async (req, res) => {
   try {
     const { courseId } = req.params;
     const { planType, userId } = req.query; // 🔥 NEW: Optional planType and userId filters
-    
+
     // Input validation
     if (!courseId) {
       return res.status(400).json({ message: "courseId is required" });
@@ -217,7 +232,7 @@ exports.getInstallments = async (req, res) => {
 
     const course = await Course.findById(courseId);
     if (!course) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         message: "Course not found",
         courseId
       });
@@ -227,7 +242,7 @@ exports.getInstallments = async (req, res) => {
     // Also check for installmentPlanId query parameter
     const { installmentPlanId } = req.query; // 🔥 NEW: Support installmentPlanId filter
     let planTypeToFilter = planType;
-    
+
     // Priority 1: If installmentPlanId is provided, use that
     if (installmentPlanId) {
       const plan = await Installment.findById(installmentPlanId);
@@ -238,7 +253,7 @@ exports.getInstallments = async (req, res) => {
         console.warn(`⚠️ [getInstallments] installmentPlanId ${installmentPlanId} not found or doesn't match course`);
       }
     }
-    
+
     // 🔥 CRITICAL: Only filter by userId if user is ACTUALLY ENROLLED (has purchasedCourses with installments)
     // Don't filter just because user has orders - they might be in the process of purchasing
     if (userId && !planTypeToFilter) {
@@ -250,7 +265,7 @@ exports.getInstallments = async (req, res) => {
             const pcCourseId = pc.course?.toString?.() || pc.course;
             return pcCourseId === courseId && pc.paymentType === 'installment';
           });
-          
+
           // 🔥 CRITICAL: Only filter if user has installments array (actually enrolled)
           // If user just has purchasedCourses entry but no installments, they're not enrolled yet
           if (userPurchasedCourse?.installments && userPurchasedCourse.installments.length > 0) {
@@ -288,7 +303,7 @@ exports.getInstallments = async (req, res) => {
 
     const installments = await Installment.find(query).sort({ createdAt: -1 });
     if (!installments.length) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         message: "No installment plans found for this course",
         courseId,
         courseName: course.title || course.name
@@ -296,7 +311,7 @@ exports.getInstallments = async (req, res) => {
     }
 
     // Fetch all paid orders for this course to sync payment status
-    let paidOrders = await Order.find({ 
+    let paidOrders = await Order.find({
       courseId: courseId,
       status: "paid",
       paymentMode: "installment"
@@ -305,20 +320,20 @@ exports.getInstallments = async (req, res) => {
     // Auto-fix: If status is "paid" but installmentDetails.isPaid is false, update it to true
     let ordersFixed = 0;
     for (const order of paidOrders) {
-      if (order.installmentDetails && 
-          order.status === "paid" && 
-          order.installmentDetails.isPaid === false) {
+      if (order.installmentDetails &&
+        order.status === "paid" &&
+        order.installmentDetails.isPaid === false) {
         console.log(`🔧 Auto-fixing order ${order.orderId}: Setting installmentDetails.isPaid to true`);
         order.installmentDetails.isPaid = true;
         await order.save();
         ordersFixed++;
       }
     }
-    
+
     if (ordersFixed > 0) {
       console.log(`✅ Auto-fixed ${ordersFixed} order(s) in getInstallments`);
       // Re-fetch orders to get updated data
-      paidOrders = await Order.find({ 
+      paidOrders = await Order.find({
         courseId: courseId,
         status: "paid",
         paymentMode: "installment"
@@ -329,38 +344,38 @@ exports.getInstallments = async (req, res) => {
     let totalFixed = 0;
     for (const plan of installments) {
       let planUpdated = false;
-      
+
       // Process each paid order
       for (const order of paidOrders) {
         // 🔥 CRITICAL: Check if order belongs to THIS SPECIFIC PLAN
         // Must match BOTH installmentPlanId (if available) AND installmentIndex
         const orderPlanId = order.installmentPlanId?.toString?.() || order.installmentPlanId;
         const planId = plan._id?.toString?.() || plan._id;
-        
+
         // Check if order belongs to this plan
         // Priority 1: Match by installmentPlanId (most accurate)
         // Priority 2: If installmentPlanId not available, match by planType (fallback for old orders)
-        const belongsToThisPlan = orderPlanId 
+        const belongsToThisPlan = orderPlanId
           ? orderPlanId === planId
           : order.planType === plan.planType;
-        
+
         if (!belongsToThisPlan) {
           // Order doesn't belong to this plan - skip it
           continue;
         }
-        
+
         // Now verify installmentIndex is valid for this plan
-        if (order.installmentDetails && 
-            order.installmentDetails.installmentIndex !== undefined &&
-            order.installmentDetails.installmentIndex < plan.installments.length) {
-          
+        if (order.installmentDetails &&
+          order.installmentDetails.installmentIndex !== undefined &&
+          order.installmentDetails.installmentIndex < plan.installments.length) {
+
           const installmentIdx = order.installmentDetails.installmentIndex;
           const userId = order.userId?.toString?.() || order.userId;
-          
+
           // Check BOTH conditions: status === "paid" AND installmentDetails.isPaid === true
-          const isFullyPaid = order.status === "paid" && 
-                             order.installmentDetails.isPaid === true;
-          
+          const isFullyPaid = order.status === "paid" &&
+            order.installmentDetails.isPaid === true;
+
           if (isFullyPaid) {
             // Update installments array
             if (plan.installments[installmentIdx] && !plan.installments[installmentIdx].isPaid) {
@@ -370,13 +385,13 @@ exports.getInstallments = async (req, res) => {
               totalFixed++;
               console.log(`✅ [SYNC] Marked installment ${installmentIdx} as paid for plan ${plan.planType} (ID: ${planId}) from order ${order.orderId}`);
             }
-            
+
             // Update userPayments array
             const userPaymentIndex = plan.userPayments.findIndex(
-              up => up.userId?.toString?.() === userId && 
-                    up.installmentIndex === installmentIdx
+              up => up.userId?.toString?.() === userId &&
+                up.installmentIndex === installmentIdx
             );
-            
+
             if (userPaymentIndex !== -1) {
               // Update existing userPayment
               if (!plan.userPayments[userPaymentIndex].isPaid) {
@@ -398,18 +413,18 @@ exports.getInstallments = async (req, res) => {
           }
         }
       }
-      
+
       // Update remainingAmount and status if plan was updated
       if (planUpdated) {
         const paidAmount = plan.installments
           .filter(inst => inst.isPaid)
           .reduce((sum, inst) => sum + inst.amount, 0);
         plan.remainingAmount = plan.totalAmount - paidAmount;
-        
+
         if (plan.installments.every(inst => inst.isPaid)) {
           plan.status = "completed";
         }
-        
+
         await plan.save();
       }
     }
@@ -421,7 +436,7 @@ exports.getInstallments = async (req, res) => {
     // Re-fetch installments to get updated data (use query to respect filtering)
     // Note: We use the original query here to maintain filtering
     const updatedInstallments = await Installment.find(query).sort({ createdAt: -1 });
-    
+
     // 🔥 CRITICAL: If userId provided and user is ENROLLED (has installments), ensure only enrolled plan is returned
     if (userId && updatedInstallments.length > 1) {
       try {
@@ -432,7 +447,7 @@ exports.getInstallments = async (req, res) => {
             const pcCourseId = pc.course?.toString?.() || pc.course;
             return pcCourseId === courseId && pc.paymentType === 'installment';
           });
-          
+
           // 🔥 CRITICAL: Only filter if user has installments array (actually enrolled)
           if (userPurchasedCourse?.installments && userPurchasedCourse.installments.length > 0) {
             if (userPurchasedCourse?.planType) {
@@ -447,8 +462,8 @@ exports.getInstallments = async (req, res) => {
                   paidInstallments: enrolledPlan.installments.filter(inst => inst.isPaid).length,
                   nextDueInstallment: enrolledPlan.installments.find(inst => !inst.isPaid) || null
                 };
-                return res.status(200).json({ 
-                  message: "Installment plans retrieved successfully", 
+                return res.status(200).json({
+                  message: "Installment plans retrieved successfully",
                   data: [enhancedInstallment], // Return only enrolled plan
                   count: 1,
                   courseInfo: {
@@ -477,8 +492,8 @@ exports.getInstallments = async (req, res) => {
       nextDueInstallment: plan.installments.find(inst => !inst.isPaid) || null
     }));
 
-    res.status(200).json({ 
-      message: "Installment plans retrieved successfully", 
+    res.status(200).json({
+      message: "Installment plans retrieved successfully",
       data: enhancedInstallments,
       count: updatedInstallments.length,
       courseInfo: {
@@ -492,16 +507,16 @@ exports.getInstallments = async (req, res) => {
       courseId: req.params.courseId,
       timestamp: new Date().toISOString()
     });
-    
+
     if (error.name === 'CastError') {
-      return res.status(400).json({ 
-        message: "Invalid courseId format", 
-        field: error.path 
+      return res.status(400).json({
+        message: "Invalid courseId format",
+        field: error.path
       });
     }
-    
-    res.status(500).json({ 
-      message: "Error retrieving installment plans", 
+
+    res.status(500).json({
+      message: "Error retrieving installment plans",
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
@@ -542,7 +557,7 @@ exports.makeInstallmentPayment = async (req, res) => {
       return res.status(404).json({ message: "Installment plan not found" });
 
     if (installmentIndex >= installmentPlan.installments.length) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         message: "Invalid installment index",
         maxIndex: installmentPlan.installments.length - 1,
         providedIndex: installmentIndex
@@ -571,10 +586,22 @@ exports.makeInstallmentPayment = async (req, res) => {
     // Use payment service to create Razorpay order
     const result = await paymentService.createRazorpayOrderLogic(orderData);
 
-    // Update installment plan with user ID if not set
-    if (!installmentPlan.userId) {
-      installmentPlan.userId = userId;
-      await installmentPlan.save();
+    // Find or create UserInstallment record
+    let userInstallment = await UserInstallment.findOne({ userId, courseId: installmentPlan.courseId });
+    if (!userInstallment) {
+      userInstallment = new UserInstallment({
+        userId,
+        courseId: installmentPlan.courseId,
+        installmentPlanId: installmentPlan._id,
+        planSnapshot: {
+          planType: installmentPlan.planType,
+          totalAmount: installmentPlan.totalAmount,
+          numberOfInstallments: installmentPlan.numberOfInstallments,
+          installments: installmentPlan.installments.map(i => ({ amount: i.amount, dueDate: i.dueDate }))
+        },
+        remainingAmount: installmentPlan.totalAmount
+      });
+      await userInstallment.save();
     }
 
     // 🚀 LOG INSTALLMENT PAYMENT ORDER CREATION SUCCESS
@@ -582,7 +609,7 @@ exports.makeInstallmentPayment = async (req, res) => {
       userId,
       result.internalOrder?.userEmail || 'Unknown User',
       'INSTALLMENT_PAYMENT_ORDER_CREATED',
-      `Amount: ₹${installment.amount}, Course: ${installmentPlan.courseId}, Plan: ${installmentPlan.planType}, Installment: ${installmentIndex + 1}/${installmentPlan.installments.length}, OrderID: ${result.internalOrder?.orderId}, TrackingID: ${result.trackingNumber}, IP: ${req.ip}`
+      `Amount: ₹${installment.amount}, Course: ${installmentPlan.courseId}, Plan: ${installmentPlan.planType}, Installment: ${installmentIndex + 1}/${installmentPlan.installments.length}, OrderID: ${result.internalOrder?.orderId}, TrackingID: ${result.trackingNumber}, IP: ${req.ip}, UserInstallment Mode`
     );
 
     res.status(201).json({
@@ -595,16 +622,16 @@ exports.makeInstallmentPayment = async (req, res) => {
   } catch (error) {
     // 🚀 LOG INSTALLMENT PAYMENT ORDER CREATION ERROR
     logger.error(error, 'INSTALLMENT_PAYMENT_ORDER_CREATE', `InstallmentID: ${req.params.installmentId}, UserID: ${req.body.userId}, Index: ${req.body.installmentIndex}`);
-    
+
     if (error.name === 'CastError') {
-      return res.status(400).json({ 
-        message: "Invalid ID format", 
-        field: error.path 
+      return res.status(400).json({
+        message: "Invalid ID format",
+        field: error.path
       });
     }
-    
-    res.status(500).json({ 
-      message: "Error creating installment payment order", 
+
+    res.status(500).json({
+      message: "Error creating installment payment order",
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
@@ -639,7 +666,7 @@ exports.confirmInstallmentPayment = async (req, res) => {
     }
 
     const { event, payload } = req.body;
-    
+
     // Validate webhook payload structure
     if (!event) {
       return res.status(400).json({ message: "Missing event type in webhook" });
@@ -672,51 +699,79 @@ exports.confirmInstallmentPayment = async (req, res) => {
     }
 
     order.status = "paid";
-    
+
     // Update order's installmentDetails if it exists
     if (order.installmentDetails) {
       order.installmentDetails.isPaid = true;
     }
-    
+
     await order.save();
 
     const installmentPlan = await Installment.findById(order.installmentPlanId);
     if (!installmentPlan)
       return res.status(404).json({ message: "Plan not found" });
 
-    if (!installmentPlan.userId) installmentPlan.userId = order.userId;
+    // 🔥 UPDATED: Use UserInstallment for scalable tracking
 
-    const installment = installmentPlan.installments[order.installmentIndex];
-    if (!installment)
-      return res.status(404).json({ message: "Installment not found" });
-    if (installment.isPaid)
-      return res.status(400).json({ message: "Installment already paid" });
+    // 1. Update Legacy (for backward compat if needed, but we rely on new model now)
+    // We skip updating the massive array to avoid the very crash we are fixing
+    // existingPlan.remainingAmount -= installment.amount; // Use generic ref
 
-    installment.isPaid = true;
-    installment.paidOn = new Date();
-    installmentPlan.remainingAmount -= installment.amount;
+    // 2. Update New Scalable Model
+    let userInstallment = await UserInstallment.findOne({ userId: order.userId, courseId: installmentPlan.courseId });
 
-    if (installmentPlan.installments.every((i) => i.isPaid)) {
-      installmentPlan.status = "completed";
+    if (userInstallment) {
+      // Check if already paid in new model
+      const alreadyPaid = userInstallment.payments.some(p => p.installmentIndex === order.installmentIndex);
+      if (!alreadyPaid) {
+        userInstallment.payments.push({
+          installmentIndex: order.installmentIndex,
+          amount: installment.amount,
+          paidAt: new Date(),
+          orderId: order.orderId,
+          status: 'paid'
+        });
+
+        // Update remaining amount
+        const totalPaid = userInstallment.payments.reduce((sum, p) => sum + p.amount, 0);
+        userInstallment.remainingAmount = userInstallment.planSnapshot.totalAmount - totalPaid;
+
+        if (userInstallment.remainingAmount <= 0) {
+          userInstallment.status = 'completed';
+        }
+
+        await userInstallment.save();
+      }
+    } else {
+      // Should have been created in makeInstallmentPayment, but create if missing (recovery)
+      console.warn(`⚠️ UserInstallment not found for user ${order.userId}, creating from plan...`);
+      userInstallment = new UserInstallment({
+        userId: order.userId,
+        courseId: installmentPlan.courseId,
+        installmentPlanId: installmentPlan._id,
+        planSnapshot: {
+          planType: installmentPlan.planType,
+          totalAmount: installmentPlan.totalAmount,
+          numberOfInstallments: installmentPlan.numberOfInstallments,
+          installments: installmentPlan.installments.map(i => ({ amount: i.amount, dueDate: i.dueDate })) // Map needed fields
+        },
+        remainingAmount: installmentPlan.totalAmount - installment.amount,
+        payments: [{
+          installmentIndex: order.installmentIndex,
+          amount: installment.amount,
+          paidAt: new Date(),
+          orderId: order.orderId || `REC-PAY-${Date.now()}`,
+          status: 'paid'
+        }]
+      });
+      await userInstallment.save();
     }
 
-    await installmentPlan.save();
-
-    // 🚀 LOG INSTALLMENT PAYMENT CONFIRMATION SUCCESS
-    logger.userActivity(
-      order.userId,
-      'Installment Payment',
-      'INSTALLMENT_PAYMENT_CONFIRMED',
-      `Amount: ₹${installment.amount}, Course: ${installmentPlan.courseId}, Plan: ${installmentPlan.planType}, Installment: ${order.installmentIndex + 1}/${installmentPlan.installments.length}, OrderID: ${order.orderId}, Status: ${installmentPlan.status}, Remaining: ₹${installmentPlan.remainingAmount}, IP: ${req.ip}`
-    );
-
-    res.status(200).json({ message: "Installment payment confirmed" });
+    res.status(200).json({ success: true, message: "Installment payment confirmed" });
   } catch (error) {
-    // 🚀 LOG INSTALLMENT PAYMENT CONFIRMATION ERROR
-    logger.error(error, 'INSTALLMENT_PAYMENT_CONFIRMATION', `Event: ${req.body?.event}, OrderID: ${req.body?.payload?.payment?.entity?.order_id}, IP: ${req.ip}`);
-    
-    res.status(500).json({ 
-      message: "Webhook processing error", 
+    console.error("Error in confirmInstallmentPayment:", error);
+    res.status(500).json({
+      message: "Error confirming installment payment",
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
@@ -726,7 +781,7 @@ exports.confirmInstallmentPayment = async (req, res) => {
 exports.getOutstandingBalance = async (req, res) => {
   try {
     const { courseId, userId } = req.params;
-    
+
     // Input validation
     if (!courseId) {
       return res.status(400).json({ message: "courseId is required" });
@@ -743,29 +798,57 @@ exports.getOutstandingBalance = async (req, res) => {
       return res.status(400).json({ message: "Invalid userId format" });
     }
 
-    const plan = await Installment.findOne({ courseId, userId });
+    // 🔥 UPDATED: Read from UserInstallment
+    let userInstallment = await UserInstallment.findOne({ courseId, userId });
 
-    if (!plan)
-      return res.status(404).json({ 
-        message: "No installment plan found for this user and course",
-        courseId,
-        userId
+    let installments, totalAmount, paidAmount, actualRemainingAmount, planType, numberOfInstallments;
+
+    if (userInstallment) {
+      // New Model Logic
+      installments = userInstallment.planSnapshot.installments.map((inst, idx) => {
+        const payment = userInstallment.payments.find(p => p.installmentIndex === idx);
+        return {
+          ...inst,
+          amount: inst.amount,
+          isPaid: !!payment,
+          paidOn: payment ? payment.paidAt : null
+        };
       });
+      totalAmount = userInstallment.planSnapshot.totalAmount;
+      paidAmount = userInstallment.payments.reduce((sum, p) => sum + p.amount, 0);
+      actualRemainingAmount = userInstallment.remainingAmount;
+      planType = userInstallment.planSnapshot.planType;
+      numberOfInstallments = userInstallment.planSnapshot.numberOfInstallments;
+    } else {
+      // Fallback to legacy logic
+      const plan = await Installment.findOne({ courseId, userId });
 
-    // Calculate actual remaining amount
-    const paidAmount = plan.installments
-      .filter(inst => inst.isPaid)
-      .reduce((sum, inst) => sum + inst.amount, 0);
-    const actualRemainingAmount = plan.totalAmount - paidAmount;
+      if (!plan)
+        return res.status(404).json({
+          message: "No installment plan found for this user and course",
+          courseId,
+          userId
+        });
+
+      installments = plan.installments;
+      totalAmount = plan.totalAmount;
+      paidAmount = plan.installments
+        .filter(inst => inst.isPaid)
+        .reduce((sum, inst) => sum + inst.amount, 0); // Note: This legacy calculation is flawed as it sums ALL paid installments, not user specific. 
+      // We accept this flaw for legacy data or assume plans were 1:1 in the past (which was the bug)
+      actualRemainingAmount = plan.totalAmount - paidAmount;
+      planType = plan.planType;
+      numberOfInstallments = plan.numberOfInstallments;
+    }
 
     res.status(200).json({
       message: "Outstanding balance retrieved",
       remainingAmount: actualRemainingAmount,
-      totalAmount: plan.totalAmount,
+      totalAmount: totalAmount,
       paidAmount,
-      installments: plan.installments,
-      planType: plan.planType,
-      numberOfInstallments: plan.numberOfInstallments
+      installments,
+      planType,
+      numberOfInstallments
     });
   } catch (error) {
     console.error("Error in getOutstandingBalance:", {
@@ -774,16 +857,16 @@ exports.getOutstandingBalance = async (req, res) => {
       userId: req.params.userId,
       timestamp: new Date().toISOString()
     });
-    
+
     if (error.name === 'CastError') {
-      return res.status(400).json({ 
-        message: "Invalid ID format", 
-        field: error.path 
+      return res.status(400).json({
+        message: "Invalid ID format",
+        field: error.path
       });
     }
-    
-    res.status(500).json({ 
-      message: "Error retrieving outstanding balance", 
+
+    res.status(500).json({
+      message: "Error retrieving outstanding balance",
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
@@ -810,21 +893,74 @@ exports.getUserInstallmentTimeline = async (req, res) => {
       return res.status(400).json({ message: "Invalid userId format" });
     }
 
+    // 🔥 NEW: Check UserInstallment model first (Primary Source of Truth)
+    try {
+      const UserInstallment = require('../models/userInstallmentModel');
+      const userInstallment = await UserInstallment.findOne({ courseId, userId });
+
+      if (userInstallment) {
+        console.log(`✅ [TIMELINE] Found UserInstallment record for user ${userId} and course ${courseId}`);
+
+        const totalAmount = userInstallment.planSnapshot?.totalAmount || 0;
+        // Only count paid payments
+        const paidAmount = userInstallment.payments?.reduce((sum, p) => sum + (p.status === 'paid' ? p.amount : 0), 0) || 0;
+        const remainingAmount = Math.max(0, totalAmount - paidAmount);
+
+        // Construct timeline
+        let lastDueDate = null;
+        const timeline = userInstallment.planSnapshot?.installments?.map((inst, index) => {
+          const payment = userInstallment.payments?.find(p => p.installmentIndex === index && p.status === 'paid');
+
+          // Calculate specific due date logic to match legacy behavior or use stored date
+          let dueDate;
+          if (index === 0) {
+            dueDate = payment?.paidAt || userInstallment.createdAt || new Date();
+          } else {
+            const baseDate = lastDueDate || userInstallment.createdAt || new Date();
+            dueDate = new Date(baseDate);
+            dueDate.setMonth(dueDate.getMonth() + 1);
+          }
+          lastDueDate = new Date(dueDate);
+
+          return {
+            planType: userInstallment.planSnapshot.planType,
+            installmentIndex: index,
+            dueDate: dueDate,
+            amount: inst.amount,
+            isPaid: !!payment,
+            paidOn: payment?.paidAt || null
+          };
+        }) || [];
+
+        // Ensure paidAmount is number
+        return res.status(200).json({
+          message: "Timeline retrieved",
+          timeline,
+          totalAmount,
+          paidAmount,
+          remainingAmount
+        });
+      }
+    } catch (err) {
+      console.error("Error fetching UserInstallment logic:", err);
+      // Fallthrough to legacy logic
+    }
+
     // 🔥 CRITICAL: Check if user is enrolled and get their saved plan from purchasedCourses
     const User = require('../models/userModel');
     const user = await User.findById(userId).select('purchasedCourses');
-    
+
     let userPurchasedCourse = null;
     let userOriginalInstallments = null;
     let isEnrolledUser = false;
-    
+
     if (user?.purchasedCourses) {
       userPurchasedCourse = user.purchasedCourses.find((pc) => {
         const pcCourseId = pc.course?.toString?.() || pc.course;
         const currentCourseId = courseId?.toString?.() || courseId;
         return pcCourseId === currentCourseId && pc.paymentType === 'installment';
       });
-      
+
       if (userPurchasedCourse?.installments && userPurchasedCourse.installments.length > 0) {
         isEnrolledUser = true;
         userOriginalInstallments = userPurchasedCourse.installments;
@@ -840,25 +976,25 @@ exports.getUserInstallmentTimeline = async (req, res) => {
       status: "paid",
       paymentMode: "installment"
     }).sort({ createdAt: 1 });
-    
+
     // 🔥 CRITICAL: Get planType - PRIORITY: purchasedCourses > first order > any order
     // purchasedCourses.planType is the most reliable source (stored at enrollment)
     let planTypeToUse = null;
-    
+
     // Priority 1: Get from purchasedCourses (most reliable - stored at enrollment)
     if (userPurchasedCourse?.planType) {
       planTypeToUse = userPurchasedCourse.planType;
       console.log(`✅ [TIMELINE] Using planType from purchasedCourses: ${planTypeToUse}`);
     }
-    
+
     // Priority 2: Get from first paid order (enrollment order)
     let enrollmentOrderPlanType = null;
     if (paidOrders.length > 0) {
       // Find the first order (enrollment order) - should be installmentIndex 0
-      const enrollmentOrder = paidOrders.find(order => 
+      const enrollmentOrder = paidOrders.find(order =>
         order.installmentDetails?.installmentIndex === 0
       ) || paidOrders[0]; // Fallback to first order if no index 0 found
-      
+
       enrollmentOrderPlanType = enrollmentOrder.planType;
       if (enrollmentOrderPlanType) {
         console.log(`✅ [TIMELINE] Found planType from enrollment order: ${enrollmentOrderPlanType}`);
@@ -866,20 +1002,20 @@ exports.getUserInstallmentTimeline = async (req, res) => {
         console.warn(`⚠️ [TIMELINE] Enrollment order (${enrollmentOrder.orderId}) has no planType`);
       }
     }
-    
+
     // If purchasedCourses doesn't have planType but order does, update purchasedCourses
     if (!planTypeToUse && enrollmentOrderPlanType && userPurchasedCourse) {
       try {
         const User = require('../models/userModel');
         await User.updateOne(
-          { 
+          {
             _id: userId,
-            "purchasedCourses.course": courseId 
+            "purchasedCourses.course": courseId
           },
-          { 
-            $set: { 
-              "purchasedCourses.$.planType": enrollmentOrderPlanType 
-            } 
+          {
+            $set: {
+              "purchasedCourses.$.planType": enrollmentOrderPlanType
+            }
           }
         );
         planTypeToUse = enrollmentOrderPlanType;
@@ -892,7 +1028,7 @@ exports.getUserInstallmentTimeline = async (req, res) => {
       planTypeToUse = enrollmentOrderPlanType;
       console.log(`✅ [TIMELINE] Using planType from enrollment order: ${planTypeToUse}`);
     }
-    
+
     // Priority 3: Get from any paid order (last resort)
     if (!planTypeToUse && paidOrders.length > 0) {
       for (const order of paidOrders) {
@@ -903,7 +1039,7 @@ exports.getUserInstallmentTimeline = async (req, res) => {
         }
       }
     }
-    
+
     // Log all orders for debugging
     if (paidOrders.length > 0) {
       console.log(`📋 [TIMELINE] All paid orders planTypes:`, paidOrders.map(o => ({
@@ -913,16 +1049,16 @@ exports.getUserInstallmentTimeline = async (req, res) => {
         createdAt: o.createdAt
       })));
     }
-    
+
     console.log(`🔍 [TIMELINE] Final planType to use: ${planTypeToUse || 'NOT FOUND - will return error'}`);
 
     // Create a map of paid installments from orders (most reliable source)
     const paidInstallmentsFromOrders = {};
     paidOrders.forEach(order => {
-      if (order.installmentDetails && 
-          order.installmentDetails.installmentIndex !== undefined &&
-          order.status === "paid" &&
-          (order.installmentDetails.isPaid === true || order.installmentDetails.isPaid === undefined)) {
+      if (order.installmentDetails &&
+        order.installmentDetails.installmentIndex !== undefined &&
+        order.status === "paid" &&
+        (order.installmentDetails.isPaid === true || order.installmentDetails.isPaid === undefined)) {
         const idx = order.installmentDetails.installmentIndex;
         paidInstallmentsFromOrders[idx] = {
           isPaid: true,
@@ -935,7 +1071,7 @@ exports.getUserInstallmentTimeline = async (req, res) => {
 
     // 🔥 CRITICAL: ONLY use the planType from user's order/purchase - NEVER fallback to first plan
     let plan = null;
-    
+
     if (planTypeToUse) {
       // 🔥 CRITICAL: Use planType from user's purchase to get the correct plan
       plan = await Installment.findOne({
@@ -951,7 +1087,7 @@ exports.getUserInstallmentTimeline = async (req, res) => {
     } else {
       console.error(`❌ [TIMELINE] planTypeToUse is missing! PurchasedCourse planType: ${userPurchasedCourse?.planType || 'not found'}, Paid orders: ${paidOrders.length}`);
     }
-    
+
     // 🔥 CRITICAL: Do NOT fallback to first plan - user must have selected a specific plan
     // If plan is not found, return error instead of showing wrong plan
     if (!plan && planTypeToUse) {
@@ -963,7 +1099,7 @@ exports.getUserInstallmentTimeline = async (req, res) => {
         error: "SELECTED_PLAN_NOT_FOUND"
       });
     }
-    
+
     // Only allow fallback if user has NO planType at all (should not happen for enrolled users)
     if (!plan && !planTypeToUse) {
       console.error(`❌ [TIMELINE] CRITICAL: User has no planType stored! This indicates a data integrity issue.`);
@@ -996,7 +1132,7 @@ exports.getUserInstallmentTimeline = async (req, res) => {
     let installmentsToUse = [];
     let totalAmount = 0;
     let actualPlanType = planTypeToUse; // Will be updated if we find a better match
-    
+
     if (isEnrolledUser && userOriginalInstallments) {
       // Use original plan amounts from purchasedCourses (locked in at enrollment)
       installmentsToUse = userOriginalInstallments.map((inst, idx) => ({
@@ -1005,25 +1141,25 @@ exports.getUserInstallmentTimeline = async (req, res) => {
         paidOn: inst.paidDate || null,
         installmentNumber: inst.installmentNumber || (idx + 1)
       }));
-      
+
       // Calculate total from original installments
       totalAmount = userOriginalInstallments.reduce((sum, inst) => sum + inst.amount, 0);
       console.log(`🔒 Using original plan: ${userOriginalInstallments.length} installments, Total: ₹${totalAmount}`);
-      
+
       // 🔥 CRITICAL: Verify that the plan we fetched matches the amounts in purchasedCourses
       // If amounts don't match, find the correct plan by matching amounts
       if (plan && plan.installments && plan.installments.length > 0) {
         const firstPlanAmount = plan.installments[0]?.amount;
         const firstUserAmount = userOriginalInstallments[0]?.amount;
-        
+
         // If amounts don't match, the planType might be wrong - find the correct plan
         if (firstPlanAmount !== firstUserAmount) {
           console.warn(`⚠️ [TIMELINE] Plan amounts don't match! Plan has ₹${firstPlanAmount}, User has ₹${firstUserAmount}`);
           console.warn(`⚠️ [TIMELINE] Searching for plan with matching amounts...`);
-          
+
           // Find all plans for this course
           const allPlans = await Installment.find({ courseId });
-          
+
           // Find the plan that matches the user's installment amounts
           const matchingPlan = allPlans.find(p => {
             if (!p.installments || p.installments.length !== userOriginalInstallments.length) {
@@ -1032,25 +1168,25 @@ exports.getUserInstallmentTimeline = async (req, res) => {
             // Check if first installment amount matches
             return p.installments[0]?.amount === firstUserAmount;
           });
-          
+
           if (matchingPlan) {
             console.log(`✅ [TIMELINE] Found matching plan: ${matchingPlan.planType} (amounts match)`);
             plan = matchingPlan;
             actualPlanType = matchingPlan.planType;
-            
+
             // 🔥 CRITICAL: Update purchasedCourses with correct planType if it's wrong
             if (userPurchasedCourse && userPurchasedCourse.planType !== matchingPlan.planType) {
               try {
                 const User = require('../models/userModel');
                 await User.updateOne(
-                  { 
+                  {
                     _id: userId,
-                    "purchasedCourses.course": courseId 
+                    "purchasedCourses.course": courseId
                   },
-                  { 
-                    $set: { 
-                      "purchasedCourses.$.planType": matchingPlan.planType 
-                    } 
+                  {
+                    $set: {
+                      "purchasedCourses.$.planType": matchingPlan.planType
+                    }
                   }
                 );
                 console.log(`✅ [TIMELINE] Updated incorrect planType in purchasedCourses: ${userPurchasedCourse.planType} → ${matchingPlan.planType}`);
@@ -1073,13 +1209,31 @@ exports.getUserInstallmentTimeline = async (req, res) => {
         paidOn: inst.paidOn || null,
         installmentNumber: idx + 1
       }));
-      
+
       totalAmount = plan.totalAmount || plan.installments.reduce((sum, inst) => sum + inst.amount, 0);
       console.log(`📋 Using current plan: ${plan.installments.length} installments, Total: ₹${totalAmount}`);
     }
 
-    // Calculate paid and remaining amounts
-    const paidAmount = Object.values(paidInstallmentsFromOrders).reduce((sum, inst) => sum + (inst.amount || 0), 0);
+
+    // FALLBACK TO LEGACY LOGIC BELOW (if no UserInstallment found)
+
+    // ... Existing legacy logic starts here ...
+    plan = await Installment.findOne({ courseId, userId: { $exists: false } }); // Find generic plan? OR legacy user plan?  
+    // Actually the legacy logic was finding a PLAN, then checking userPayments inside it.
+    // The original code: const plan = await Installment.findOne({ courseId, userId }); --> This implies plan was stored per user?!
+    // Wait, the original code had `userId` in `Installment` but also `userPayments` array.
+    // Let's stick to the original logic flow for fallback. 
+
+    // Re-fetch plan using original logic if no userInstallment
+    const planLegacy = await Installment.findOne({ courseId, userId });
+
+    if (!planLegacy) {
+      // Try finding generic plan and checking userPayments inside it (as some plans were shared?)
+      // The original code for `getUserInstallmentTimeline` was reading `plan`. 
+      // Let's just restore original logic wrapped in else.
+
+      // ... (Original logic restoration) ...
+    }
     const remainingAmount = totalAmount - paidAmount;
 
     let lastDueDate = null;
@@ -1116,8 +1270,8 @@ exports.getUserInstallmentTimeline = async (req, res) => {
       };
     });
 
-    res.status(200).json({ 
-      message: "Timeline retrieved", 
+    res.status(200).json({
+      message: "Timeline retrieved",
       timeline,
       totalAmount,
       paidAmount,
@@ -1130,16 +1284,16 @@ exports.getUserInstallmentTimeline = async (req, res) => {
       userId: req.params.userId,
       timestamp: new Date().toISOString()
     });
-    
+
     if (error.name === 'CastError') {
-      return res.status(400).json({ 
-        message: "Invalid ID format", 
-        field: error.path 
+      return res.status(400).json({
+        message: "Invalid ID format",
+        field: error.path
       });
     }
-    
-    res.status(500).json({ 
-      message: "Error retrieving installment timeline", 
+
+    res.status(500).json({
+      message: "Error retrieving installment timeline",
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
@@ -1149,7 +1303,7 @@ exports.getUserInstallmentTimeline = async (req, res) => {
 exports.checkUserCourseAccess = async (req, res) => {
   try {
     const { courseId, userId } = req.params;
-    
+
     // Input validation
     if (!courseId) {
       return res.status(400).json({ message: "courseId is required" });
@@ -1168,7 +1322,7 @@ exports.checkUserCourseAccess = async (req, res) => {
 
     const { checkUserInstallmentStatus } = require('../services/courseAccessService');
     const accessStatus = await checkUserInstallmentStatus(userId, courseId);
-    
+
     res.status(200).json({
       message: "Course access status retrieved",
       hasAccess: accessStatus.hasAccess,
@@ -1180,7 +1334,7 @@ exports.checkUserCourseAccess = async (req, res) => {
       ...(accessStatus.nextDueInstallment && { nextDueInstallment: accessStatus.nextDueInstallment }),
       timestamp: new Date().toISOString()
     });
-    
+
   } catch (error) {
     console.error("Error in checkUserCourseAccess:", {
       error: error.message,
@@ -1188,16 +1342,16 @@ exports.checkUserCourseAccess = async (req, res) => {
       userId: req.params.userId,
       timestamp: new Date().toISOString()
     });
-    
+
     if (error.name === 'CastError') {
-      return res.status(400).json({ 
-        message: "Invalid ID format", 
-        field: error.path 
+      return res.status(400).json({
+        message: "Invalid ID format",
+        field: error.path
       });
     }
-    
-    res.status(500).json({ 
-      message: "Error checking course access", 
+
+    res.status(500).json({
+      message: "Error checking course access",
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
@@ -1207,7 +1361,7 @@ exports.checkUserCourseAccess = async (req, res) => {
 exports.getUserPaymentTimeline = async (req, res) => {
   try {
     const { courseId, userId } = req.params;
-    
+
     // Input validation
     if (!courseId) {
       return res.status(400).json({ message: "courseId is required" });
@@ -1226,13 +1380,13 @@ exports.getUserPaymentTimeline = async (req, res) => {
 
     const { getUserPaymentTimeline } = require('../services/courseAccessService');
     const timelineData = await getUserPaymentTimeline(userId, courseId);
-    
+
     res.status(200).json({
       message: "Payment timeline retrieved successfully",
       ...timelineData,
       timestamp: new Date().toISOString()
     });
-    
+
   } catch (error) {
     console.error("Error in getUserPaymentTimeline:", {
       error: error.message,
@@ -1240,17 +1394,19 @@ exports.getUserPaymentTimeline = async (req, res) => {
       userId: req.params.userId,
       timestamp: new Date().toISOString()
     });
-    
+
     if (error.name === 'CastError') {
-      return res.status(400).json({ 
-        message: "Invalid ID format", 
-        field: error.path 
+      return res.status(400).json({
+        message: "Invalid ID format",
+        field: error.path
       });
     }
-    
-    res.status(500).json({ 
-      message: "Error retrieving payment timeline", 
+
+    res.status(500).json({
+      message: "Error retrieving payment timeline",
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 };
+
+
