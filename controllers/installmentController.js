@@ -1215,32 +1215,16 @@ exports.getUserInstallmentTimeline = async (req, res) => {
     }
 
 
-    // FALLBACK TO LEGACY LOGIC BELOW (if no UserInstallment found)
-
-    // ... Existing legacy logic starts here ...
-    plan = await Installment.findOne({ courseId, userId: { $exists: false } }); // Find generic plan? OR legacy user plan?  
-    // Actually the legacy logic was finding a PLAN, then checking userPayments inside it.
-    // The original code: const plan = await Installment.findOne({ courseId, userId }); --> This implies plan was stored per user?!
-    // Wait, the original code had `userId` in `Installment` but also `userPayments` array.
-    // Let's stick to the original logic flow for fallback. 
-
-    // Re-fetch plan using original logic if no userInstallment
-    const planLegacy = await Installment.findOne({ courseId, userId });
-
-    if (!planLegacy) {
-      // Try finding generic plan and checking userPayments inside it (as some plans were shared?)
-      // The original code for `getUserInstallmentTimeline` was reading `plan`. 
-      // Let's just restore original logic wrapped in else.
-
-      // ... (Original logic restoration) ...
-    }
-    const remainingAmount = totalAmount - paidAmount;
+    // Calculate paidAmount from paid orders
+    const paidAmount = paidOrders.reduce((sum, order) => sum + (order.amount / 100), 0);
+    const remainingAmount = Math.max(0, totalAmount - paidAmount);
 
     let lastDueDate = null;
 
     const timeline = installmentsToUse.map((installment, index) => {
-      const userPayment = plan.userPayments.find(
+      const userPayment = plan.userPayments?.find(
         (payment) =>
+          payment.userId &&
           payment.userId.toString() === userId &&
           payment.installmentIndex === index
       );
