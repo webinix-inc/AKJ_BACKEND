@@ -216,6 +216,38 @@ const createCourseLogic = async (courseData, files) => {
         });
         await newFolder.save({ session });
 
+        // Create File documents from uploaded courseNotes and add to folder
+        if (courseNotes && courseNotes.length > 0) {
+          const fileIds = [];
+          for (const noteUrl of courseNotes) {
+            // Extract filename from URL
+            const urlParts = noteUrl.split('/');
+            const filename = urlParts[urlParts.length - 1];
+
+            // Determine file type from extension
+            const ext = filename.split('.').pop().toLowerCase();
+            let fileType = 'document';
+            if (ext === 'pdf') fileType = 'pdf';
+            else if (['doc', 'docx'].includes(ext)) fileType = 'document';
+
+            const newFile = new File({
+              name: decodeURIComponent(filename.replace(/^\d+_/, '')), // Remove timestamp prefix
+              url: noteUrl,
+              type: fileType,
+              description: '',
+              isDownloadable: false,
+              isViewable: true, // Visible to purchased users by default
+            });
+            await newFile.save({ session });
+            fileIds.push(newFile._id);
+          }
+
+          // Add file IDs to folder
+          newFolder.files.push(...fileIds);
+          await newFolder.save({ session });
+          console.log(`✅ Added ${fileIds.length} course notes to root folder`);
+        }
+
         // Update course with rootFolder (within transaction)
         course.rootFolder = newFolder._id;
         await course.save({ session });

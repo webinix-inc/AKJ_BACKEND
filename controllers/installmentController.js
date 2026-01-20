@@ -827,6 +827,7 @@ exports.getUserInstallmentTimeline = async (req, res) => {
         .filter((idx) => idx !== undefined && idx !== null)
     );
 
+    // Calculate base date for timeline from first payment
     const enrollmentOrder = paidOrders.find(
       (order) => order.installmentDetails?.installmentIndex === 0
     ) || paidOrders[0];
@@ -836,28 +837,97 @@ exports.getUserInstallmentTimeline = async (req, res) => {
     let lastDueDate = null;
     const currentDate = new Date();
 
+    // 🔥 STEP 1: Find planType using fallback cascade (Your fix for null planType)
     let planTypeToUse = purchasedCourse.planType || null;
     if (!planTypeToUse) {
       const orderWithPlanType = paidOrders.find((order) => order.planType);
       if (orderWithPlanType?.planType) {
         planTypeToUse = orderWithPlanType.planType;
+        console.log(`✅ [TIMELINE] Found planType from order: ${planTypeToUse}`);
       } else {
         const orderWithPlanId = paidOrders.find((order) => order.installmentPlanId);
         if (orderWithPlanId?.installmentPlanId) {
           const planFromOrder = await Installment.findById(orderWithPlanId.installmentPlanId).select('planType');
           if (planFromOrder?.planType) {
             planTypeToUse = planFromOrder.planType;
+            console.log(`✅ [TIMELINE] Found planType from installmentPlan: ${planTypeToUse}`);
           }
         }
       }
     }
+
+    // 🔥 STEP 2: Validate planType against actual amounts (Incoming version's validation)
+    if (planTypeToUse && purchasedCourse.installments && purchasedCourse.installments.length > 0) {
+      try {
+        // Fetch the plan from database
+        const plan = await Installment.findOne({ courseId, planType: planTypeToUse });
+        
+        if (plan && plan.installments && plan.installments.length > 0) {
+          const firstPlanAmount = plan.installments[0]?.amount;
+          const firstUserAmount = purchasedCourse.installments[0]?.amount;
+
+          // 🔥 CRITICAL: Verify that amounts match - if not, find correct plan
+          if (firstPlanAmount !== firstUserAmount) {
+            console.warn(`⚠️ [TIMELINE] Plan amounts don't match! Plan has ₹${firstPlanAmount}, User has ₹${firstUserAmount}`);
+            console.warn(`⚠️ [TIMELINE] Searching for plan with matching amounts...`);
+
+            // Find all plans for this course
+            const allPlans = await Installment.find({ courseId });
+
+            // Find the plan that matches the user's installment amounts
+            const matchingPlan = allPlans.find(p => {
+              if (!p.installments || p.installments.length !== purchasedCourse.installments.length) {
+                return false;
+              }
+              // Check if first installment amount matches
+              return p.installments[0]?.amount === firstUserAmount;
+            });
+
+            if (matchingPlan) {
+              console.log(`✅ [TIMELINE] Found matching plan: ${matchingPlan.planType} (amounts match)`);
+              planTypeToUse = matchingPlan.planType;
+
+              // 🔥 CRITICAL: Update purchasedCourses with correct planType if it was wrong
+              if (purchasedCourse.planType !== matchingPlan.planType) {
+                try {
+                  await User.updateOne(
+                    {
+                      _id: userId,
+                      "purchasedCourses.course": courseId
+                    },
+                    {
+                      $set: {
+                        "purchasedCourses.$.planType": matchingPlan.planType
+                      }
+                    }
+                  );
+                  console.log(`✅ [TIMELINE] Updated incorrect planType in purchasedCourses: ${purchasedCourse.planType} → ${matchingPlan.planType}`);
+                } catch (updateError) {
+                  console.error(`❌ [TIMELINE] Failed to update planType in purchasedCourses:`, updateError);
+                }
+              }
+            } else {
+              console.error(`❌ [TIMELINE] No matching plan found for amounts. User's first installment: ₹${firstUserAmount}`);
+            }
+          } else {
+            console.log(`✅ [TIMELINE] Plan amounts match correctly`);
+          }
+        }
+      } catch (planValidationError) {
+        console.error(`❌ [TIMELINE] Error validating plan amounts:`, planValidationError);
+      }
+    }
+
+    // 🔥 STEP 3: Update purchasedCourse if planType was missing
     if (planTypeToUse && !purchasedCourse.planType) {
       await User.updateOne(
         { _id: userId, "purchasedCourses.course": courseId },
         { $set: { "purchasedCourses.$.planType": planTypeToUse } }
       );
+      console.log(`✅ [TIMELINE] Set missing planType in purchasedCourses: ${planTypeToUse}`);
     }
 
+    // 🔥 STEP 4: Generate timeline with correct planType
     const timeline = purchasedCourse.installments.map((inst, index) => {
       let dueDate;
       if (index === 0) {
@@ -896,6 +966,7 @@ exports.getUserInstallmentTimeline = async (req, res) => {
       };
     });
 
+    // 🔥 STEP 5: Calculate amounts from user's locked-in installments
     const totalAmount = purchasedCourse.installments.reduce((sum, inst) => sum + (inst.amount || 0), 0);
     const paidAmount = purchasedCourse.installments
       .filter((_, idx) => paidIndexes.has(idx) || purchasedCourse.installments[idx]?.isPaid)

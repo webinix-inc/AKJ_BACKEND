@@ -202,7 +202,7 @@ exports.createFolder = async (req, res = null) => {
       });
 
       await Folder.findByIdAndUpdate(newFolder._id, { parentFolderId: null });
-      
+
       // Auto-initialize Live Videos folder for course root folders
       try {
         const { initializeLiveVideosFolder } = require('../utils/folderUtils');
@@ -265,64 +265,86 @@ exports.deleteFolder = async (req, res) => {
     const { sourceFolderId } = req.body;
 
     if (!sourceFolderId) {
-      return res.status(400).json({ 
-        message: "sourceFolderId is required" 
+      return res.status(400).json({
+        message: "sourceFolderId is required"
       });
     }
 
     const folderToDelete = await Folder.findById(folderId);
-    
+
     if (!folderToDelete) {
       return res.status(404).json({ message: "Folder not found" });
     }
 
-
-    if (folderToDelete.parentFolderId?.toString()!== sourceFolderId.toString()) {
+    // If it's just a reference removal (not the owner), just pull it
+    if (folderToDelete.parentFolderId?.toString() !== sourceFolderId.toString()) {
       await Folder.findByIdAndUpdate(
         sourceFolderId,
         { $pull: { folders: folderId } }
       );
-      
-      return res.status(200).json({ 
-        message: "Folder reference removed from source folder" 
+
+      return res.status(200).json({
+        message: "Folder reference removed from source folder"
       });
     }
+
+    // Helper for recursive deletion with ref counting
     const deleteFolderRecursively = async (id) => {
-      const folder = await Folder.findById(id);
+      const folder = await Folder.findById(id).populate('files');
 
       if (!folder) {
         console.log(`Folder with id ${id} not found`);
         return;
       }
 
-      if (folder.folders.length === null) {
-        await Folder.findByIdAndDelete(id);
-        return;
-      }
-      for (const subfolderId of folder.folders) {
-        await deleteFolderRecursively(subfolderId);
+      // 1. Recursively delete subfolders
+      if (folder.folders && folder.folders.length > 0) {
+        for (const subfolderId of folder.folders) {
+          await deleteFolderRecursively(subfolderId);
+        }
       }
 
-      const fileUrls = folder.files.map((file) => file.url);
+      // 2. Process files for safe deletion
+      if (folder.files && folder.files.length > 0) {
+        const fileUrlsToDelete = [];
 
-      if (fileUrls?.length > 0) {
-        await deleteFilesFromBucket(authConfig.s3_bucket, fileUrls);
+        for (const file of folder.files) {
+          const fileUrl = file.url;
+
+          // Delete the File document first
+          await File.findByIdAndDelete(file._id);
+
+          // Check if any other file record uses this URL
+          const usageCount = await File.countDocuments({ url: fileUrl });
+          if (usageCount === 0) {
+            fileUrlsToDelete.push(fileUrl);
+          }
+        }
+
+        // Batch delete from S3 only if no references remain
+        if (fileUrlsToDelete.length > 0) {
+          await deleteFilesFromBucket(authConfig.s3_bucket, fileUrlsToDelete);
+          console.log(`Deleted ${fileUrlsToDelete.length} orphaned files from S3`);
+        }
       }
-      // Delete files from storage
 
+      // 3. Delete the folder document
       await Folder.findByIdAndDelete(id);
     };
 
     await deleteFolderRecursively(folderId);
 
-    res
-      .status(200)
-      .json({ message: "Folder and its contents deleted successfully" });
+    // Also remove from parent's folders array if applicable
+    if (folderToDelete.parentFolderId) {
+      await Folder.findByIdAndUpdate(folderToDelete.parentFolderId, {
+        $pull: { folders: folderId }
+      });
+    }
+
+    res.status(200).json({ message: "Folder and its contents deleted successfully" });
   } catch (error) {
     console.log("Error deleting folder:", error);
-    res
-      .status(500)
-      .json({ message: "Failed to delete folder", error: error.message });
+    res.status(500).json({ message: "Failed to delete folder", error: error.message });
   }
 };
 
@@ -354,23 +376,23 @@ exports.getFolderContents = async (req, res) => {
 
     const getRootFolder = async (folderId) => {
       let currentFolder = await Folder.findById(folderId)
-      while(currentFolder && currentFolder.parentFolderId){
+      while (currentFolder && currentFolder.parentFolderId) {
         currentFolder = await Folder.findById(currentFolder.parentFolderId)
       }
       return currentFolder
     }
 
     const getCourseFromRootFolder = async (rootFolder) => {
-      if(!rootFolder) return null
-      let course=await Course.findOne({rootFolder:rootFolder._id})
+      if (!rootFolder) return null
+      let course = await Course.findOne({ rootFolder: rootFolder._id })
       return course
     }
 
     const rootFolder = await getRootFolder(folderId)
     const course = await getCourseFromRootFolder(rootFolder)
 
-    const courseId = course?course._id:null;
-    
+    const courseId = course ? course._id : null;
+
     console.log(`🔍 [DEBUG] Folder access check for user ${userId}:`);
     console.log(`🔍 [DEBUG] - FolderId: ${folderId}`);
     console.log(`🔍 [DEBUG] - Course: ${course ? course.title : 'null'} (${course ? course.courseType : 'N/A'})`);
@@ -380,14 +402,14 @@ exports.getFolderContents = async (req, res) => {
     // 🗂️ NEW: Check if this is a Master Folder or a subfolder of Master Folder
     const currentFolder = await Folder.findById(folderId);
     const isMasterFolder = currentFolder && (currentFolder.isMasterFolder || currentFolder.folderType === 'master');
-    
+
     // 🗂️ NEW: Also check if the root folder is a Master Folder (for subfolders)
     const isSubfolderOfMaster = rootFolder && (rootFolder.isMasterFolder || rootFolder.folderType === 'master');
-    
+
     // 🗂️ NEW: Check if this is an assignment folder or subfolder of assignment folder
     const isAssignmentFolder = currentFolder && (currentFolder.folderType === 'assignments' || currentFolder.folderType === 'student_assignments');
     const isAssignmentSystemFolder = currentFolder && currentFolder.isSystemFolder && (currentFolder.name === 'Assignments' || currentFolder.name?.includes('_'));
-    
+
     console.log(`🔍 [DEBUG] Folder type checks:`);
     console.log(`🔍 [DEBUG] - isMasterFolder: ${isMasterFolder}`);
     console.log(`🔍 [DEBUG] - isSubfolderOfMaster: ${isSubfolderOfMaster}`);
@@ -396,7 +418,7 @@ exports.getFolderContents = async (req, res) => {
     console.log(`🔍 [DEBUG] - currentFolder.folderType: ${currentFolder?.folderType}`);
     console.log(`🔍 [DEBUG] - currentFolder.isSystemFolder: ${currentFolder?.isSystemFolder}`);
     console.log(`🔍 [DEBUG] - currentFolder.name: ${currentFolder?.name}`);
-    
+
     if (!courseId && !isMasterFolder && !isSubfolderOfMaster && !isAssignmentFolder && !isAssignmentSystemFolder) {
       return res.status(404).json({ message: "Course not found and not a Master Folder or its subfolder" });
     }
@@ -409,14 +431,14 @@ exports.getFolderContents = async (req, res) => {
       folder = await Folder.findById(folderId)
         .populate("folders")
         .populate("files");
-        
+
       if (!folder) {
         return res.status(404).json({ error: "Master Folder, Assignment Folder, or subfolder not found" });
       }
-      
+
       // For Master Folders, Assignment Folders, and their subfolders, all files are viewable by admin users
       hasPurchasedCourse = true; // Admin has access to all Master Folder and Assignment content
-      
+
     } else {
       // 🗂️ Course Folder: Check course access
       const user = await User.findById(userId);
@@ -456,10 +478,10 @@ exports.getFolderContents = async (req, res) => {
     console.log(`🔍 [DEBUG] Processing ${folder.files.length} files:`);
     console.log(`🔍 [DEBUG] - Course type: ${course ? course.courseType : 'N/A'}`);
     console.log(`🔍 [DEBUG] - Has purchased course: ${hasPurchasedCourse}`);
-    
+
     const folderContents = folder.files.map((file) => {
       const fileObj = file.toObject();
-      
+
       const isBatchCourse = course && course.courseType === "Batch";
       let newIsViewable;
 
@@ -467,11 +489,11 @@ exports.getFolderContents = async (req, res) => {
         // 🎯 BATCH COURSE LOGIC: Files are unlocked by default unless manually locked by admin
         // If admin has explicitly set isViewable to false, respect that (manual lock)
         // Otherwise, unlock all files for batch users
-        
+
         // Check if this file was manually locked by admin (has been explicitly set to false)
         // For batch courses, we assume files are unlocked by default unless admin locked them
         const wasManuallyLocked = fileObj.isViewable === false;
-        
+
         if (wasManuallyLocked) {
           // Admin has manually locked this file - keep it locked
           newIsViewable = false;
@@ -509,10 +531,10 @@ exports.getFolderContents = async (req, res) => {
       finalIsViewable: f.isViewable
     })));
 
-    res.status(200).json({ 
-      message: (isMasterFolder || isSubfolderOfMaster || isAssignmentFolder || isAssignmentSystemFolder) ? 
-        "System Folder contents retrieved" : "Folder contents retrieved", 
-      folder: folderData 
+    res.status(200).json({
+      message: (isMasterFolder || isSubfolderOfMaster || isAssignmentFolder || isAssignmentSystemFolder) ?
+        "System Folder contents retrieved" : "Folder contents retrieved",
+      folder: folderData
     });
   } catch (error) {
     console.log("Error getting folder contents:", error);
@@ -542,123 +564,52 @@ exports.getFolderContentsForHomeScreen = async (req, res) => {
   }
 };
 
-
-
-// exports.deleteFolder = async (req, res) => {
-//   try {
-//     const { folderId } = req.params;
-//     const { sourceFolderId } = req.body;
-
-//     if (!sourceFolderId) {
-//       return res.status(400).json({ 
-//         message: "sourceFolderId is required" 
-//       });
-//     }
-
-//     const folderToDelete = await Folder.findById(folderId);
-    
-//     if (!folderToDelete) {
-//       return res.status(404).json({ message: "Folder not found" });
-//     }
-
-
-//     if (folderToDelete.parentFolderId?.toString()!== sourceFolderId.toString()) {
-//       await Folder.findByIdAndUpdate(
-//         sourceFolderId,
-//         { $pull: { folders: folderId } }
-//       );
-      
-//       return res.status(200).json({ 
-//         message: "Folder reference removed from source folder" 
-//       });
-//     }
-//     const deleteFolderRecursively = async (id) => {
-//       const folder = await Folder.findById(id);
-
-//       if (!folder) {
-//         console.log(`Folder with id ${id} not found`);
-//         return;
-//       }
-
-//       if (folder.folders.length === null) {
-//         await Folder.findByIdAndDelete(id);
-//         return;
-//       }
-//       for (const subfolderId of folder.folders) {
-//         await deleteFolderRecursively(subfolderId);
-//       }
-
-//       const fileUrls = folder.files.map((file) => file.url);
-
-//       if (fileUrls?.length > 0) {
-//         await deleteFilesFromBucket(authConfig.s3_bucket, fileUrls);
-//       }
-//       // Delete files from storage
-
-//       await Folder.findByIdAndDelete(id);
-//     };
-
-//     await deleteFolderRecursively(folderId);
-
-//     res
-//       .status(200)
-//       .json({ message: "Folder and its contents deleted successfully" });
-//   } catch (error) {
-//     console.log("Error deleting folder:", error);
-//     res
-//       .status(500)
-//       .json({ message: "Failed to delete folder", error: error.message });
-//   }
-// };
-
 exports.deleteFileFromFolder = async (req, res) => {
   try {
     const { folderId, fileId } = req.params;
 
-    //check to delete file permanently if its in root folder else just pull from files array
-
-    // Find the folder and populate the `files` field
-    const folder = await Folder.findById(folderId).populate("files");
-
+    const folder = await Folder.findById(folderId);
     if (!folder) {
       return res.status(404).json({ message: "Folder not found" });
     }
 
-    // Locate the file in the folder's files array
-    const file = folder.files.find((file) => file._id.toString() === fileId);
-
+    const file = await File.findById(fileId);
     if (!file) {
-      return res.status(404).json({ message: "File not found in folder" });
+      return res.status(404).json({ message: "File not found" });
     }
 
-    // Extract the fileUrl
     const fileUrl = file.url;
 
-    // Remove the file reference from the folder
-    folder.files = folder.files.filter(
-      (file) => file._id.toString() !== fileId
-    );
-    await folder.save();
+    // Remove file reference from folder
+    await Folder.findByIdAndUpdate(folderId, {
+      $pull: { files: fileId }
+    });
 
-    // Delete the file from the S3 bucket
-    await deleteFilesFromBucket(authConfig.s3_bucket, [fileUrl]);
-
-    // Optionally, delete the File document from the database
+    // Delete the File document
     await File.findByIdAndDelete(fileId);
 
-    res.status(200).json({ message: "File deleted successfully", fileUrl });
+    // 🔒 SAFE DELETION: Check if the file URL is used by any other File document
+    // If usageCount is 0, it means we just deleted the LAST reference to this S3 object
+    const usageCount = await File.countDocuments({ url: fileUrl });
+
+    if (usageCount === 0) {
+      await deleteFilesFromBucket(authConfig.s3_bucket, [fileUrl]);
+      console.log(`✅ Permanently deleted orphaned file from S3: ${fileUrl}`);
+    } else {
+      console.log(`ℹ️ File URL still in use by ${usageCount} other records. S3 object preserved.`);
+    }
+
+    res.status(200).json({ message: "File deleted successfully" });
   } catch (error) {
     console.error("Error deleting file:", error);
-    res
-      .status(500)
-      .json({ message: "Failed to delete file", error: error.message });
+    res.status(500).json({ message: "Failed to delete file", error: error.message });
   }
 };
 
 exports.updateFolder = async (req, res) => {
   try {
     const { folderId } = req.params;
-    const { name, isDownloadable, downloadType  } = req.body;
+    const { name, isDownloadable, downloadType } = req.body;
 
     const folder = await Folder.findById(folderId);
     if (!folder) {
@@ -736,47 +687,43 @@ exports.moveFileToFolder = async (req, res) => {
     const importedFiles = [];
     const skippedFiles = [];
 
-    for (const fileId of fileIdsArray) {
+    // Parallel processing with Promise.all for speed
+    await Promise.all(fileIdsArray.map(async (fileId) => {
       try {
         const file = await File.findById(fileId);
         if (!file) {
           console.warn(`⚠️ [WARN] File not found: ${fileId}`);
           skippedFiles.push({ fileId, reason: 'File not found' });
-          continue;
+          return;
         }
 
-        // Check if file already exists in destination folder to avoid duplicates
-        const existingFile = destinationFolder.files.find(f => 
-          f.toString() === fileId.toString()
-        );
-        
-        if (existingFile) {
-          console.warn(`⚠️ [WARN] File already exists in destination: ${fileId}`);
-          skippedFiles.push({ fileId, reason: 'File already exists in destination' });
-          continue;
-        }
-
-        // Create a copy of the file for import (not move)
+        // Create a copy of the file for import
         const duplicateFile = await File.create({
           name: file.name,
           url: file.url,
           description: file.description,
           isDownloadable: file.isDownloadable,
           isViewable: file.isViewable,
+          type: file.type || 'other'
         });
 
-        destinationFolder.files.push(duplicateFile._id);
+        // Use array push within the sequential mapping context to ensure thread safety on the array
+        // (Node.js single thread event loop makes this safe for array ops)
         importedFiles.push(duplicateFile);
-
         console.log(`✅ [DEBUG] File imported successfully: ${file.name} -> ${duplicateFile._id}`);
+
       } catch (fileError) {
         console.error(`❌ [ERROR] Failed to import file ${fileId}:`, fileError);
         skippedFiles.push({ fileId, reason: fileError.message });
       }
-    }
+    }));
 
-    // Save the destination folder with new files
-    await destinationFolder.save();
+    if (importedFiles.length > 0) {
+      // atomic push
+      await Folder.findByIdAndUpdate(destinationFolderId, {
+        $push: { files: { $each: importedFiles.map(f => f._id) } }
+      });
+    }
 
     const successfulImports = importedFiles.length;
     const totalRequested = fileIdsArray.length;
@@ -796,11 +743,66 @@ exports.moveFileToFolder = async (req, res) => {
     });
   } catch (error) {
     console.error("❌ [ERROR] File import operation failed:", error);
-    res.status(500).json({ 
-      message: "Failed to import files", 
-      error: error.message 
+    res.status(500).json({
+      message: "Failed to import files",
+      error: error.message
     });
   }
+};
+
+// Helper: Deep copy a folder recursively
+// Returns the ObjectId of the NEW folder
+const deepCopyFolder = async (folderId, newParentId) => {
+  const originalFolder = await Folder.findById(folderId).populate('files');
+  if (!originalFolder) return null;
+
+  // 1. Copy all Files first (Bulk Insert for performance)
+  let newFileIds = [];
+  if (originalFolder.files && originalFolder.files.length > 0) {
+    const filesToCreate = originalFolder.files.map(f => ({
+      name: f.name,
+      url: f.url,
+      description: f.description,
+      isDownloadable: f.isDownloadable,
+      downloadType: f.downloadType,
+      isViewable: f.isViewable,
+      type: f.type || 'other'
+    }));
+
+    // Insert all files in one go
+    const createdFiles = await File.insertMany(filesToCreate);
+    newFileIds = createdFiles.map(f => f._id);
+  }
+
+  // 2. Create the New Folder
+  const newFolder = await Folder.create({
+    name: originalFolder.name,
+    parentFolderId: newParentId,
+    folders: [], // Will populate recursively
+    files: newFileIds,
+    importedQuizzes: originalFolder.importedQuizzes || [], // These are just refs, can probably keep? Or should deep copy? For now keeping refs.
+    QuizFolders: originalFolder.QuizFolders || [],
+    isDownloadable: originalFolder.isDownloadable,
+    downloadType: originalFolder.downloadType,
+    // Do NOT copy system flags like isMasterFolder unless specifically required logic handles it
+    folderType: originalFolder.folderType === 'master' ? 'general' : originalFolder.folderType
+  });
+
+  // 3. Recursively copy subfolders
+  if (originalFolder.folders && originalFolder.folders.length > 0) {
+    // Process subfolders in parallel
+    const subfolderPromises = originalFolder.folders.map(subId => deepCopyFolder(subId, newFolder._id));
+    const newSubfolderIds = (await Promise.all(subfolderPromises)).filter(id => id !== null);
+
+    // Update the new folder with subfolder IDs
+    if (newSubfolderIds.length > 0) {
+      await Folder.findByIdAndUpdate(newFolder._id, {
+        $push: { folders: { $each: newSubfolderIds } }
+      });
+    }
+  }
+
+  return newFolder._id;
 };
 
 //import/copy complete folder into another folder
@@ -808,7 +810,7 @@ exports.moveFolderToFolder = async (req, res) => {
   try {
     const { folderIds, destinationFolderId } = req.body;
 
-    console.log('🔍 [DEBUG] Folder import/move request:', { folderIds, destinationFolderId });
+    console.log('🔍 [DEBUG] Deep Folder import/move request:', { folderIds, destinationFolderId });
 
     if (!destinationFolderId) {
       return res.status(400).json({ error: "Destination folder ID is required" });
@@ -825,100 +827,81 @@ exports.moveFolderToFolder = async (req, res) => {
       return res.status(404).json({ error: "Destination folder not found" });
     }
 
-    // Prevent importing folders into themselves or their descendants
+    // Recursion Check: Prevent importing into itself or its children
     const isAlreadyItsOwnSubfolder = async (childIds, parentId) => {
-      if (childIds.includes(parentId)) {
-        return true;
-      }
+      // If the destination IS one of the folders being moved
+      if (typeof parentId === 'string' && childIds.includes(parentId)) return true; // simplified check
+      if (childIds.some(id => id.toString() === parentId.toString())) return true;
 
-      const parent = await Folder.findById(parentId).populate("folders");
-      if (!parent) {
-        return false;
-      }
+      const parent = await Folder.findById(parentId);
+      if (!parent || !parent.parentFolderId) return false;
 
-      for (let subfolder of parent.folders) {
-        if (await isAlreadyItsOwnSubfolder(childIds, subfolder._id)) {
+      // Traverse UP to check if we are pasting inside a child of the source
+      // Actually simpler: Just check if any ancestor of 'destinationFolderId' is in 'folderIdsArray'
+      // But typically we care if Destination is Inside Source.
+      // Upward traversal:
+      let current = parent;
+      while (current.parentFolderId) {
+        if (childIds.some(id => id.toString() === current.parentFolderId.toString())) {
           return true;
         }
+        current = await Folder.findById(current.parentFolderId);
+        if (!current) break;
       }
-
       return false;
     };
 
     if (await isAlreadyItsOwnSubfolder(folderIdsArray, destinationFolderId)) {
-      return res.status(400).json({ 
-        error: "Cannot import folders into their own subfolders" 
+      return res.status(400).json({
+        error: "Circular dependency detected: Cannot import a folder into itself or its subfolders."
       });
     }
 
     const importedFolders = [];
     const skippedFolders = [];
 
-    // Import each folder to the new parent
+    // Import each folder using Deep Copy
     for (let folderId of folderIdsArray) {
       try {
-        const folder = await Folder.findById(folderId).populate('files folders');
-        if (!folder) {
-          console.warn(`⚠️ [WARN] Folder not found: ${folderId}`);
-          skippedFolders.push({ folderId, reason: 'Folder not found' });
-          continue;
+        // Deep copy!
+        const newFolderId = await deepCopyFolder(folderId, destinationFolderId);
+
+        if (newFolderId) {
+          importedFolders.push(newFolderId);
+          console.log(`✅ [DEBUG] Folder deep copied successfully: ${folderId} -> ${newFolderId}`);
+        } else {
+          skippedFolders.push({ folderId, reason: 'Source folder not found' });
         }
-
-        // Check if folder already exists in destination to avoid duplicates
-        const existingFolder = destinationFolder.folders.find(f => 
-          f.toString() === folderId.toString()
-        );
-        
-        if (existingFolder) {
-          console.warn(`⚠️ [WARN] Folder already exists in destination: ${folderId}`);
-          skippedFolders.push({ folderId, reason: 'Folder already exists in destination' });
-          continue;
-        }
-
-        // Create a copy of the folder for import (not move)
-        const duplicateFolder = await Folder.create({
-          name: folder.name,
-          parentFolderId: destinationFolderId,
-          folders: folder.folders || [],
-          files: folder.files || [],
-          importedQuizzes: folder.importedQuizzes || [],
-          QuizFolders: folder.QuizFolders || [],
-        });
-
-        destinationFolder.folders.push(duplicateFolder._id);
-        importedFolders.push(duplicateFolder);
-
-        console.log(`✅ [DEBUG] Folder imported successfully: ${folder.name} -> ${duplicateFolder._id}`);
       } catch (folderError) {
         console.error(`❌ [ERROR] Failed to import folder ${folderId}:`, folderError);
-        skippedFolders.push({ folderId, reason: folderError.message });
+        skippedFiles.push({ folderId, reason: folderError.message });
       }
     }
 
-    // Save the destination folder with new subfolders
-    await destinationFolder.save();
+    // Update Destination Folder Refs
+    if (importedFolders.length > 0) {
+      await Folder.findByIdAndUpdate(destinationFolderId, {
+        $push: { folders: { $each: importedFolders } }
+      });
+    }
 
     const successfulImports = importedFolders.length;
     const totalRequested = folderIdsArray.length;
 
-    console.log(`📊 [DEBUG] Folder import summary: ${successfulImports}/${totalRequested} folders imported`);
+    console.log(`📊 [DEBUG] Chunk import summary: ${successfulImports}/${totalRequested} folders imported`);
 
     res.status(200).json({
-      message: `${successfulImports} folder(s) imported successfully${skippedFolders.length > 0 ? ` (${skippedFolders.length} skipped)` : ''}`,
+      message: `${successfulImports} folder(s) imported successfully`,
       importedFolders,
       skippedFolders,
-      destinationFolder: {
-        _id: destinationFolder._id,
-        name: destinationFolder.name
-      },
       totalFoldersImported: successfulImports,
       totalFoldersSkipped: skippedFolders.length
     });
   } catch (error) {
     console.error("❌ [ERROR] Folder import operation failed:", error);
-    res.status(500).json({ 
-      message: "Failed to import folders", 
-      error: error.message 
+    res.status(500).json({
+      message: "Failed to import folders",
+      error: error.message
     });
   }
 };
@@ -1157,27 +1140,27 @@ exports.removeQuizFolderFromCourseFolder = async (req, res) => {
   }
 };
 
-exports.updateFileOrder=async(req,res)=>{
-  try{
-    const {folderId}=req.params;
-    const {fileIds}=req.body;
+exports.updateFileOrder = async (req, res) => {
+  try {
+    const { folderId } = req.params;
+    const { fileIds } = req.body;
 
-    const folder=await Folder.findById(folderId);
-    if(!folder){
-      return res.status(404).json({message:"Folder not found"});
+    const folder = await Folder.findById(folderId);
+    if (!folder) {
+      return res.status(404).json({ message: "Folder not found" });
     }
 
-    await Folder.findByIdAndUpdate(folderId,{
-      files:fileIds
+    await Folder.findByIdAndUpdate(folderId, {
+      files: fileIds
     });
 
-    const updatedFolder=await Folder.findById(folderId).populate("files");
+    const updatedFolder = await Folder.findById(folderId).populate("files");
 
     return res.status(200).json({
-      message:"File order updated successfully",
-      folder:updatedFolder
+      message: "File order updated successfully",
+      folder: updatedFolder
     });
-  }catch(error){
-    return res.status(500).json({message:"Failed to update file order",error:error.message});
+  } catch (error) {
+    return res.status(500).json({ message: "Failed to update file order", error: error.message });
   }
 }

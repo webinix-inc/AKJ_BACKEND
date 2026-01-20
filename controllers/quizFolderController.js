@@ -106,55 +106,55 @@ exports.getFolderStructure = async (req, res) => {
   try {
     const userId = req.user._id;
     console.log(`🔍 [DEBUG] Fetching quiz folders for user: ${userId}`);
-    
+
     // Get user's purchased courses (including batch courses)
     const User = require('../models/userModel');
     const user = await User.findById(userId).populate('purchasedCourses.course', '_id');
-    
+
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
-    
+
     // Extract course IDs that user has access to
     const userCourseIds = user.purchasedCourses
       .filter(pc => pc.course) // Only include valid courses
       .map(pc => pc.course._id.toString());
-    
+
     console.log(`🔍 [DEBUG] User has access to ${userCourseIds.length} courses:`, userCourseIds);
-    
+
     // Admin users see all folders
     if (user.userType === "ADMIN") {
       console.log(`🔍 [DEBUG] Admin user - showing all folders`);
       const rootFolders = await QuizFolder.find({ parentFolderId: null, isVisible: true })
         .populate('courses', 'title courseType');
-      
-      return res.status(200).json({ 
-        message: 'Folder structure fetched successfully (Admin)', 
-        folders: rootFolders 
+
+      return res.status(200).json({
+        message: 'Folder structure fetched successfully (Admin)',
+        folders: rootFolders
       });
     }
-    
+
     // For regular users, only show folders for courses they have access to
-    const rootFolders = await QuizFolder.find({ 
+    const rootFolders = await QuizFolder.find({
       parentFolderId: null,
       isVisible: true,
       courses: { $in: userCourseIds }
     }).populate('courses', 'title courseType');
-    
+
     console.log(`🔍 [DEBUG] Found ${rootFolders.length} accessible quiz folders for user`);
-    
+
     // Filter out folders that don't have any courses the user has access to
     const accessibleFolders = rootFolders.filter(folder => {
-      const hasAccessibleCourse = folder.courses.some(course => 
+      const hasAccessibleCourse = folder.courses.some(course =>
         userCourseIds.includes(course._id.toString())
       );
       console.log(`🔍 [DEBUG] Folder "${folder.name}" accessible: ${hasAccessibleCourse}`);
       return hasAccessibleCourse;
     });
-    
-    return res.status(200).json({ 
-      message: `Found ${accessibleFolders.length} accessible test folders`, 
-      folders: accessibleFolders 
+
+    return res.status(200).json({
+      message: `Found ${accessibleFolders.length} accessible test folders`,
+      folders: accessibleFolders
     });
   } catch (error) {
     console.error('❌ Error in getFolderStructure:', error);
@@ -166,20 +166,20 @@ exports.getFolderContents = async (req, res) => {
   try {
     const { folderId } = req.params;
     const userId = req.user._id;
-    
+
     // Validate folderId
     if (!folderId || folderId === 'undefined' || folderId === 'null') {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: "Invalid folder ID provided",
-        message: "Folder ID is required and must be valid" 
+        message: "Folder ID is required and must be valid"
       });
     }
 
     // Validate ObjectId format
     if (!mongoose.Types.ObjectId.isValid(folderId)) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: "Invalid folder ID format",
-        message: "Folder ID must be a valid MongoDB ObjectId" 
+        message: "Folder ID must be a valid MongoDB ObjectId"
       });
     }
 
@@ -194,42 +194,47 @@ exports.getFolderContents = async (req, res) => {
       .populate('courses', '_id title courseType');
 
     if (!folder) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         error: "Folder not found",
-        message: "The requested folder does not exist" 
+        message: "The requested folder does not exist"
       });
     }
 
     // Check if user has access to this folder (unless admin)
     const User = require('../models/userModel');
     const user = await User.findById(userId).populate('purchasedCourses.course', '_id');
-    
+
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
-    
+
     // Admin users have access to all folders
     if (user.userType !== "ADMIN") {
       // Extract course IDs that user has access to
       const userCourseIds = user.purchasedCourses
         .filter(pc => pc.course)
         .map(pc => pc.course._id.toString());
-      
+
       // Check if user has access to any of the courses linked to this folder
-      const hasAccess = folder.courses.some(course => 
+      const hasAccess = folder.courses.some(course =>
         userCourseIds.includes(course._id.toString())
       );
-      
+
       if (!hasAccess) {
         console.log(`🚫 Access denied to folder "${folder.name}" for user ${userId}`);
-        return res.status(403).json({ 
+        return res.status(403).json({
           error: "Access denied",
-          message: "You don't have access to this test folder" 
+          message: "You don't have access to this test folder"
         });
       }
-      
+
       console.log(`✅ Access granted to folder "${folder.name}" for user ${userId}`);
     }
+
+    // 🔧 FIX: Prevent browser/proxy caching
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
 
     res.status(200).json({ message: "Folder contents retrieved", folder });
   } catch (error) {
