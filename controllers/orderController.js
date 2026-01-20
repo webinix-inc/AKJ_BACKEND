@@ -57,6 +57,7 @@ exports.getAllPaidOrders = async (req, res) => {
     });
   }
 };
+
 // Controller to count enrolled students for a specific course
 exports.countStudentsForCourse = async (req, res) => {
   const { courseId } = req.params; // Get courseId from request parameters

@@ -85,17 +85,20 @@ const createRazorpayOrderLogic = async (orderData) => {
 
     // 🔥 CRITICAL: Declare installmentPlan outside the if block so it's accessible later
     let installmentPlan = null;
+    let planTypeToUse = planType;
 
     // Handle installment-specific logic
     if (paymentMode === "installment") {
       // 🔥 CRITICAL: Use installmentPlanId if provided, otherwise fallback to planType
-
       if (installmentPlanId) {
         installmentPlan = await Installment.findById(installmentPlanId);
         if (!installmentPlan || installmentPlan.courseId.toString() !== courseId.toString()) {
           throw new Error("Installment plan not found or doesn't match course");
         }
         console.log(`✅ [createRazorpayOrderLogic] Using selected plan ID: ${installmentPlanId} (${installmentPlan.planType})`);
+        if (!planTypeToUse && installmentPlan?.planType) {
+          planTypeToUse = installmentPlan.planType;
+        }
       } else if (planType) {
         installmentPlan = await Installment.findOne({ courseId, planType });
         if (!installmentPlan) {
@@ -145,33 +148,7 @@ const createRazorpayOrderLogic = async (orderData) => {
         }
       }
 
-      // Check if installment already exists
-      const existingPayment = installmentPlan.userPayments.find(
-        (p) =>
-          p.userId.toString() === userId &&
-          p.installmentIndex === installmentIndex
-      );
-
-      if (existingPayment) {
-        // If installment already exists and is paid, don't allow creating another order
-        if (existingPayment.isPaid) {
-          throw new Error(`Installment ${installmentIndex + 1} has already been paid for this user`);
-        }
-
-        // If installment exists but not paid, allow creating order (user might be retrying payment)
-        // Don't add duplicate entry, just proceed with order creation
-        console.log(`⚠️ Installment ${installmentIndex + 1} already exists but not paid. Allowing order creation for retry.`);
-      } else {
-        // Add new installment to plan only if it doesn't exist
-        installmentPlan.userPayments.push({
-          userId,
-          installmentIndex,
-          isPaid: false,
-          paidAmount: amount, // Use amount (may be saved amount for enrolled users)
-          paymentDate: null,
-        });
-        await installmentPlan.save();
-      }
+      // NOTE: Do not write user-specific payment state to shared Installment plans.
     }
 
     // Create Razorpay order (amount may have been adjusted for enrolled users)
@@ -183,7 +160,7 @@ const createRazorpayOrderLogic = async (orderData) => {
         userId,
         courseId,
         paymentMode,
-        planType,
+        planType: planTypeToUse,
         ...notes
       }
     };
@@ -216,7 +193,7 @@ const createRazorpayOrderLogic = async (orderData) => {
       userId,
       courseId,
       paymentMode,
-      planType,
+      planType: planTypeToUse,
       installmentPlanId: finalInstallmentPlanId, // 🔥 NEW: Store selected plan ID
     };
 
@@ -568,6 +545,10 @@ const addCourseToUserLogic = async (userId, courseId, paymentMode, installmentDe
             throw new Error(`❌ planType not found for course enrollment. OrderId: ${finalOrderId}, CourseId: ${courseId}`);
           }
 
+          if (!newCourse.planType) {
+            newCourse.planType = planTypeToUse;
+          }
+
           console.log(`✅ [ENROLLMENT] Using planType: ${planTypeToUse} for course ${courseId}`);
 
           // 🔥 CRITICAL: Final check - if installmentPlan still not found, try one more time with orderId
@@ -686,6 +667,19 @@ const addCourseToUserLogic = async (userId, courseId, paymentMode, installmentDe
         if (!purchasedCourse.planType && installmentDetails?.planType) {
           purchasedCourse.planType = installmentDetails.planType;
           console.log(`✅ [ENROLLMENT] Updated missing planType for existing course: ${installmentDetails.planType}`);
+        }
+        if (!purchasedCourse.planType && finalOrderId) {
+          const orderForPlan = await Order.findOne({ orderId: finalOrderId }).select('planType installmentPlanId');
+          if (orderForPlan?.planType) {
+            purchasedCourse.planType = orderForPlan.planType;
+            console.log(`✅ [ENROLLMENT] Filled planType from order: ${orderForPlan.planType}`);
+          } else if (orderForPlan?.installmentPlanId) {
+            const planFromOrder = await Installment.findById(orderForPlan.installmentPlanId).select('planType');
+            if (planFromOrder?.planType) {
+              purchasedCourse.planType = planFromOrder.planType;
+              console.log(`✅ [ENROLLMENT] Filled planType from installmentPlanId: ${planFromOrder.planType}`);
+            }
+          }
         }
 
         // Update total amount paid
@@ -911,74 +905,37 @@ const handleInstallmentPaymentLogic = async (userId, courseId, installmentDetail
       throw new Error("Installment plan not found");
     }
 
-    // Find the specific installment entry
-    const entryIndex = plan.userPayments.findIndex(
-      (p) =>
-        p.userId.toString() === userId.toString() &&
-        p.installmentIndex === installmentDetails.installmentIndex
+    // Do NOT write user-specific payment state to shared Installment plans.
+    // Compute user-specific status from orders only.
+    const Order = require('../models/orderModel');
+    const paidOrders = await Order.find({
+      courseId,
+      userId,
+      status: "paid",
+      paymentMode: "installment"
+    });
+
+    const paidIndexes = new Set(
+      paidOrders
+        .map((order) => order.installmentDetails?.installmentIndex)
+        .filter((idx) => idx !== undefined && idx !== null)
     );
 
-    // 🔥 CRITICAL: Handle case where entry doesn't exist or is already paid
-    if (entryIndex === -1) {
-      // Entry doesn't exist - create it
-      plan.userPayments.push({
-        userId,
-        installmentIndex: installmentDetails.installmentIndex,
-        isPaid: true,
-        paidAmount: installmentDetails.amount || plan.installments[installmentDetails.installmentIndex]?.amount || 0,
-        paymentDate: new Date(),
-      });
-      console.log(`✅ [INSTALLMENT PAYMENT] Created new userPayment entry for installment ${installmentDetails.installmentIndex}`);
-    } else if (plan.userPayments[entryIndex].isPaid) {
-      // Already paid - log warning but don't throw error (idempotent operation)
-      console.warn(`⚠️ [INSTALLMENT PAYMENT] Installment ${installmentDetails.installmentIndex} already paid, skipping update`);
-      return {
-        installmentPaid: true,
-        remainingAmount: plan.remainingAmount,
-        totalInstallments: plan.installments.length,
-        paidInstallments: plan.userPayments.filter(p => p.userId.toString() === userId.toString() && p.isPaid).length,
-        isCompleted: plan.status === "completed",
-        alreadyPaid: true
-      };
-    } else {
-      // Update existing entry
-      plan.userPayments[entryIndex].isPaid = true;
-      plan.userPayments[entryIndex].paymentDate = new Date();
-      if (!plan.userPayments[entryIndex].paidAmount) {
-        plan.userPayments[entryIndex].paidAmount = installmentDetails.amount || plan.installments[installmentDetails.installmentIndex]?.amount || 0;
-      }
-    }
-
-    // Update installment in plan.installments array
-    if (plan.installments[installmentDetails.installmentIndex]) {
-      plan.installments[installmentDetails.installmentIndex].isPaid = true;
-      plan.installments[installmentDetails.installmentIndex].paidOn = new Date();
-    }
-
-    // Recalculate remaining amount based on actual paid installments
     const paidAmount = plan.installments
-      .filter(inst => inst.isPaid)
-      .reduce((sum, inst) => sum + inst.amount, 0);
-    plan.remainingAmount = plan.totalAmount - paidAmount;
+      .filter((_, idx) => paidIndexes.has(idx))
+      .reduce((sum, inst) => sum + (inst.amount || 0), 0);
 
-    // Check if all installments are paid
-    const paidInstallments = plan.userPayments.filter(
-      (p) => p.userId.toString() === userId && p.isPaid
-    ).length;
+    const remainingAmount = (plan.totalAmount || 0) - paidAmount;
+    const paidInstallments = paidIndexes.size;
+    const isCompleted = paidInstallments === plan.installments.length;
 
-    if (paidInstallments === plan.installments.length) {
-      plan.status = "completed";
-    }
-
-    await plan.save();
-
-    console.log("✅ Installment payment processed");
+    console.log("✅ Installment payment processed (user-scoped, no plan writes)");
     return {
       installmentPaid: true,
-      remainingAmount: plan.remainingAmount,
+      remainingAmount,
       totalInstallments: plan.installments.length,
       paidInstallments,
-      isCompleted: plan.status === "completed"
+      isCompleted
     };
   } catch (error) {
     console.error("❌ Error in handleInstallmentPaymentLogic:", error);

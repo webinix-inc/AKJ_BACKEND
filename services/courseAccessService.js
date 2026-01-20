@@ -1,7 +1,6 @@
 // 🔥 Course Access Service - Handles installment-based course access control
 const User = require('../models/userModel');
-const Installment = require('../models/installmentModel');
-const Course = require('../models/courseModel');
+const Order = require('../models/orderModel');
 
 /**
  * Check and update course access for all users with installment payments
@@ -12,7 +11,10 @@ const checkAndUpdateCourseAccess = async () => {
     
     // Find all users with installment-based course purchases
     const usersWithInstallments = await User.find({
-      'purchasedCourses.paymentMode': 'installment'
+      $or: [
+        { 'purchasedCourses.paymentMode': 'installment' },
+        { 'purchasedCourses.paymentType': 'installment' }
+      ]
     }).populate('purchasedCourses.course');
     
     let totalChecked = 0;
@@ -21,7 +23,8 @@ const checkAndUpdateCourseAccess = async () => {
     
     for (const user of usersWithInstallments) {
       for (const purchasedCourse of user.purchasedCourses) {
-        if (purchasedCourse.paymentMode !== 'installment') continue;
+        const paymentMode = purchasedCourse.paymentMode || purchasedCourse.paymentType;
+        if (paymentMode !== 'installment') continue;
         
         totalChecked++;
         const courseId = purchasedCourse.course._id || purchasedCourse.course;
@@ -68,92 +71,99 @@ const checkAndUpdateCourseAccess = async () => {
  */
 const checkUserInstallmentStatus = async (userId, courseId) => {
   try {
-    // Find user's installment plans for this course
-    const installmentPlans = await Installment.find({ 
-      courseId,
-      'userPayments.userId': userId 
-    });
-    
-    if (!installmentPlans.length) {
-      return { hasAccess: true, reason: 'NO_INSTALLMENT_PLAN' };
+    const user = await User.findById(userId).select('purchasedCourses');
+    if (!user) {
+      return { hasAccess: false, reason: 'USER_NOT_FOUND' };
     }
-    
+
+    const purchasedCourse = user.purchasedCourses?.find((pc) => {
+      const pcCourseId = pc.course?.toString?.() || pc.course;
+      const paymentMode = pc.paymentType || pc.paymentMode;
+      return pcCourseId === courseId && paymentMode === 'installment';
+    });
+
+    if (!purchasedCourse || !purchasedCourse.installments || purchasedCourse.installments.length === 0) {
+      return { hasAccess: true, reason: 'NO_INSTALLMENT_ENROLLMENT' };
+    }
+
+    const paidOrders = await Order.find({
+      courseId,
+      userId,
+      status: "paid",
+      paymentMode: "installment"
+    }).select('installmentDetails paidAt updatedAt createdAt');
+
+    const paidIndexes = new Set(
+      paidOrders
+        .map((order) => order.installmentDetails?.installmentIndex)
+        .filter((idx) => idx !== undefined && idx !== null)
+    );
+
+    const enrollmentOrder = paidOrders.find(
+      (order) => order.installmentDetails?.installmentIndex === 0
+    ) || paidOrders[0];
+    const firstPaymentDate = enrollmentOrder?.paidAt || enrollmentOrder?.updatedAt || enrollmentOrder?.createdAt || null;
+
+    const baseDate = firstPaymentDate || purchasedCourse.purchaseDate || new Date();
     const currentDate = new Date();
-    
-    for (const plan of installmentPlans) {
-      const userPayments = plan.userPayments.filter(p => p.userId.toString() === userId);
-      
-      if (!userPayments.length) continue;
-      
-      // Find the first payment to establish the timeline
-      const firstPayment = userPayments.find(p => p.installmentIndex === 0);
-      if (!firstPayment || !firstPayment.isPaid) {
-        return { 
-          hasAccess: false, 
+    const overdueInstallments = [];
+    let nextDueInstallment = null;
+
+    for (let i = 0; i < purchasedCourse.installments.length; i++) {
+      const installment = purchasedCourse.installments[i];
+      const isPaid = paidIndexes.has(i) || !!installment.isPaid;
+
+      if (i === 0 && !isPaid) {
+        return {
+          hasAccess: false,
           reason: 'FIRST_INSTALLMENT_UNPAID',
           message: 'First installment payment is required',
-          planType: plan.planType
+          planType: purchasedCourse.planType || null
         };
       }
-      
-      const firstPaymentDate = firstPayment.paymentDate;
-      let overdueInstallments = [];
-      let nextDueInstallment = null;
-      
-      // Check each installment's status
-      for (let i = 0; i < plan.installments.length; i++) {
-        const installment = plan.installments[i];
-        const userPayment = userPayments.find(p => p.installmentIndex === i);
-        
-        if (userPayment && userPayment.isPaid) {
-          continue; // This installment is paid
-        }
-        
-        // Calculate due date: First payment date + i months
-        let dueDate = new Date(firstPaymentDate);
-        dueDate.setMonth(dueDate.getMonth() + i);
-        
-        if (currentDate > dueDate) {
-          // Payment is overdue
-          const daysPastDue = Math.floor((currentDate - dueDate) / (1000 * 60 * 60 * 24));
-          overdueInstallments.push({
-            installmentNumber: i + 1,
-            amount: installment.amount,
-            dueDate,
-            daysPastDue
-          });
-        } else if (!nextDueInstallment) {
-          nextDueInstallment = {
-            installmentNumber: i + 1,
-            amount: installment.amount,
-            dueDate
-          };
-        }
+
+      if (isPaid) {
+        continue;
       }
-      
-      if (overdueInstallments.length > 0) {
-        const totalOverdue = overdueInstallments.reduce((sum, inst) => sum + inst.amount, 0);
-        
-        return { 
-          hasAccess: false, 
-          reason: 'INSTALLMENTS_OVERDUE',
-          message: `${overdueInstallments.length} installment(s) overdue. Total amount: ₹${totalOverdue.toFixed(2)}`,
-          planType: plan.planType,
-          overdueInstallments,
-          totalOverdueAmount: totalOverdue
+
+      const dueDate = new Date(baseDate);
+      dueDate.setMonth(dueDate.getMonth() + i);
+
+      if (currentDate > dueDate) {
+        const daysPastDue = Math.floor((currentDate - dueDate) / (1000 * 60 * 60 * 24));
+        overdueInstallments.push({
+          installmentNumber: i + 1,
+          amount: installment.amount,
+          dueDate,
+          daysPastDue
+        });
+      } else if (!nextDueInstallment) {
+        nextDueInstallment = {
+          installmentNumber: i + 1,
+          amount: installment.amount,
+          dueDate
         };
       }
-      
-      return { 
-        hasAccess: true, 
-        reason: 'PAYMENTS_CURRENT',
-        planType: plan.planType,
-        nextDueInstallment
+    }
+
+    if (overdueInstallments.length > 0) {
+      const totalOverdue = overdueInstallments.reduce((sum, inst) => sum + inst.amount, 0);
+      return {
+        hasAccess: false,
+        reason: 'INSTALLMENTS_OVERDUE',
+        message: `${overdueInstallments.length} installment(s) overdue. Total amount: ₹${totalOverdue.toFixed(2)}`,
+        planType: purchasedCourse.planType || null,
+        overdueInstallments,
+        totalOverdueAmount: totalOverdue
       };
     }
-    
-    return { hasAccess: true, reason: 'NO_ACTIVE_PLAN' };
-    
+
+    return {
+      hasAccess: true,
+      reason: 'PAYMENTS_CURRENT',
+      planType: purchasedCourse.planType || null,
+      nextDueInstallment
+    };
   } catch (error) {
     console.error('Error checking user installment status:', error);
     return { hasAccess: false, reason: 'ERROR', error: error.message };
@@ -165,68 +175,91 @@ const checkUserInstallmentStatus = async (userId, courseId) => {
  */
 const getUserPaymentTimeline = async (userId, courseId) => {
   try {
-    const installmentPlans = await Installment.find({ 
-      courseId,
-      'userPayments.userId': userId 
+    const user = await User.findById(userId).select('purchasedCourses');
+    if (!user) {
+      return { timeline: [], message: 'User not found' };
+    }
+
+    const purchasedCourse = user.purchasedCourses?.find((pc) => {
+      const pcCourseId = pc.course?.toString?.() || pc.course;
+      const paymentMode = pc.paymentType || pc.paymentMode;
+      return pcCourseId === courseId && paymentMode === 'installment';
     });
-    
-    if (!installmentPlans.length) {
-      return { timeline: [], message: 'No installment plan found' };
+
+    if (!purchasedCourse || !purchasedCourse.installments || purchasedCourse.installments.length === 0) {
+      return { timeline: [], message: 'No installment enrollment found' };
     }
-    
-    const plan = installmentPlans[0]; // Assuming one plan per user per course
-    const userPayments = plan.userPayments.filter(p => p.userId.toString() === userId);
-    
-    if (!userPayments.length) {
-      return { timeline: [], message: 'No payments found for this user' };
-    }
-    
-    // Find the first payment date to establish timeline
-    const firstPayment = userPayments.find(p => p.installmentIndex === 0 && p.isPaid);
-    if (!firstPayment) {
-      return { timeline: [], message: 'First installment not paid yet' };
-    }
-    
-    const firstPaymentDate = firstPayment.paymentDate;
-    const timeline = [];
-    
-    for (let i = 0; i < plan.installments.length; i++) {
-      const installment = plan.installments[i];
-      const userPayment = userPayments.find(p => p.installmentIndex === i);
-      
-      // Calculate due date
-      let dueDate = new Date(firstPaymentDate);
-      dueDate.setMonth(dueDate.getMonth() + i);
-      
-      const currentDate = new Date();
-      let status = 'PENDING';
-      
-      if (userPayment && userPayment.isPaid) {
+
+    const paidOrders = await Order.find({
+      courseId,
+      userId,
+      status: "paid",
+      paymentMode: "installment"
+    }).sort({ createdAt: 1 }).select('installmentDetails paidAt updatedAt createdAt');
+
+    const paidIndexes = new Set(
+      paidOrders
+        .map((order) => order.installmentDetails?.installmentIndex)
+        .filter((idx) => idx !== undefined && idx !== null)
+    );
+
+    const enrollmentOrder = paidOrders.find(
+      (order) => order.installmentDetails?.installmentIndex === 0
+    ) || paidOrders[0];
+    const firstPaymentDate = enrollmentOrder?.paidAt || enrollmentOrder?.updatedAt || enrollmentOrder?.createdAt || null;
+    const baseDate = firstPaymentDate || purchasedCourse.purchaseDate || new Date();
+
+    let lastDueDate = null;
+    const currentDate = new Date();
+    const timeline = purchasedCourse.installments.map((installment, i) => {
+      let dueDate;
+      if (i === 0) {
+        dueDate = baseDate;
+      } else {
+        const prevDate = lastDueDate || baseDate;
+        dueDate = new Date(prevDate);
+        dueDate.setMonth(dueDate.getMonth() + 1);
+      }
+      lastDueDate = new Date(dueDate);
+
+      const paidOrder = paidOrders.find(
+        (order) => order.installmentDetails?.installmentIndex === i
+      );
+      const isPaid = paidIndexes.has(i) || !!installment.isPaid;
+      const paidDate = paidOrder?.paidAt || paidOrder?.updatedAt || paidOrder?.createdAt || installment.paidDate || null;
+
+      let status = 'UPCOMING';
+      if (isPaid) {
         status = 'PAID';
       } else if (currentDate > dueDate) {
         status = 'OVERDUE';
-      } else {
-        status = 'UPCOMING';
       }
-      
-      timeline.push({
+
+      return {
         installmentNumber: i + 1,
         amount: installment.amount,
         dueDate,
-        paidDate: userPayment?.paymentDate || null,
+        paidDate,
         status,
-        daysPastDue: status === 'OVERDUE' ? Math.floor((currentDate - dueDate) / (1000 * 60 * 60 * 24)) : 0
-      });
-    }
-    
+        daysPastDue: status === 'OVERDUE'
+          ? Math.floor((currentDate - dueDate) / (1000 * 60 * 60 * 24))
+          : 0
+      };
+    });
+
+    const totalAmount = purchasedCourse.installments.reduce((sum, inst) => sum + (inst.amount || 0), 0);
+    const paidAmount = purchasedCourse.installments
+      .filter((_, idx) => paidIndexes.has(idx) || purchasedCourse.installments[idx]?.isPaid)
+      .reduce((sum, inst) => sum + (inst.amount || 0), 0);
+    const remainingAmount = Math.max(0, totalAmount - paidAmount);
+
     return {
       timeline,
-      planType: plan.planType,
-      totalAmount: plan.totalAmount,
-      remainingAmount: plan.remainingAmount,
+      planType: purchasedCourse.planType || null,
+      totalAmount,
+      remainingAmount,
       firstPaymentDate
     };
-    
   } catch (error) {
     console.error('Error getting payment timeline:', error);
     throw error;

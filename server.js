@@ -385,6 +385,8 @@ mongoose
     }
     console.log("🔧 Loading admin routes...");
     require("./routes/admin.route")(app);
+    console.log("🧪 Loading test routes...");
+    require("./routes/test.route")(app);
     console.log("👨‍🏫 Loading teacher routes...");
     require("./routes/teacher.route")(app);
     console.log("📡 Loading broadcast routes...");

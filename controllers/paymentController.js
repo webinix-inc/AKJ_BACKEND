@@ -42,6 +42,7 @@ exports.createOrder = async (req, res) => {
     }
 
     let installmentPlan;
+    let planTypeToUse = planType;
     if (paymentMode === "installment") {
       // 🔥 CRITICAL: Use installmentPlanId if provided, otherwise fallback to planType
       if (installmentPlanId) {
@@ -52,6 +53,9 @@ exports.createOrder = async (req, res) => {
             .json({ success: false, message: "Installment plan not found or doesn't match course" });
         }
         console.log(`✅ [createOrder] Using selected plan ID: ${installmentPlanId} (${installmentPlan.planType})`);
+        if (!planTypeToUse && installmentPlan?.planType) {
+          planTypeToUse = installmentPlan.planType;
+        }
       } else {
         installmentPlan = await Installment.findOne({ courseId, planType });
         if (!installmentPlan) {
@@ -62,30 +66,7 @@ exports.createOrder = async (req, res) => {
         console.log(`⚠️ [createOrder] Using planType fallback: ${planType}`);
       }
 
-      const existingUserPayment = installmentPlan.userPayments.find(
-        (payment) =>
-          payment.userId.toString() === userId.toString() &&
-          payment.installmentIndex === installmentIndex
-      );
-
-      if (!existingUserPayment) {
-        installmentPlan.userPayments.push({
-          userId,
-          installmentIndex,
-          isPaid: false,
-          paidAmount: amount,
-          paymentDate: null,
-        });
-      } else {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: "Installment already exists for this user",
-          });
-      }
-
-      await installmentPlan.save();
+      // NOTE: Do not write user-specific payment state to shared Installment plans.
     }
 
     const totalAmountInSmallestUnit = Math.round(amount * 100);
@@ -105,7 +86,7 @@ exports.createOrder = async (req, res) => {
       userId,
       courseId,
       paymentMode,
-      planType,
+      planType: planTypeToUse,
       installmentPlanId: installmentPlan?._id, // 🔥 NEW: Store selected plan ID
     };
 

@@ -1,5 +1,4 @@
 const Installment = require("../models/installmentModel");
-const UserInstallment = require("../models/userInstallmentModel");
 const Order = require("../models/orderModel");
 const Course = require("../models/courseModel");
 const Subscription = require("../models/subscriptionModel");
@@ -219,6 +218,8 @@ exports.getInstallments = async (req, res) => {
   try {
     const { courseId } = req.params;
     const { planType, userId } = req.query; // 🔥 NEW: Optional planType and userId filters
+    let userPurchasedCourse = null;
+    let userIsEnrolled = false;
 
     // Input validation
     if (!courseId) {
@@ -261,14 +262,16 @@ exports.getInstallments = async (req, res) => {
         const User = require('../models/userModel');
         const user = await User.findById(userId).select('purchasedCourses');
         if (user?.purchasedCourses) {
-          const userPurchasedCourse = user.purchasedCourses.find((pc) => {
+          userPurchasedCourse = user.purchasedCourses.find((pc) => {
             const pcCourseId = pc.course?.toString?.() || pc.course;
-            return pcCourseId === courseId && pc.paymentType === 'installment';
+            const paymentMode = pc.paymentType || pc.paymentMode;
+            return pcCourseId === courseId && paymentMode === 'installment';
           });
 
           // 🔥 CRITICAL: Only filter if user has installments array (actually enrolled)
           // If user just has purchasedCourses entry but no installments, they're not enrolled yet
           if (userPurchasedCourse?.installments && userPurchasedCourse.installments.length > 0) {
+            userIsEnrolled = true;
             // User is enrolled - filter to their enrolled plan
             if (userPurchasedCourse?.planType) {
               planTypeToFilter = userPurchasedCourse.planType;
@@ -310,153 +313,86 @@ exports.getInstallments = async (req, res) => {
       });
     }
 
-    // Fetch all paid orders for this course to sync payment status
-    let paidOrders = await Order.find({
-      courseId: courseId,
-      status: "paid",
-      paymentMode: "installment"
-    });
-
-    // Auto-fix: If status is "paid" but installmentDetails.isPaid is false, update it to true
-    let ordersFixed = 0;
-    for (const order of paidOrders) {
-      if (order.installmentDetails &&
-        order.status === "paid" &&
-        order.installmentDetails.isPaid === false) {
-        console.log(`🔧 Auto-fixing order ${order.orderId}: Setting installmentDetails.isPaid to true`);
-        order.installmentDetails.isPaid = true;
-        await order.save();
-        ordersFixed++;
+    // NOTE: Do not sync Order state into shared Installment plans.
+    // Installment plans are templates; user-specific payment state must be derived elsewhere.
+    let responseInstallments = installments.map((plan) => plan.toObject());
+    if (userId) {
+      const User = require('../models/userModel');
+      const user = await User.findById(userId).select('purchasedCourses');
+      if (user?.purchasedCourses && !userPurchasedCourse) {
+        userPurchasedCourse = user.purchasedCourses.find((pc) => {
+          const pcCourseId = pc.course?.toString?.() || pc.course;
+          const paymentMode = pc.paymentType || pc.paymentMode;
+          return pcCourseId === courseId && paymentMode === 'installment';
+        });
+        userIsEnrolled = !!(userPurchasedCourse?.installments && userPurchasedCourse.installments.length > 0);
       }
-    }
 
-    if (ordersFixed > 0) {
-      console.log(`✅ Auto-fixed ${ordersFixed} order(s) in getInstallments`);
-      // Re-fetch orders to get updated data
-      paidOrders = await Order.find({
-        courseId: courseId,
+      const paidOrders = await Order.find({
+        courseId,
+        userId,
         status: "paid",
         paymentMode: "installment"
+      }).select('installmentDetails installmentPlanId planType paidAt updatedAt createdAt');
+
+      responseInstallments = installments.map((plan) => {
+        const planObj = plan.toObject();
+        const planId = plan._id?.toString?.() || plan._id;
+        const planPaidOrders = paidOrders.filter((order) => {
+          const orderPlanId = order.installmentPlanId?.toString?.() || order.installmentPlanId;
+          return orderPlanId ? orderPlanId === planId : order.planType === plan.planType;
+        });
+        const paidByIndex = new Map();
+        planPaidOrders.forEach((order) => {
+          const idx = order.installmentDetails?.installmentIndex;
+          if (idx !== undefined && idx !== null) {
+            paidByIndex.set(idx, order);
+          }
+        });
+
+        const sourceInstallments = (userIsEnrolled && userPurchasedCourse?.planType === plan.planType)
+          ? userPurchasedCourse.installments
+          : plan.installments;
+
+        const mappedInstallments = sourceInstallments.map((inst, idx) => {
+          const paidOrder = paidByIndex.get(idx);
+          const isPaid = !!paidOrder || !!inst.isPaid;
+          const paidOn = paidOrder?.paidAt || paidOrder?.updatedAt || paidOrder?.createdAt || inst.paidDate || inst.paidOn || null;
+          return {
+            ...inst,
+            isPaid,
+            paidOn
+          };
+        });
+
+        return {
+          ...planObj,
+          installments: mappedInstallments
+        };
       });
     }
 
-    // Sync userPayments and installments with Order status
-    let totalFixed = 0;
-    for (const plan of installments) {
-      let planUpdated = false;
-
-      // Process each paid order
-      for (const order of paidOrders) {
-        // 🔥 CRITICAL: Check if order belongs to THIS SPECIFIC PLAN
-        // Must match BOTH installmentPlanId (if available) AND installmentIndex
-        const orderPlanId = order.installmentPlanId?.toString?.() || order.installmentPlanId;
-        const planId = plan._id?.toString?.() || plan._id;
-
-        // Check if order belongs to this plan
-        // Priority 1: Match by installmentPlanId (most accurate)
-        // Priority 2: If installmentPlanId not available, match by planType (fallback for old orders)
-        const belongsToThisPlan = orderPlanId
-          ? orderPlanId === planId
-          : order.planType === plan.planType;
-
-        if (!belongsToThisPlan) {
-          // Order doesn't belong to this plan - skip it
-          continue;
-        }
-
-        // Now verify installmentIndex is valid for this plan
-        if (order.installmentDetails &&
-          order.installmentDetails.installmentIndex !== undefined &&
-          order.installmentDetails.installmentIndex < plan.installments.length) {
-
-          const installmentIdx = order.installmentDetails.installmentIndex;
-          const userId = order.userId?.toString?.() || order.userId;
-
-          // Check BOTH conditions: status === "paid" AND installmentDetails.isPaid === true
-          const isFullyPaid = order.status === "paid" &&
-            order.installmentDetails.isPaid === true;
-
-          if (isFullyPaid) {
-            // Update installments array
-            if (plan.installments[installmentIdx] && !plan.installments[installmentIdx].isPaid) {
-              plan.installments[installmentIdx].isPaid = true;
-              plan.installments[installmentIdx].paidOn = order.updatedAt || order.createdAt || new Date();
-              planUpdated = true;
-              totalFixed++;
-              console.log(`✅ [SYNC] Marked installment ${installmentIdx} as paid for plan ${plan.planType} (ID: ${planId}) from order ${order.orderId}`);
-            }
-
-            // Update userPayments array
-            const userPaymentIndex = plan.userPayments.findIndex(
-              up => up.userId?.toString?.() === userId &&
-                up.installmentIndex === installmentIdx
-            );
-
-            if (userPaymentIndex !== -1) {
-              // Update existing userPayment
-              if (!plan.userPayments[userPaymentIndex].isPaid) {
-                plan.userPayments[userPaymentIndex].isPaid = true;
-                plan.userPayments[userPaymentIndex].paymentDate = order.updatedAt || order.createdAt || new Date();
-                planUpdated = true;
-              }
-            } else {
-              // Add new userPayment entry if it doesn't exist
-              plan.userPayments.push({
-                userId: userId,
-                installmentIndex: installmentIdx,
-                isPaid: true,
-                paidAmount: order.amount,
-                paymentDate: order.updatedAt || order.createdAt || new Date()
-              });
-              planUpdated = true;
-            }
-          }
-        }
-      }
-
-      // Update remainingAmount and status if plan was updated
-      if (planUpdated) {
-        const paidAmount = plan.installments
-          .filter(inst => inst.isPaid)
-          .reduce((sum, inst) => sum + inst.amount, 0);
-        plan.remainingAmount = plan.totalAmount - paidAmount;
-
-        if (plan.installments.every(inst => inst.isPaid)) {
-          plan.status = "completed";
-        }
-
-        await plan.save();
-      }
-    }
-
-    if (totalFixed > 0) {
-      console.log(`✅ Synced ${totalFixed} installment payment(s) with Order status for course ${courseId}`);
-    }
-
-    // Re-fetch installments to get updated data (use query to respect filtering)
-    // Note: We use the original query here to maintain filtering
-    const updatedInstallments = await Installment.find(query).sort({ createdAt: -1 });
-
     // 🔥 CRITICAL: If userId provided and user is ENROLLED (has installments), ensure only enrolled plan is returned
-    if (userId && updatedInstallments.length > 1) {
+    if (userId && responseInstallments.length > 1) {
       try {
         const User = require('../models/userModel');
         const user = await User.findById(userId).select('purchasedCourses');
         if (user?.purchasedCourses) {
           const userPurchasedCourse = user.purchasedCourses.find((pc) => {
             const pcCourseId = pc.course?.toString?.() || pc.course;
-            return pcCourseId === courseId && pc.paymentType === 'installment';
+            const paymentMode = pc.paymentType || pc.paymentMode;
+            return pcCourseId === courseId && paymentMode === 'installment';
           });
 
           // 🔥 CRITICAL: Only filter if user has installments array (actually enrolled)
           if (userPurchasedCourse?.installments && userPurchasedCourse.installments.length > 0) {
             if (userPurchasedCourse?.planType) {
               // Filter to only return the enrolled plan
-              const enrolledPlan = updatedInstallments.find(p => p.planType === userPurchasedCourse.planType);
+              const enrolledPlan = responseInstallments.find(p => p.planType === userPurchasedCourse.planType);
               if (enrolledPlan) {
                 console.log(`✅ [getInstallments] User ${userId} is ENROLLED - returning only enrolled plan: ${userPurchasedCourse.planType}`);
                 const enhancedInstallment = {
-                  ...enrolledPlan.toObject(),
+                  ...enrolledPlan,
                   courseName: course.title || course.name,
                   totalInstallments: enrolledPlan.installments.length,
                   paidInstallments: enrolledPlan.installments.filter(inst => inst.isPaid).length,
@@ -484,8 +420,8 @@ exports.getInstallments = async (req, res) => {
     }
 
     // Enhance response with additional metadata
-    const enhancedInstallments = updatedInstallments.map(plan => ({
-      ...plan.toObject(),
+    const enhancedInstallments = responseInstallments.map(plan => ({
+      ...plan,
       courseName: course.title || course.name,
       totalInstallments: plan.installments.length,
       paidInstallments: plan.installments.filter(inst => inst.isPaid).length,
@@ -495,7 +431,7 @@ exports.getInstallments = async (req, res) => {
     res.status(200).json({
       message: "Installment plans retrieved successfully",
       data: enhancedInstallments,
-      count: updatedInstallments.length,
+      count: responseInstallments.length,
       courseInfo: {
         id: course._id,
         name: course.title || course.name
@@ -565,8 +501,18 @@ exports.makeInstallmentPayment = async (req, res) => {
     }
 
     const installment = installmentPlan.installments[installmentIndex];
-    if (installment.isPaid)
+    const existingPaidOrder = await Order.findOne({
+      userId,
+      courseId: installmentPlan.courseId,
+      installmentPlanId: installmentPlan._id,
+      paymentMode: "installment",
+      status: "paid",
+      "installmentDetails.installmentIndex": installmentIndex
+    }).select("_id");
+
+    if (existingPaidOrder) {
       return res.status(400).json({ message: "Already paid" });
+    }
 
     // Prepare order data for payment service
     const orderData = {
@@ -586,30 +532,12 @@ exports.makeInstallmentPayment = async (req, res) => {
     // Use payment service to create Razorpay order
     const result = await paymentService.createRazorpayOrderLogic(orderData);
 
-    // Find or create UserInstallment record
-    let userInstallment = await UserInstallment.findOne({ userId, courseId: installmentPlan.courseId });
-    if (!userInstallment) {
-      userInstallment = new UserInstallment({
-        userId,
-        courseId: installmentPlan.courseId,
-        installmentPlanId: installmentPlan._id,
-        planSnapshot: {
-          planType: installmentPlan.planType,
-          totalAmount: installmentPlan.totalAmount,
-          numberOfInstallments: installmentPlan.numberOfInstallments,
-          installments: installmentPlan.installments.map(i => ({ amount: i.amount, dueDate: i.dueDate }))
-        },
-        remainingAmount: installmentPlan.totalAmount
-      });
-      await userInstallment.save();
-    }
-
     // 🚀 LOG INSTALLMENT PAYMENT ORDER CREATION SUCCESS
     logger.userActivity(
       userId,
       result.internalOrder?.userEmail || 'Unknown User',
       'INSTALLMENT_PAYMENT_ORDER_CREATED',
-      `Amount: ₹${installment.amount}, Course: ${installmentPlan.courseId}, Plan: ${installmentPlan.planType}, Installment: ${installmentIndex + 1}/${installmentPlan.installments.length}, OrderID: ${result.internalOrder?.orderId}, TrackingID: ${result.trackingNumber}, IP: ${req.ip}, UserInstallment Mode`
+      `Amount: ₹${installment.amount}, Course: ${installmentPlan.courseId}, Plan: ${installmentPlan.planType}, Installment: ${installmentIndex + 1}/${installmentPlan.installments.length}, OrderID: ${result.internalOrder?.orderId}, TrackingID: ${result.trackingNumber}, IP: ${req.ip}`
     );
 
     res.status(201).json({
@@ -687,7 +615,6 @@ exports.confirmInstallmentPayment = async (req, res) => {
 
     const {
       order_id: orderId,
-      amount: paidAmount,
       status: paymentStatus,
     } = paymentEntity;
 
@@ -706,66 +633,6 @@ exports.confirmInstallmentPayment = async (req, res) => {
     }
 
     await order.save();
-
-    const installmentPlan = await Installment.findById(order.installmentPlanId);
-    if (!installmentPlan)
-      return res.status(404).json({ message: "Plan not found" });
-
-    // 🔥 UPDATED: Use UserInstallment for scalable tracking
-
-    // 1. Update Legacy (for backward compat if needed, but we rely on new model now)
-    // We skip updating the massive array to avoid the very crash we are fixing
-    // existingPlan.remainingAmount -= installment.amount; // Use generic ref
-
-    // 2. Update New Scalable Model
-    let userInstallment = await UserInstallment.findOne({ userId: order.userId, courseId: installmentPlan.courseId });
-
-    if (userInstallment) {
-      // Check if already paid in new model
-      const alreadyPaid = userInstallment.payments.some(p => p.installmentIndex === order.installmentIndex);
-      if (!alreadyPaid) {
-        userInstallment.payments.push({
-          installmentIndex: order.installmentIndex,
-          amount: installment.amount,
-          paidAt: new Date(),
-          orderId: order.orderId,
-          status: 'paid'
-        });
-
-        // Update remaining amount
-        const totalPaid = userInstallment.payments.reduce((sum, p) => sum + p.amount, 0);
-        userInstallment.remainingAmount = userInstallment.planSnapshot.totalAmount - totalPaid;
-
-        if (userInstallment.remainingAmount <= 0) {
-          userInstallment.status = 'completed';
-        }
-
-        await userInstallment.save();
-      }
-    } else {
-      // Should have been created in makeInstallmentPayment, but create if missing (recovery)
-      console.warn(`⚠️ UserInstallment not found for user ${order.userId}, creating from plan...`);
-      userInstallment = new UserInstallment({
-        userId: order.userId,
-        courseId: installmentPlan.courseId,
-        installmentPlanId: installmentPlan._id,
-        planSnapshot: {
-          planType: installmentPlan.planType,
-          totalAmount: installmentPlan.totalAmount,
-          numberOfInstallments: installmentPlan.numberOfInstallments,
-          installments: installmentPlan.installments.map(i => ({ amount: i.amount, dueDate: i.dueDate })) // Map needed fields
-        },
-        remainingAmount: installmentPlan.totalAmount - installment.amount,
-        payments: [{
-          installmentIndex: order.installmentIndex,
-          amount: installment.amount,
-          paidAt: new Date(),
-          orderId: order.orderId || `REC-PAY-${Date.now()}`,
-          status: 'paid'
-        }]
-      });
-      await userInstallment.save();
-    }
 
     res.status(200).json({ success: true, message: "Installment payment confirmed" });
   } catch (error) {
@@ -798,53 +665,87 @@ exports.getOutstandingBalance = async (req, res) => {
       return res.status(400).json({ message: "Invalid userId format" });
     }
 
-    // 🔥 UPDATED: Read from UserInstallment
-    let userInstallment = await UserInstallment.findOne({ courseId, userId });
-
-    let installments, totalAmount, paidAmount, actualRemainingAmount, planType, numberOfInstallments;
-
-    if (userInstallment) {
-      // New Model Logic
-      installments = userInstallment.planSnapshot.installments.map((inst, idx) => {
-        const payment = userInstallment.payments.find(p => p.installmentIndex === idx);
-        return {
-          ...inst,
-          amount: inst.amount,
-          isPaid: !!payment,
-          paidOn: payment ? payment.paidAt : null
-        };
-      });
-      totalAmount = userInstallment.planSnapshot.totalAmount;
-      paidAmount = userInstallment.payments.reduce((sum, p) => sum + p.amount, 0);
-      actualRemainingAmount = userInstallment.remainingAmount;
-      planType = userInstallment.planSnapshot.planType;
-      numberOfInstallments = userInstallment.planSnapshot.numberOfInstallments;
-    } else {
-      // Fallback to legacy logic
-      const plan = await Installment.findOne({ courseId, userId });
-
-      if (!plan)
-        return res.status(404).json({
-          message: "No installment plan found for this user and course",
-          courseId,
-          userId
-        });
-
-      installments = plan.installments;
-      totalAmount = plan.totalAmount;
-      paidAmount = plan.installments
-        .filter(inst => inst.isPaid)
-        .reduce((sum, inst) => sum + inst.amount, 0); // Note: This legacy calculation is flawed as it sums ALL paid installments, not user specific. 
-      // We accept this flaw for legacy data or assume plans were 1:1 in the past (which was the bug)
-      actualRemainingAmount = plan.totalAmount - paidAmount;
-      planType = plan.planType;
-      numberOfInstallments = plan.numberOfInstallments;
+    const User = require('../models/userModel');
+    const user = await User.findById(userId).select('purchasedCourses');
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
     }
+
+    const purchasedCourse = user.purchasedCourses?.find((pc) => {
+      const pcCourseId = pc.course?.toString?.() || pc.course;
+      const paymentMode = pc.paymentType || pc.paymentMode;
+      return pcCourseId === courseId && paymentMode === 'installment';
+    });
+
+    if (!purchasedCourse || !purchasedCourse.installments || purchasedCourse.installments.length === 0) {
+      return res.status(404).json({
+        message: "No installment enrollment found for this user and course",
+        courseId,
+        userId
+      });
+    }
+
+    const paidOrders = await Order.find({
+      courseId,
+      userId,
+      status: "paid",
+      paymentMode: "installment"
+    }).select('installmentDetails paidAt updatedAt createdAt planType installmentPlanId');
+
+    const paidIndexes = new Set(
+      paidOrders
+        .map((order) => order.installmentDetails?.installmentIndex)
+        .filter((idx) => idx !== undefined && idx !== null)
+    );
+
+    const installments = purchasedCourse.installments.map((inst, idx) => {
+      const paidOrder = paidOrders.find(
+        (order) => order.installmentDetails?.installmentIndex === idx
+      );
+      const isPaid = paidIndexes.has(idx) || !!inst.isPaid;
+      const paidOn = paidOrder?.paidAt || paidOrder?.updatedAt || paidOrder?.createdAt || inst.paidDate || null;
+      return {
+        amount: inst.amount,
+        isPaid,
+        paidOn,
+        installmentNumber: inst.installmentNumber || idx + 1
+      };
+    });
+
+    let planTypeToUse = purchasedCourse.planType || null;
+    if (!planTypeToUse) {
+      const orderWithPlanType = paidOrders.find((order) => order.planType);
+      if (orderWithPlanType?.planType) {
+        planTypeToUse = orderWithPlanType.planType;
+      } else {
+        const orderWithPlanId = paidOrders.find((order) => order.installmentPlanId);
+        if (orderWithPlanId?.installmentPlanId) {
+          const planFromOrder = await Installment.findById(orderWithPlanId.installmentPlanId).select('planType');
+          if (planFromOrder?.planType) {
+            planTypeToUse = planFromOrder.planType;
+          }
+        }
+      }
+    }
+    if (planTypeToUse && !purchasedCourse.planType) {
+      await User.updateOne(
+        { _id: userId, "purchasedCourses.course": courseId },
+        { $set: { "purchasedCourses.$.planType": planTypeToUse } }
+      );
+    }
+
+    const totalAmount = installments.reduce((sum, inst) => sum + (inst.amount || 0), 0);
+    const paidAmount = installments
+      .filter((inst) => inst.isPaid)
+      .reduce((sum, inst) => sum + (inst.amount || 0), 0);
+    const actualRemainingAmount = Math.max(0, totalAmount - paidAmount);
+    const planType = planTypeToUse;
+    const numberOfInstallments = purchasedCourse.totalInstallments || installments.length;
 
     res.status(200).json({
       message: "Outstanding balance retrieved",
       remainingAmount: actualRemainingAmount,
-      totalAmount: totalAmount,
+      totalAmount,
       paidAmount,
       installments,
       planType,
@@ -893,389 +794,130 @@ exports.getUserInstallmentTimeline = async (req, res) => {
       return res.status(400).json({ message: "Invalid userId format" });
     }
 
-    // 🔥 NEW: Check UserInstallment model first (Primary Source of Truth)
-    try {
-      const UserInstallment = require('../models/userInstallmentModel');
-      const userInstallment = await UserInstallment.findOne({ courseId, userId });
-
-      if (userInstallment) {
-        console.log(`✅ [TIMELINE] Found UserInstallment record for user ${userId} and course ${courseId}`);
-
-        const totalAmount = userInstallment.planSnapshot?.totalAmount || 0;
-        // Only count paid payments
-        const paidAmount = userInstallment.payments?.reduce((sum, p) => sum + (p.status === 'paid' ? p.amount : 0), 0) || 0;
-        const remainingAmount = Math.max(0, totalAmount - paidAmount);
-
-        // Construct timeline
-        let lastDueDate = null;
-        const timeline = userInstallment.planSnapshot?.installments?.map((inst, index) => {
-          const payment = userInstallment.payments?.find(p => p.installmentIndex === index && p.status === 'paid');
-
-          // Calculate specific due date logic to match legacy behavior or use stored date
-          let dueDate;
-          if (index === 0) {
-            dueDate = payment?.paidAt || userInstallment.createdAt || new Date();
-          } else {
-            const baseDate = lastDueDate || userInstallment.createdAt || new Date();
-            dueDate = new Date(baseDate);
-            dueDate.setMonth(dueDate.getMonth() + 1);
-          }
-          lastDueDate = new Date(dueDate);
-
-          return {
-            planType: userInstallment.planSnapshot.planType,
-            installmentIndex: index,
-            dueDate: dueDate,
-            amount: inst.amount,
-            isPaid: !!payment,
-            paidOn: payment?.paidAt || null
-          };
-        }) || [];
-
-        // Ensure paidAmount is number
-        return res.status(200).json({
-          message: "Timeline retrieved",
-          timeline,
-          totalAmount,
-          paidAmount,
-          remainingAmount
-        });
-      }
-    } catch (err) {
-      console.error("Error fetching UserInstallment logic:", err);
-      // Fallthrough to legacy logic
-    }
-
-    // 🔥 CRITICAL: Check if user is enrolled and get their saved plan from purchasedCourses
     const User = require('../models/userModel');
     const user = await User.findById(userId).select('purchasedCourses');
-
-    let userPurchasedCourse = null;
-    let userOriginalInstallments = null;
-    let isEnrolledUser = false;
-
-    if (user?.purchasedCourses) {
-      userPurchasedCourse = user.purchasedCourses.find((pc) => {
-        const pcCourseId = pc.course?.toString?.() || pc.course;
-        const currentCourseId = courseId?.toString?.() || courseId;
-        return pcCourseId === currentCourseId && pc.paymentType === 'installment';
-      });
-
-      if (userPurchasedCourse?.installments && userPurchasedCourse.installments.length > 0) {
-        isEnrolledUser = true;
-        userOriginalInstallments = userPurchasedCourse.installments;
-        console.log(`🔒 User is enrolled - using original plan amounts from purchasedCourses`);
-      }
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
     }
 
-    // 🔥 CRITICAL: Fetch paid orders FIRST to get latest payment status AND planType
-    const Order = require('../models/orderModel');
-    const paidOrders = await Order.find({
-      courseId: courseId,
-      userId: userId,
-      status: "paid",
-      paymentMode: "installment"
-    }).sort({ createdAt: 1 });
-
-    // 🔥 CRITICAL: Get planType - PRIORITY: purchasedCourses > first order > any order
-    // purchasedCourses.planType is the most reliable source (stored at enrollment)
-    let planTypeToUse = null;
-
-    // Priority 1: Get from purchasedCourses (most reliable - stored at enrollment)
-    if (userPurchasedCourse?.planType) {
-      planTypeToUse = userPurchasedCourse.planType;
-      console.log(`✅ [TIMELINE] Using planType from purchasedCourses: ${planTypeToUse}`);
-    }
-
-    // Priority 2: Get from first paid order (enrollment order)
-    let enrollmentOrderPlanType = null;
-    if (paidOrders.length > 0) {
-      // Find the first order (enrollment order) - should be installmentIndex 0
-      const enrollmentOrder = paidOrders.find(order =>
-        order.installmentDetails?.installmentIndex === 0
-      ) || paidOrders[0]; // Fallback to first order if no index 0 found
-
-      enrollmentOrderPlanType = enrollmentOrder.planType;
-      if (enrollmentOrderPlanType) {
-        console.log(`✅ [TIMELINE] Found planType from enrollment order: ${enrollmentOrderPlanType}`);
-      } else {
-        console.warn(`⚠️ [TIMELINE] Enrollment order (${enrollmentOrder.orderId}) has no planType`);
-      }
-    }
-
-    // If purchasedCourses doesn't have planType but order does, update purchasedCourses
-    if (!planTypeToUse && enrollmentOrderPlanType && userPurchasedCourse) {
-      try {
-        const User = require('../models/userModel');
-        await User.updateOne(
-          {
-            _id: userId,
-            "purchasedCourses.course": courseId
-          },
-          {
-            $set: {
-              "purchasedCourses.$.planType": enrollmentOrderPlanType
-            }
-          }
-        );
-        planTypeToUse = enrollmentOrderPlanType;
-        console.log(`✅ [TIMELINE] Updated missing planType in purchasedCourses: ${planTypeToUse}`);
-      } catch (updateError) {
-        console.error(`❌ [TIMELINE] Failed to update planType in purchasedCourses:`, updateError);
-        planTypeToUse = enrollmentOrderPlanType; // Use order planType anyway
-      }
-    } else if (!planTypeToUse && enrollmentOrderPlanType) {
-      planTypeToUse = enrollmentOrderPlanType;
-      console.log(`✅ [TIMELINE] Using planType from enrollment order: ${planTypeToUse}`);
-    }
-
-    // Priority 3: Get from any paid order (last resort)
-    if (!planTypeToUse && paidOrders.length > 0) {
-      for (const order of paidOrders) {
-        if (order.planType) {
-          planTypeToUse = order.planType;
-          console.log(`⚠️ [TIMELINE] Using planType from order ${order.orderId}: ${planTypeToUse} (fallback)`);
-          break;
-        }
-      }
-    }
-
-    // Log all orders for debugging
-    if (paidOrders.length > 0) {
-      console.log(`📋 [TIMELINE] All paid orders planTypes:`, paidOrders.map(o => ({
-        orderId: o.orderId,
-        planType: o.planType,
-        installmentIndex: o.installmentDetails?.installmentIndex,
-        createdAt: o.createdAt
-      })));
-    }
-
-    console.log(`🔍 [TIMELINE] Final planType to use: ${planTypeToUse || 'NOT FOUND - will return error'}`);
-
-    // Create a map of paid installments from orders (most reliable source)
-    const paidInstallmentsFromOrders = {};
-    paidOrders.forEach(order => {
-      if (order.installmentDetails &&
-        order.installmentDetails.installmentIndex !== undefined &&
-        order.status === "paid" &&
-        (order.installmentDetails.isPaid === true || order.installmentDetails.isPaid === undefined)) {
-        const idx = order.installmentDetails.installmentIndex;
-        paidInstallmentsFromOrders[idx] = {
-          isPaid: true,
-          paidOn: order.paidAt || order.updatedAt || order.createdAt,
-          amount: order.amount / 100, // Convert from paise
-          orderId: order.orderId
-        };
-      }
+    const purchasedCourse = user.purchasedCourses?.find((pc) => {
+      const pcCourseId = pc.course?.toString?.() || pc.course;
+      const paymentMode = pc.paymentType || pc.paymentMode;
+      return pcCourseId === courseId && paymentMode === 'installment';
     });
 
-    // 🔥 CRITICAL: ONLY use the planType from user's order/purchase - NEVER fallback to first plan
-    let plan = null;
-
-    if (planTypeToUse) {
-      // 🔥 CRITICAL: Use planType from user's purchase to get the correct plan
-      plan = await Installment.findOne({
-        courseId,
-        planType: planTypeToUse
-      });
-      console.log(`🔍 [TIMELINE] Looking for plan with planType: "${planTypeToUse}"`, plan ? '✅ Found' : '❌ Not found');
-      if (plan) {
-        console.log(`✅ [TIMELINE] Using plan: ${plan.planType} (${plan.installments?.length || 0} installments)`);
-      } else {
-        console.error(`❌ [TIMELINE] Plan not found for planType: "${planTypeToUse}" - this should not happen!`);
-      }
-    } else {
-      console.error(`❌ [TIMELINE] planTypeToUse is missing! PurchasedCourse planType: ${userPurchasedCourse?.planType || 'not found'}, Paid orders: ${paidOrders.length}`);
-    }
-
-    // 🔥 CRITICAL: Do NOT fallback to first plan - user must have selected a specific plan
-    // If plan is not found, return error instead of showing wrong plan
-    if (!plan && planTypeToUse) {
+    if (!purchasedCourse || !purchasedCourse.installments || purchasedCourse.installments.length === 0) {
       return res.status(404).json({
-        message: `Installment plan not found for planType: ${planTypeToUse}. Please contact support.`,
-        courseId,
-        userId,
-        planType: planTypeToUse,
-        error: "SELECTED_PLAN_NOT_FOUND"
-      });
-    }
-
-    // Only allow fallback if user has NO planType at all (should not happen for enrolled users)
-    if (!plan && !planTypeToUse) {
-      console.error(`❌ [TIMELINE] CRITICAL: User has no planType stored! This indicates a data integrity issue.`);
-      // Last resort: Try to find plan with userPayments
-      plan = await Installment.findOne({
-        courseId,
-        "userPayments.userId": userId,
-      });
-      if (plan) {
-        console.log(`⚠️ [TIMELINE] Using plan with userPayments as last resort: ${plan.planType}`);
-      } else {
-        return res.status(404).json({
-          message: "No installment plan found for this course. Please contact support.",
-          courseId,
-          userId,
-          error: "NO_PLAN_FOUND"
-        });
-      }
-    }
-
-    if (!plan) {
-      return res.status(404).json({
-        message: "No installment plan found for this course",
+        message: "No installment enrollment found for this user and course",
         courseId,
         userId
       });
     }
 
-    // 🔥 CRITICAL: For enrolled users, use saved plan amounts; for new users, use current plan
-    let installmentsToUse = [];
-    let totalAmount = 0;
-    let actualPlanType = planTypeToUse; // Will be updated if we find a better match
+    const paidOrders = await Order.find({
+      courseId,
+      userId,
+      status: "paid",
+      paymentMode: "installment"
+    }).sort({ createdAt: 1 }).select('installmentDetails paidAt updatedAt createdAt planType installmentPlanId');
 
-    if (isEnrolledUser && userOriginalInstallments) {
-      // Use original plan amounts from purchasedCourses (locked in at enrollment)
-      installmentsToUse = userOriginalInstallments.map((inst, idx) => ({
-        amount: inst.amount, // Original amount locked in at enrollment
-        isPaid: inst.isPaid || false,
-        paidOn: inst.paidDate || null,
-        installmentNumber: inst.installmentNumber || (idx + 1)
-      }));
+    const paidIndexes = new Set(
+      paidOrders
+        .map((order) => order.installmentDetails?.installmentIndex)
+        .filter((idx) => idx !== undefined && idx !== null)
+    );
 
-      // Calculate total from original installments
-      totalAmount = userOriginalInstallments.reduce((sum, inst) => sum + inst.amount, 0);
-      console.log(`🔒 Using original plan: ${userOriginalInstallments.length} installments, Total: ₹${totalAmount}`);
-
-      // 🔥 CRITICAL: Verify that the plan we fetched matches the amounts in purchasedCourses
-      // If amounts don't match, find the correct plan by matching amounts
-      if (plan && plan.installments && plan.installments.length > 0) {
-        const firstPlanAmount = plan.installments[0]?.amount;
-        const firstUserAmount = userOriginalInstallments[0]?.amount;
-
-        // If amounts don't match, the planType might be wrong - find the correct plan
-        if (firstPlanAmount !== firstUserAmount) {
-          console.warn(`⚠️ [TIMELINE] Plan amounts don't match! Plan has ₹${firstPlanAmount}, User has ₹${firstUserAmount}`);
-          console.warn(`⚠️ [TIMELINE] Searching for plan with matching amounts...`);
-
-          // Find all plans for this course
-          const allPlans = await Installment.find({ courseId });
-
-          // Find the plan that matches the user's installment amounts
-          const matchingPlan = allPlans.find(p => {
-            if (!p.installments || p.installments.length !== userOriginalInstallments.length) {
-              return false;
-            }
-            // Check if first installment amount matches
-            return p.installments[0]?.amount === firstUserAmount;
-          });
-
-          if (matchingPlan) {
-            console.log(`✅ [TIMELINE] Found matching plan: ${matchingPlan.planType} (amounts match)`);
-            plan = matchingPlan;
-            actualPlanType = matchingPlan.planType;
-
-            // 🔥 CRITICAL: Update purchasedCourses with correct planType if it's wrong
-            if (userPurchasedCourse && userPurchasedCourse.planType !== matchingPlan.planType) {
-              try {
-                const User = require('../models/userModel');
-                await User.updateOne(
-                  {
-                    _id: userId,
-                    "purchasedCourses.course": courseId
-                  },
-                  {
-                    $set: {
-                      "purchasedCourses.$.planType": matchingPlan.planType
-                    }
-                  }
-                );
-                console.log(`✅ [TIMELINE] Updated incorrect planType in purchasedCourses: ${userPurchasedCourse.planType} → ${matchingPlan.planType}`);
-              } catch (updateError) {
-                console.error(`❌ [TIMELINE] Failed to update planType in purchasedCourses:`, updateError);
-              }
-            }
-          } else {
-            console.error(`❌ [TIMELINE] No matching plan found for amounts. User's first installment: ₹${firstUserAmount}`);
-          }
-        } else {
-          console.log(`✅ [TIMELINE] Plan amounts match correctly`);
-        }
-      }
-    } else {
-      // New user - use current plan from database
-      installmentsToUse = plan.installments.map((inst, idx) => ({
-        amount: inst.amount,
-        isPaid: inst.isPaid || false,
-        paidOn: inst.paidOn || null,
-        installmentNumber: idx + 1
-      }));
-
-      totalAmount = plan.totalAmount || plan.installments.reduce((sum, inst) => sum + inst.amount, 0);
-      console.log(`📋 Using current plan: ${plan.installments.length} installments, Total: ₹${totalAmount}`);
-    }
-
-
-    // FALLBACK TO LEGACY LOGIC BELOW (if no UserInstallment found)
-
-    // ... Existing legacy logic starts here ...
-    plan = await Installment.findOne({ courseId, userId: { $exists: false } }); // Find generic plan? OR legacy user plan?  
-    // Actually the legacy logic was finding a PLAN, then checking userPayments inside it.
-    // The original code: const plan = await Installment.findOne({ courseId, userId }); --> This implies plan was stored per user?!
-    // Wait, the original code had `userId` in `Installment` but also `userPayments` array.
-    // Let's stick to the original logic flow for fallback. 
-
-    // Re-fetch plan using original logic if no userInstallment
-    const planLegacy = await Installment.findOne({ courseId, userId });
-
-    if (!planLegacy) {
-      // Try finding generic plan and checking userPayments inside it (as some plans were shared?)
-      // The original code for `getUserInstallmentTimeline` was reading `plan`. 
-      // Let's just restore original logic wrapped in else.
-
-      // ... (Original logic restoration) ...
-    }
-    const remainingAmount = totalAmount - paidAmount;
+    const enrollmentOrder = paidOrders.find(
+      (order) => order.installmentDetails?.installmentIndex === 0
+    ) || paidOrders[0];
+    const firstPaidDate = enrollmentOrder?.paidAt || enrollmentOrder?.updatedAt || enrollmentOrder?.createdAt || null;
+    const baseDate = firstPaidDate || purchasedCourse.purchaseDate || new Date();
 
     let lastDueDate = null;
+    const currentDate = new Date();
 
-    const timeline = installmentsToUse.map((installment, index) => {
-      const userPayment = plan.userPayments.find(
-        (payment) =>
-          payment.userId.toString() === userId &&
-          payment.installmentIndex === index
+    let planTypeToUse = purchasedCourse.planType || null;
+    if (!planTypeToUse) {
+      const orderWithPlanType = paidOrders.find((order) => order.planType);
+      if (orderWithPlanType?.planType) {
+        planTypeToUse = orderWithPlanType.planType;
+      } else {
+        const orderWithPlanId = paidOrders.find((order) => order.installmentPlanId);
+        if (orderWithPlanId?.installmentPlanId) {
+          const planFromOrder = await Installment.findById(orderWithPlanId.installmentPlanId).select('planType');
+          if (planFromOrder?.planType) {
+            planTypeToUse = planFromOrder.planType;
+          }
+        }
+      }
+    }
+    if (planTypeToUse && !purchasedCourse.planType) {
+      await User.updateOne(
+        { _id: userId, "purchasedCourses.course": courseId },
+        { $set: { "purchasedCourses.$.planType": planTypeToUse } }
       );
+    }
 
-      // 🔥 CRITICAL: Prioritize order data over plan data for payment status
-      const orderPayment = paidInstallmentsFromOrders[index];
-      const isPaid = orderPayment?.isPaid || installment.isPaid || userPayment?.isPaid || false;
-      const paidOn = orderPayment?.paidOn || installment.paidOn || userPayment?.paymentDate || null;
-
+    const timeline = purchasedCourse.installments.map((inst, index) => {
       let dueDate;
       if (index === 0) {
-        dueDate = paidOn || new Date();
+        dueDate = baseDate;
       } else {
-        dueDate = new Date(lastDueDate || new Date());
+        const prevDate = lastDueDate || baseDate;
+        dueDate = new Date(prevDate);
         dueDate.setMonth(dueDate.getMonth() + 1);
       }
-
       lastDueDate = new Date(dueDate);
 
+      const paidOrder = paidOrders.find(
+        (order) => order.installmentDetails?.installmentIndex === index
+      );
+      const isPaid = paidIndexes.has(index) || !!inst.isPaid;
+      const paidOn = paidOrder?.paidAt || paidOrder?.updatedAt || paidOrder?.createdAt || inst.paidDate || null;
+
+      let status = 'UPCOMING';
+      if (isPaid) {
+        status = 'PAID';
+      } else if (currentDate > dueDate) {
+        status = 'OVERDUE';
+      }
+
       return {
-        planType: actualPlanType || plan.planType, // Use actualPlanType (corrected if needed)
+        planType: planTypeToUse,
         installmentIndex: index,
         dueDate,
-        amount: installment.amount, // 🔒 This is now the original amount for enrolled users
+        amount: inst.amount,
         isPaid,
         paidOn,
+        status,
+        daysPastDue: status === 'OVERDUE'
+          ? Math.floor((currentDate - dueDate) / (1000 * 60 * 60 * 24))
+          : 0
       };
     });
+
+    const totalAmount = purchasedCourse.installments.reduce((sum, inst) => sum + (inst.amount || 0), 0);
+    const paidAmount = purchasedCourse.installments
+      .filter((_, idx) => paidIndexes.has(idx) || purchasedCourse.installments[idx]?.isPaid)
+      .reduce((sum, inst) => sum + (inst.amount || 0), 0);
+    const remainingAmount = Math.max(0, totalAmount - paidAmount);
 
     res.status(200).json({
       message: "Timeline retrieved",
       timeline,
       totalAmount,
       paidAmount,
-      remainingAmount
+      remainingAmount,
+      purchasedCourse: {
+        courseId: purchasedCourse.course?.toString?.() || purchasedCourse.course,
+        purchaseDate: purchasedCourse.purchaseDate,
+        amountPaid: purchasedCourse.amountPaid,
+        paymentType: purchasedCourse.paymentType || purchasedCourse.paymentMode,
+        totalInstallments: purchasedCourse.totalInstallments,
+        planType: planTypeToUse,
+        assignedByAdmin: purchasedCourse.assignedByAdmin,
+        expiresAt: purchasedCourse.expiresAt
+      }
     });
   } catch (error) {
     console.error("Error in getUserInstallmentTimeline:", {
