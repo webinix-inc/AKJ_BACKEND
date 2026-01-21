@@ -37,7 +37,7 @@ exports.getCachedData = async (key) => {
 };
 
 // Set cached data with dynamic expiry based on access count
-exports.setCachedData = async (key, messages, expireSeconds = 3600) => {
+exports.setCachedData = async (key, messages, expireSeconds = 3600, maxItems = 10) => {
   try {
     await redisClient.del(key); // Clear existing data
     for (const message of messages) {
@@ -52,7 +52,8 @@ exports.setCachedData = async (key, messages, expireSeconds = 3600) => {
       };
       await redisClient.lPush(key, JSON.stringify(cachedMessage));
     }
-    await redisClient.lTrim(key, 0, 9);
+    const trimCount = Number.isFinite(maxItems) && maxItems > 0 ? maxItems - 1 : 9;
+    await redisClient.lTrim(key, 0, trimCount);
     await redisClient.expire(key, expireSeconds);
     console.log(`Successfully cached latest messages for key: ${key}`);
   } catch (error) {
@@ -240,15 +241,22 @@ exports.specificUserMessages = async (req, res) => {
     const cacheKey = exports.getCacheKey(senderId, requestedUserID);
     let messages;
 
-    // For ADMIN users, don't use cache to ensure we get all messages from any admin
-    // For regular users, use cache for performance
+    // For ADMIN users or admin-consolidated chats, skip cache to avoid stale/incomplete data
+    // Cache only for non-admin <-> non-admin chats
     let cachedMessages = null;
-    if (userType !== "ADMIN") {
+    const isRequestedUserAdmin = user.userType === "ADMIN";
+    const shouldUseCache = !cursor && userType !== "ADMIN" && !isRequestedUserAdmin;
+
+    if (shouldUseCache) {
       cachedMessages = await exports.getCachedData(cacheKey);
     }
 
-    if (!cursor && cachedMessages && cachedMessages.length > 0) {
-      messages = cachedMessages;
+    const requestedLimit = parseInt(limit, 10);
+    const hasSufficientCache =
+      cachedMessages && cachedMessages.length >= requestedLimit;
+
+    if (shouldUseCache && hasSufficientCache) {
+      messages = cachedMessages.slice(0, requestedLimit);
     } else {
       // For ADMIN users: Include messages sent by ANY admin to the student
       // For regular users: Only include messages between current user and requested user
@@ -383,9 +391,9 @@ exports.specificUserMessages = async (req, res) => {
         }
       }
 
-      // Only cache for non-admin users to avoid stale data
-      if (!cursor && userType !== "ADMIN") {
-        await exports.setCachedData(cacheKey, messages);
+      // Only cache for non-admin <-> non-admin chats to avoid stale data
+      if (!cursor && userType !== "ADMIN" && !isRequestedUserAdmin) {
+        await exports.setCachedData(cacheKey, messages, 3600, requestedLimit);
       }
     }
 
